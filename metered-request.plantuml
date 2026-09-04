@@ -1,0 +1,79 @@
+@startuml
+
+title A metered page request
+
+skinparam shadowing false
+skinparam sequence {
+  ArrowColor #333333
+  LifeLineBorderColor #999999
+  ParticipantBorderColor #333333
+  ParticipantBackgroundColor #FFFFFF
+}
+
+actor "viewer" as V
+participant "site server" as S
+participant "RPC" as R
+participant "pay_on_chain" as P #pink
+participant "SPL Token" as T #pink
+
+V -> S : GET /read/{slug}
+activate S
+
+S -> S : session cookie -> wallet address
+break no session
+  S -[#00A0A0]-> V : sign_in
+end
+
+S -> S : live view grant for this article?
+break grant is live
+  S -[#00A0A0]-> V : metered_page (no charge)
+end
+
+S -> S : derive site PDA, contract PDA
+S -> R : getMultipleAccounts(site, contract, payer ATA)
+R --> S : account data
+S -> S : decode Site, Contract, TokenAccount
+break no contract account
+  S -[#00A0A0]-> V : set_meter
+end
+
+S -> S : preflight can_meter(contract, site, 1)
+break blocked: LimitReached
+  S -[#00A0A0]-> V : manage_meter
+end
+
+S -> S : build meter_and_settle
+S -> S : sign as site authority
+S -> R : sendTransaction
+R -> P : meter_and_settle(page_views = 1)
+activate P
+P -> P : used += page_price
+P -> P : require used <= limit
+alt unpaid >= collection_threshold
+  P -> T : transfer_checked(unpaid, decimals)
+  T --> P : ok
+  P -> P : paid = used
+end
+P --> R : Metered event
+deactivate P
+R --> S : signature, confirmation
+
+break transaction failed
+  S -> S : cause(raising program, code); discard logs
+  S -[#00A0A0]-> V : re-authorize, top up, or manage_meter
+end
+
+S -> S : record view grant
+S -[#00A0A0]-> V : metered_page + inspector
+deactivate S
+
+legend left
+Colour follows state-machine.plantuml in the sol-pay repository.
+  pink ..... on chain
+  teal ..... a screen this site builds
+Every break is a screen, not an error page.
+The site authority signs meter_and_settle. The payer is not present.
+An ambiguous confirmation is served, not refused; see SPEC section 7.3.
+endlegend
+
+@enduml
