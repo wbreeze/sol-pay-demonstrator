@@ -77,14 +77,38 @@ final class Config
     }
 
     /** @return array<string, int> */
+    public function setup(): array
+    {
+        return $this->static['setup'];
+    }
+
+    /** @return array<string, int> */
     public function metering(): array
     {
         return $this->static['metering'];
     }
 
+    /**
+     * Provisioned means the site account exists, not that setup started.
+     * `var/site.json` is written as each step finishes, so a run interrupted
+     * after the mint but before `initialize_site` leaves a file behind — and a
+     * file is not a site.
+     */
     public function isProvisioned(): bool
     {
-        return $this->provisioned !== null;
+        return isset($this->provisioned['site']);
+    }
+
+    /**
+     * Whatever setup has recorded so far, which may be nothing. This is what
+     * makes a second run resume rather than start over: a mint that already
+     * exists costs rent that is not worth paying twice.
+     *
+     * @return array<string, string>
+     */
+    public function partial(): array
+    {
+        return $this->provisioned ?? [];
     }
 
     /**
@@ -103,15 +127,20 @@ final class Config
         return $this->provisioned;
     }
 
-    /** @param array<string, string> $addresses */
+    /**
+     * Merge into what setup has already recorded, and write it out.
+     *
+     * @param array<string, string> $addresses
+     */
     public function writeProvisioned(array $addresses): void
     {
         $this->ensureVar();
+        $merged = array_merge($this->provisioned ?? [], $addresses);
         file_put_contents(
             $this->root.'/var/site.json',
-            json_encode($addresses, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n",
+            json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n",
         );
-        $this->provisioned = $addresses;
+        $this->provisioned = $merged;
     }
 
     public function dbPath(): string

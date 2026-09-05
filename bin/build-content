@@ -28,6 +28,19 @@ use League\CommonMark\MarkdownConverter;
 
 require __DIR__.'/../vendor/autoload.php';
 
+/**
+ * commonmark lists `symfony/yaml` as a *suggestion* rather than a
+ * requirement — "v2.3+ required if using the Front Matter extension" — so
+ * installing commonmark alone leaves the front matter parser throwing from
+ * three frames inside the library. `composer.json` requires it explicitly;
+ * this is here so that a stale `vendor/` says one sentence instead of forty
+ * lines of stack trace.
+ */
+if (!class_exists(\Symfony\Component\Yaml\Yaml::class)) {
+    fwrite(STDERR, "symfony/yaml is missing — front matter cannot be parsed without it. Run: composer update\n");
+    exit(1);
+}
+
 $root = dirname(__DIR__);
 $source = $root.'/content';
 $target = $root.'/var/content';
@@ -67,9 +80,16 @@ foreach (glob($source.'/*.md') ?: [] as $path) {
     }
 
     $front = $rendered->getFrontMatter();
-    foreach (['title', 'slug', 'lede'] as $required) {
-        if (!isset($front[$required])) {
-            fwrite(STDERR, "{$name}: front matter has no '{$required}'\n");
+    $metered = (bool) ($front['metered'] ?? true);
+
+    // A lede is required of a *metered* piece and of nothing else, because of
+    // what it is for: §6.1 wants something honest to render beside the meter
+    // to a visitor with no contract. A public page — the privacy page (§10.2)
+    // — is served whole, so there is nothing to stand in for.
+    $required = $metered ? ['title', 'slug', 'lede'] : ['title', 'slug'];
+    foreach ($required as $key) {
+        if (!isset($front[$key])) {
+            fwrite(STDERR, "{$name}: front matter has no '{$key}'".($key === 'lede' ? " (metered pieces need one; set 'metered: false' for a public page)" : '')."\n");
             exit(1);
         }
     }
@@ -90,16 +110,16 @@ foreach (glob($source.'/*.md') ?: [] as $path) {
     $manifest[] = [
         'slug' => $slug,
         'title' => (string) $front['title'],
-        'lede' => trim((string) $front['lede']),
+        'lede' => trim((string) ($front['lede'] ?? '')),
         'reading_time' => (int) ($front['reading_time'] ?? max(1, (int) ceil($words / 238))),
-        'metered' => (bool) ($front['metered'] ?? true),
+        'metered' => $metered,
         'status' => (string) ($front['status'] ?? 'published'),
         'source' => $name,
         'words' => $words,
     ];
 
     if (!$quiet) {
-        printf("  %-28s %-24s %5d words  %s\n", $name, $slug, $words, $manifest[array_key_last($manifest)]['metered'] ? 'metered' : 'public');
+        printf("  %-28s %-24s %5d words  %s\n", $name, $slug, $words, $metered ? 'metered' : 'public');
     }
 }
 

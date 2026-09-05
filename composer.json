@@ -13,6 +13,7 @@
         "league/commonmark": "^2.7",
         "slim/psr7": "^1.7",
         "slim/slim": "^4.15",
+        "symfony/yaml": "^6.4 || ^7.0",
         "wbreeze/sol-pay-client": "^0.1.2"
     },
     "require-dev": {

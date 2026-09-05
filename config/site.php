@@ -55,6 +55,14 @@ return [
         'demo_base_units' => 600_000, // 0.60 DEMO
     ],
 
+    // SPEC §12.0's first run. The operator funds one address and setup moves
+    // a reserve to the other, so there is one thing to do by hand and not two.
+    'setup' => [
+        'airdrop_lamports' => 1_000_000_000,        // 1 SOL; devnet's faucet refuses more often than it works
+        'authority_minimum_lamports' => 300_000_000, // enough for setup's transactions and a long session of metering
+        'faucet_reserve_lamports' => 250_000_000,    // five visitors at §4.3's 0.05 SOL each
+    ],
+
     // SPEC §7.1 and §7.4. Both are policy numbers with no chain meaning.
     'metering' => [
         'grant_ttl_s' => 1_800, // thirty minutes

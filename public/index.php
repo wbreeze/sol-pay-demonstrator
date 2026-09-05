@@ -13,13 +13,18 @@ declare(strict_types=1);
  * SAPI, before concluding the two-browsers-one-wallet test passes.
  */
 
+use Newsprint\Chain\Rpc;
+use Newsprint\Chain\RpcException;
+use Newsprint\Chain\Submitter;
 use Newsprint\Content\Library;
 use Newsprint\Content\Piece;
 use Newsprint\Support\Alias;
 use Newsprint\Support\Config;
+use Newsprint\Setup\Provisioner;
 use Newsprint\Support\View;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Slim\Exception\HttpNotFoundException;
 use Slim\Factory\AppFactory;
 use SolPay\Core\Units;
 
@@ -95,7 +100,7 @@ $inspector = static function () use ($config, $params, $site, $decimals): array 
 
 $app = AppFactory::create();
 $app->addRoutingMiddleware();
-$app->addErrorMiddleware(true, true, true);
+$errorMiddleware = $app->addErrorMiddleware(true, true, true);
 
 $page = static function (Response $response, string $html, int $status = 200) use ($view, $inspector, $site): Response {
     $response->getBody()->write($html);
@@ -111,14 +116,31 @@ $shell = static function (string $title, string $content) use ($view, $inspector
     ]);
 };
 
-$app->get('/', function (Request $request, Response $response) use ($view, $shell, $page, $contentDir, $site): Response {
+/**
+ * An unknown path is an ordinary thing — a stale link, a browser asking for
+ * /favicon.ico — and Slim's default is a stack trace in the log and a bare
+ * error page in the browser. Neither belongs on a site whose whole argument is
+ * that you can read what it is doing.
+ */
+$errorMiddleware->setErrorHandler(
+    HttpNotFoundException::class,
+    static function (Request $request) use ($app, $view, $shell, $page): Response {
+        return $page($app->getResponseFactory()->createResponse(), $shell('Not found', $view->render('not-found')), 404);
+    },
+);
+
+$app->get('/', function (Request $request, Response $response) use ($view, $shell, $page, $contentDir, $site, $config): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
 
     $articles = Library::load($contentDir)->articles();
 
-    return $page($response, $shell('Newsprint', $view->render('index', ['articles' => $articles, 'site' => $site])));
+    return $page($response, $shell('Newsprint', $view->render('index', [
+        'articles' => $articles,
+        'site' => $site,
+        'provisioned' => $config->isProvisioned(),
+    ])));
 });
 
 $app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $site): Response {
@@ -161,6 +183,60 @@ $app->get('/privacy', function (Request $request, Response $response) use ($view
     ])));
 });
 
+/**
+ * SPEC §12.0 and §3: first-run setup is a screen. It is the only worked example
+ * of `initialize_site` anywhere, and the separation an operator CLI would have
+ * given is enforced in the code instead — the provisioner refuses to run
+ * against a site that already exists.
+ */
+$provisioner = static function () use ($config): Provisioner {
+    $rpc = new Rpc(
+        $config->rpcUrl(),
+        $config->program(),
+        (string) $config->rpc()['commitment'],
+        (int) $config->rpc()['http_timeout_s'],
+    );
+
+    return new Provisioner($config, $rpc, new Submitter(
+        $rpc,
+        (int) $config->rpc()['confirm_timeout_ms'],
+        (int) $config->rpc()['confirm_poll_ms'],
+    ));
+};
+
+$app->get('/setup', function (Request $request, Response $response) use ($view, $shell, $page, $provisioner, $config, $site): Response {
+    $error = null;
+    $status = ['provisioned' => $config->isProvisioned(), 'authority' => '', 'faucet' => '', 'balance' => 0, 'needed' => 0, 'funded' => false];
+
+    try {
+        $status = $provisioner()->status();
+    } catch (RpcException $e) {
+        // The endpoint being unreachable is an ordinary thing on a laptop, and
+        // a stack trace is a poor way to say so.
+        $error = $e->getMessage();
+    }
+
+    return $page($response, $shell('First run', $view->render('setup', [
+        'status' => $status,
+        'site' => $site,
+        'setup' => $config->setup(),
+        'error' => $error,
+    ])));
+});
+
+$app->post('/setup', function (Request $request, Response $response) use ($view, $shell, $page, $provisioner, $root): Response {
+    $steps = $provisioner()->run();
+
+    // Re-read from disk: the provisioner wrote var/site.json as it went, and
+    // the config this request started with predates that.
+    $provisioned = Config::load($root)->isProvisioned();
+
+    return $page($response, $shell($provisioned ? 'Provisioned' : 'Setup stopped', $view->render('setup-ran', [
+        'steps' => $steps,
+        'provisioned' => $provisioned,
+    ])));
+});
+
 /** Operator-facing, and deliberately not keyed to any reader (§10.4). */
 $app->get('/health', function (Request $request, Response $response) use ($config, $contentDir): Response {
     $payload = [
@@ -175,6 +251,21 @@ $app->get('/health', function (Request $request, Response $response) use ($confi
         'provisioned' => $config->isProvisioned(),
         'content_built' => Library::isBuilt($contentDir),
     ];
+
+    // Costs one RPC call, and answers the question that otherwise surfaces as
+    // "Attempt to load a program that does not exist" halfway through setup.
+    try {
+        $payload['program_deployed'] = (new Rpc(
+            $config->rpcUrl(),
+            $config->program(),
+            (string) $config->rpc()['commitment'],
+            (int) $config->rpc()['http_timeout_s'],
+        ))->programDeployed($config->program()->id);
+    } catch (RpcException $e) {
+        $payload['program_deployed'] = null;
+        $payload['rpc_error'] = $e->getMessage();
+    }
+
     $response->getBody()->write(json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n");
 
     return $response->withHeader('Content-Type', 'application/json');

@@ -102,3 +102,34 @@ pre code { background: none; padding: 0; font-size: inherit; }
 .footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule); font-size: 0.85rem; color: var(--ink-soft); }
 .disclaimer { line-height: 1.5; }
 .empty { color: var(--ink-soft); }
+
+/* first-run setup (§12.0) */
+.plan { padding-left: 1.2rem; }
+.plan li { margin-bottom: 0.4rem; }
+.status { width: 100%; border-collapse: collapse; margin: 0.5rem 0 1.5rem; }
+.status th { text-align: left; font-weight: 400; color: var(--ink-soft); padding: 0.35rem 1rem 0.35rem 0; white-space: nowrap; vertical-align: top; }
+.status td { padding: 0.35rem 0; word-break: break-all; }
+
+form { margin: 1.5rem 0 0.5rem; }
+button {
+    font: inherit;
+    font-size: 0.95rem;
+    padding: 0.55rem 1.4rem;
+    color: var(--paper);
+    background: var(--accent);
+    border: 0;
+    border-radius: 3px;
+    cursor: pointer;
+}
+button:hover { filter: brightness(1.1); }
+
+.steps { list-style: none; margin: 1.5rem 0; padding: 0; }
+.step { border-left: 3px solid var(--rule); padding: 0.1rem 0 0.1rem 1rem; margin-bottom: 1.25rem; }
+.step h2 { font-size: 1rem; margin: 0 0 0.25rem; }
+.step p { margin: 0 0 0.25rem; }
+.step .addr { font-size: 0.75rem; word-break: break-all; }
+.step .badge { font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); }
+.step-done { border-left-color: var(--accent); }
+.step-already { border-left-color: var(--rule); }
+.step-blocked, .step-failed { border-left-color: #b3261e; }
+.step-blocked .badge, .step-failed .badge { color: #b3261e; }

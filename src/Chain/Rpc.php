@@ -53,7 +53,7 @@ final class Rpc
      *
      * @param list<string> $addresses
      *
-     * @return list<array{data: string, owner: string, lamports: int}|null> aligned with $addresses
+     * @return list<array{data: string, owner: string, lamports: int, executable: bool}|null> aligned with $addresses
      */
     public function multipleAccounts(array $addresses): array
     {
@@ -72,10 +72,31 @@ final class Rpc
                 'data' => (string) base64_decode((string) $account['data'][0], true),
                 'owner' => (string) $account['owner'],
                 'lamports' => (int) $account['lamports'],
+                'executable' => (bool) ($account['executable'] ?? false),
             ];
         }
 
         return $out;
+    }
+
+    /** Whether an account is on chain at all — the question every resumable setup step asks. */
+    public function accountExists(string $address): bool
+    {
+        return $this->multipleAccounts([$address])[0] !== null;
+    }
+
+    /**
+     * Whether a program is deployed *here*. Distinct from `accountExists`, and
+     * the distinction is the whole point: an address with no account and an
+     * address holding something that is not executable both fail at the
+     * runtime with "Attempt to load a program that does not exist", which
+     * names the symptom and not the cause.
+     */
+    public function programDeployed(string $address): bool
+    {
+        $account = $this->multipleAccounts([$address])[0];
+
+        return $account !== null && $account['executable'];
     }
 
     public function minimumBalanceForRentExemption(int $bytes): int

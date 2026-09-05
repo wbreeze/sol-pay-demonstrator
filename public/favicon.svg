@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Served from this origin like everything else (§10.3). A browser that
+       cannot find one asks for /favicon.ico on every page load and gets a 404,
+       which is noise in the log of a site meant to be read. -->
+  <rect width="32" height="32" rx="3" fill="#16150f"/>
+  <g fill="#fbf9f4">
+    <rect x="6" y="7" width="20" height="2.5"/>
+    <rect x="6" y="12" width="9" height="1.5"/>
+    <rect x="6" y="15" width="9" height="1.5"/>
+    <rect x="6" y="18" width="9" height="1.5"/>
+    <rect x="6" y="21" width="6" height="1.5"/>
+    <rect x="17" y="12" width="9" height="1.5"/>
+    <rect x="17" y="15" width="9" height="1.5"/>
+    <rect x="17" y="18" width="9" height="1.5"/>
+    <rect x="17" y="21" width="4" height="1.5"/>
+  </g>
+</svg>

@@ -2,6 +2,7 @@
 /**
  * @var list<\Newsprint\Content\Piece> $articles
  * @var array<string, int|string> $site
+ * @var bool $provisioned
  */
 use Newsprint\Support\View;
 ?>
@@ -25,6 +26,17 @@ use Newsprint\Support\View;
         every page shows the accounts the page was rendered from.
     </p>
 </article>
+
+<?php if (!$provisioned): ?>
+<section class="gate">
+    <h2>Not provisioned yet</h2>
+    <p>
+        This copy has no mint, treasury or site account on chain, so nothing can
+        be metered. <a href="/setup">Run first-run setup</a> — it takes one
+        click and a little devnet SOL.
+    </p>
+</section>
+<?php endif ?>
 
 <?php if ($articles === []): ?>
 <p class="empty">Nothing built yet. Run <code>bin/build-content</code>.</p>

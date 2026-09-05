@@ -20,6 +20,7 @@ use Newsprint\Support\View;
   CDN on every load, which would make the privacy page's central claim false in
   a way nobody would notice while writing it.
 -->
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/site.css">
 </head>
 <body>
