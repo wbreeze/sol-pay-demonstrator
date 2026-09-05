@@ -1133,11 +1133,17 @@ demonstration. Choosing it would be optimising the thing that is not the point.
   decoding with `unpack`, preflight arithmetic, transaction assembly, ed25519
   signing through `ext-sodium` (bundled since 7.2), JSON-RPC over curl. Several
   hundred lines, most of it dull. Since this was written, sol-pay's
-  `php-client` covers the first four; what remains to this repository is
-  assembly, signing and RPC. **Transaction assembly is the one item on that
-  list that is not demonstrator-specific** — every PHP adopter faces it, and
-  `handoff/sol-pay/01-transaction-assembly.md` argues it belongs in the
-  library.
+  `php-client` covers the first four, and now assembly too — `SolPay\Tx`'s
+  `compile` and `wire`, built 2026-09-04 and checked byte-for-byte against
+  `solana-message` and `solana-transaction` on three cases. What remains to
+  this repository is signing and RPC. **Assembly was the one item on that list
+  that was not demonstrator-specific** — every PHP adopter faces it — so it
+  went into the library instead of here; `php-client/README.md`'s
+  "Transaction assembly" section carries the argument and the vectors-first
+  order it was built in. What this repository still owes is the last step of
+  that order: no signature in those vectors is real and no blockhash was ever
+  current, so the first settling request on devnet is the first time that
+  encoder meets a validator.
 - **The one unproven thing, settled 2026-09-03 — and it was worse than
   stated, then fixed.** PDA derivation needs an off-curve check, and PHP's
   `sodium_crypto_core_ed25519_is_valid_point` also enforces prime-order
@@ -1177,8 +1183,10 @@ runtime whose adopters have the least trouble adopting. PHP demonstrates the
 #### The framework: Slim 4
 
 `php -S localhost:8000 -t public` survives, and Composer was already a
-prerequisite because `php-client` is a Composer package, so the framework costs
-no setup step. Eight small dependencies, no build.
+prerequisite because `php-client` is a Composer package — published on
+Packagist as `wbreeze/sol-pay-client` on 2026-09-05, so it installs with a
+plain `composer require` rather than a repository entry. The framework
+therefore costs no setup step. Eight small dependencies, no build.
 
 **The reason is the shape, not the size.** The metering decision of §7 is a
 PSR-15 middleware, which is the most portable form this code could take: a
