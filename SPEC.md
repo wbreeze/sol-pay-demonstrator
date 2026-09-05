@@ -1,4 +1,4 @@
-# Penny Press — specification
+# Newsprint — specification
 
 The sol-pay demonstrator site.
 
@@ -13,29 +13,33 @@ sol-pay repository root disagree about the flow, the diagram is right.
 
 ## 1. What this is
 
-**Penny Press** is a working site that meters a small set of articles with
+**Newsprint** is a working site that meters a small set of articles with
 sol-pay. Each interested person runs their own copy against devnet, with a mint
 it issues on first run — see §12.0. There is no shared deployment and nobody
 operates anything.
 
-The name is the *New York Sun*, 3 September 1833: one cent a copy, sold in the
-street by newsboys, against established papers at six cents and sold by annual
-subscription. It is the closest historical parallel there is to what metering
-proposes — unbundling a subscription into a price per item, at a price low
-enough that the decision stops being a decision.
+The name is what a newspaper was made of, and what reading one used to be like.
+You bought a paper, and nobody knew which parts of it you read — not the
+newsagent, not the publisher, not an advertiser. Which pages you lingered on
+was between you and the page. Nobody designed that property; it was a property
+of paper, and every digital replacement has quietly removed it. This site is
+the argument that it can be paid for instead, and kept.
 
-**The analogy is to the unbundling and stops there.** It is not an argument
-about how those papers were funded, and the about page does not make one. Penny
-papers did carry advertising, and someone will eventually raise it; the answer
-is short and belongs here so it does not have to be improvised. Advertising in
-1833 was classified notices in a four-page sheet. It was not audience
-measurement, not behavioural targeting, and not the sale of a reader's
-identity, none of which existed for another century and a half. Drawing a line
-from one to the other compresses a hundred and ninety years into a single claim
-and gets the history wrong in order to sound neat.
+So the name carries the thesis, which is §10.2's and is not a claim about
+price.
 
-What this site argues is in §10.2 and in `content/privacy.md`, and it does not
-depend on the 1830s at all.
+**An earlier draft called this Penny Press**, after the *New York Sun* of 3
+September 1833 — one cent a copy in the street against six-cent papers sold by
+annual subscription. It is a good parallel to what metering proposes, and it is
+a parallel about *unbundling and price*, which is the less interesting half of
+what is being demonstrated. It also invited an objection about how those papers
+were really funded, which had to be answered in this section before anyone
+raised it. The new name invites no such thing, and the section is shorter for
+it.
+
+The material is kept rather than discarded — it is good history and the
+rebuttal is a sound one — as a working note at `content/NamingTheSite.md`. It
+is background, not the argument.
 
 It exists because `sol-pay-client` is a library that deliberately ships no
 application. `wasm-client/SPEC.md` §1 lists three screens — `set_meter`,
@@ -96,14 +100,27 @@ package. Never sees the site authority.
 
 **Server.** Holds the site authority. Signs `meter_and_settle` and nothing
 else. Reads accounts over RPC, decodes them, runs preflight, decides whether
-this request is metered, and delivers the article. Uses the crates.io crate.
-Never sees the payer's key.
+this request is metered, and delivers the article. Uses `php-client`, published
+as `wbreeze/sol-pay-client` on Packagist, since §12.1 decided PHP; a Rust
+server would take the crates.io crate for the same row. Never sees the payer's
+key.
 
-**Operator CLI.** Run by hand, not by the site. Creates the demo mint and the
-treasury account, calls `initialize_site` once, and writes the resulting
-addresses into the configuration the server and browser both read. Setup is a
-separate program because it is rare, irreversible on a given deployment, and
-needs authority the request path should not carry.
+**First-run setup.** Creates the demo mint and the treasury account, calls
+`initialize_site` once, and writes the resulting addresses into the
+configuration the server and browser both read.
+
+It is a **screen rather than a command**, decided at §12.0. An earlier draft of
+this section made it an operator CLI, on the grounds that setup is rare,
+irreversible on a given deployment, and needs authority the request path should
+not carry. Every one of those is still true; what changed is where the answer
+lives. §12.0's shape — each person runs their own copy, and the prerequisite is
+one language runtime — makes a setup step that needs anything else the largest
+obstacle between a clone and a running page, and every call it makes is
+available over JSON-RPC including `requestAirdrop`. So the separation is
+enforced in the code rather than by the shape of the entry point: setup runs
+before a site authority exists, because generating one is the first thing it
+does, and it refuses once the site is provisioned. The operator never handles a
+keypair, which was never something a CLI was going to give them.
 
 The article text is static content in the repository. There is no database of
 articles and no editor.
@@ -1427,8 +1444,9 @@ is stingy.
 
 ## 14. Questions this draft leaves open
 
-The design questions raised in the first draft are closed. The site is **Penny
-Press** (§1); the faucet is a two-step screen (§4.3); `manage_meter` is
+The design questions raised in the first draft are closed. The site is
+**Newsprint** (§1, renamed from Penny Press on 2026-09-05, with the naming
+argument kept as a working note); the faucet is a two-step screen (§4.3); `manage_meter` is
 reachable at any time (§6); mobile is in scope (§6.3); the inspector is
 per-request and addresses carry aliases (§9); the front end is conventional
 JavaScript (§12.2); and closing a contract erases the site's record of the

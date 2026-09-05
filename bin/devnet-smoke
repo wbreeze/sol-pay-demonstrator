@@ -1,0 +1,144 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * The first time `SolPay\Core\Tx` meets a validator.
+ *
+ * `php-client/README.md`, "The order this has to happen in", step 3: the
+ * conformance run proves `Tx::compile` and `Tx::wire` agree byte-for-byte with
+ * `solana-message` and `solana-transaction` on three fixed cases, and that is
+ * a different claim from a validator accepting the result. No signature in
+ * those vectors is real, no blockhash was ever current, and nothing has paid a
+ * fee. This pays a fee.
+ *
+ * It sends one System transfer, which is chosen rather than convenient: the
+ * fee payer signs and is written, the recipient is written and does not sign,
+ * and the System program is readonly and neither — three of the four header
+ * partitions, plus the rule that the fee payer is prepended rather than sorted
+ * into place. A `meter_and_settle` against a real site comes later and needs
+ * setup first; this needs nothing but a funded key.
+ *
+ * Usage:  bin/devnet-smoke [--airdrop]
+ *
+ * It is run by hand, on a machine with network. Devnet is unreachable from
+ * both of the environments Claude works in, so this script prints what it did
+ * rather than assuming anyone can watch it.
+ */
+
+use Newsprint\Chain\Keypair;
+use Newsprint\Chain\MessageSigner;
+use Newsprint\Chain\Rpc;
+use Newsprint\Chain\SubmitStatus;
+use Newsprint\Chain\Submitter;
+use Newsprint\Chain\SystemProgram;
+use Newsprint\Support\Config;
+use SolPay\Core\Tx;
+
+require __DIR__.'/../vendor/autoload.php';
+
+$root = dirname(__DIR__);
+$config = Config::load($root);
+$rpc = new Rpc(
+    $config->rpcUrl(),
+    $config->program(),
+    (string) $config->rpc()['commitment'],
+    (int) $config->rpc()['http_timeout_s'],
+);
+
+$wantAirdrop = in_array('--airdrop', $argv, true);
+
+/** The site authority (SPEC §4.4). Generated here on first run and never committed. */
+$authority = Keypair::loadOrCreate($config->keypairPath('authority'));
+echo "endpoint   {$config->rpcUrl()}\n";
+echo "authority  {$authority->address}\n";
+
+$balance = $rpc->balance($authority->address);
+printf("balance    %.9f SOL\n", $balance / 1_000_000_000);
+
+if ($wantAirdrop || $balance < 20_000_000) {
+    echo "airdrop    requesting 1 SOL\n";
+    try {
+        $signature = $rpc->requestAirdrop($authority->address, 1_000_000_000);
+        echo "           {$signature}\n";
+        // The endpoint answers before the transaction lands.
+        for ($i = 0; $i < 30 && $rpc->balance($authority->address) <= $balance; $i++) {
+            usleep(500_000);
+        }
+        $balance = $rpc->balance($authority->address);
+        printf("balance    %.9f SOL\n", $balance / 1_000_000_000);
+    } catch (Throwable $e) {
+        // The public endpoint's faucet refuses often, and its refusal is
+        // generic: "Internal error" covers a depleted faucet, a per-address
+        // limit and a per-IP one alike, with nothing to tell them apart. Not
+        // fatal if the key already has SOL.
+        echo "airdrop    refused: {$e->getMessage()}\n";
+    }
+}
+
+if ($balance === 0) {
+    fwrite(STDERR, <<<TEXT
+
+        No SOL, and the endpoint's faucet would not supply any. It refuses more
+        often than it works and does not say why. Fund the key another way and
+        run this again — it is the same key each time, kept in var/.
+
+          address   {$authority->address}
+
+          web       https://faucet.solana.com  (and the alternatives listed at
+                    solana.com/developers/guides/getstarted/solana-token-airdrop-and-faucets)
+          cli       solana airdrop 1 {$authority->address} -u devnet
+
+        A tenth of a SOL is more than this needs: one transfer of the
+        rent-exempt minimum, plus a fee.
+
+        TEXT);
+    exit(1);
+}
+
+// One recipient, kept across runs. Generating a fresh one each time stranded a
+// rent-exempt account per run — harmless on devnet, and still the kind of
+// litter a demonstration should not be teaching by example.
+//
+// Rent exemption is the floor a transfer to an empty account has to clear, and
+// the cluster is asked rather than told: the answer on devnet today is 650_240
+// lamports, not the 890_880 that gets hardcoded from memory.
+$recipient = Keypair::loadOrCreate($config->keypairPath('smoke-recipient'));
+$lamports = $rpc->minimumBalanceForRentExemption(0);
+echo "recipient  {$recipient->address}\n";
+printf("sending    %d lamports (rent-exempt minimum for 0 bytes)\n", $lamports);
+
+$instructions = [SystemProgram::transfer($authority->address, $recipient->address, $lamports)];
+
+// Compile once here purely to show what went over the wire; Submitter compiles
+// its own against a fresh blockhash.
+$preview = Tx::compile($instructions, $authority->address, $rpc->latestBlockhash()['blockhash']);
+printf(
+    "header     %d/%d/%d (signers / readonly signers / readonly others)\n",
+    ord($preview[0]),
+    ord($preview[1]),
+    ord($preview[2]),
+);
+echo "keys       ".implode("\n           ", MessageSigner::accountKeys($preview))."\n";
+printf("message    %d bytes\n", strlen($preview));
+
+$submitter = new Submitter(
+    $rpc,
+    (int) $config->rpc()['confirm_timeout_ms'],
+    (int) $config->rpc()['confirm_poll_ms'],
+);
+$outcome = $submitter->send($instructions, $authority);
+
+echo "\n";
+echo match ($outcome->status) {
+    SubmitStatus::Confirmed => "CONFIRMED  {$outcome->signature}\n",
+    SubmitStatus::Unconfirmed => "UNCONFIRMED {$outcome->signature} — sent, no confirmation inside the window (§7.3)\n",
+    SubmitStatus::Failed => "FAILED     {$outcome->detail}\n",
+};
+
+if ($outcome->signature !== null) {
+    echo "explorer   https://explorer.solana.com/tx/{$outcome->signature}?cluster=devnet\n";
+}
+
+exit($outcome->ok() ? 0 : 1);

@@ -1,0 +1,125 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Render `content/*.md` into `var/content/` (SPEC §12.7).
+ *
+ * Twelve files rendered once, not a CMS: §12.1 rejected one partly because
+ * page and template caching is actively hostile to per-request metering —
+ * either the cache serves an unpaid reader or the CMS runs with its main
+ * feature off. Rendering ahead of time has neither problem, because what is
+ * cached is the *article*, and whether a reader may see it is decided per
+ * request by §7 and nothing else.
+ *
+ * Output is gitignored. A clone runs `composer install && bin/build-content`
+ * before `php -S`, which is one more step than §12.0's promise and the price
+ * of not committing generated files.
+ *
+ * Usage:  bin/build-content [--quiet]
+ */
+
+use League\CommonMark\Extension\FrontMatter\FrontMatterExtension;
+use League\CommonMark\Extension\FrontMatter\Output\RenderedContentWithFrontMatter;
+use League\CommonMark\Environment\Environment;
+use League\CommonMark\Extension\CommonMark\CommonMarkCoreExtension;
+use League\CommonMark\MarkdownConverter;
+
+require __DIR__.'/../vendor/autoload.php';
+
+$root = dirname(__DIR__);
+$source = $root.'/content';
+$target = $root.'/var/content';
+$quiet = in_array('--quiet', $argv, true);
+
+if (!is_dir($target) && !mkdir($target, 0o755, true) && !is_dir($target)) {
+    fwrite(STDERR, "cannot create {$target}\n");
+    exit(1);
+}
+
+$environment = new Environment([
+    // The site's own markdown, so raw HTML in it would be the site's own
+    // choice rather than a reader's — but §10.3 makes an embedded script or a
+    // remote image a broken promise rather than a style question, and the
+    // cheapest way to keep that promise is to make it unrepresentable.
+    'html_input' => 'strip',
+    'allow_unsafe_links' => false,
+]);
+$environment->addExtension(new CommonMarkCoreExtension());
+$environment->addExtension(new FrontMatterExtension());
+$converter = new MarkdownConverter($environment);
+
+$manifest = [];
+$skipped = [];
+
+foreach (glob($source.'/*.md') ?: [] as $path) {
+    $name = basename($path);
+    $rendered = $converter->convert((string) file_get_contents($path));
+
+    // §10.1 says every piece carries front matter. A file without it is a
+    // working note that happens to live here — MeteredPayEconomics.md is one,
+    // filed against sol-pay rather than written for readers — so it is skipped
+    // and named rather than silently published or silently dropped.
+    if (!$rendered instanceof RenderedContentWithFrontMatter) {
+        $skipped[] = $name;
+        continue;
+    }
+
+    $front = $rendered->getFrontMatter();
+    foreach (['title', 'slug', 'lede'] as $required) {
+        if (!isset($front[$required])) {
+            fwrite(STDERR, "{$name}: front matter has no '{$required}'\n");
+            exit(1);
+        }
+    }
+
+    $slug = (string) $front['slug'];
+    if (preg_match('/^[a-z0-9][a-z0-9-]*$/', $slug) !== 1) {
+        fwrite(STDERR, "{$name}: '{$slug}' is not a usable slug\n");
+        exit(1);
+    }
+
+    $body = $rendered->getContent();
+    file_put_contents($target.'/'.$slug.'.html', $body);
+
+    // 238 words a minute, rounded up, and only when the piece does not say.
+    // A number the writer sets is a promise to the reader; a number counted
+    // from the text is an estimate, and they should not be confused.
+    $words = str_word_count(strip_tags($body));
+    $manifest[] = [
+        'slug' => $slug,
+        'title' => (string) $front['title'],
+        'lede' => trim((string) $front['lede']),
+        'reading_time' => (int) ($front['reading_time'] ?? max(1, (int) ceil($words / 238))),
+        'metered' => (bool) ($front['metered'] ?? true),
+        'status' => (string) ($front['status'] ?? 'published'),
+        'source' => $name,
+        'words' => $words,
+    ];
+
+    if (!$quiet) {
+        printf("  %-28s %-24s %5d words  %s\n", $name, $slug, $words, $manifest[array_key_last($manifest)]['metered'] ? 'metered' : 'public');
+    }
+}
+
+// Stale output is worse than missing output: a renamed slug would otherwise
+// leave the old article on disk, still servable, still charged for.
+foreach (glob($target.'/*.html') ?: [] as $built) {
+    $slug = basename($built, '.html');
+    if (!in_array($slug, array_column($manifest, 'slug'), true)) {
+        unlink($built);
+        if (!$quiet) {
+            echo "  removed {$slug}.html (no longer in content/)\n";
+        }
+    }
+}
+
+file_put_contents($target.'/index.json', json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
+
+if (!$quiet) {
+    foreach ($skipped as $name) {
+        echo "  skipped {$name} — no front matter, so not a piece (§10.1)\n";
+    }
+    printf("\n%d piece%s built into var/content\n", count($manifest), count($manifest) === 1 ? '' : 's');
+}

@@ -1,2 +1,5 @@
 SPEC.pdf
 handoff
+vendor
+var
+.phpunit.result.cache
