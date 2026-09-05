@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+#
+# Run the site locally (SPEC §12.0): one language runtime, `php -S`.
+#
+#   bin/run-dev              # http://localhost:8000
+#   PORT=8100 bin/run-dev
+#   PHP_CLI_SERVER_WORKERS=1 bin/run-dev
+#
+# Two choices here are deliberate, and both are easy to undo by accident.
+#
+# **`composer install`, not `composer update`.** Update re-resolves inside the
+# manifest's ranges and rewrites `composer.lock`, so putting it in the script
+# that starts the server means every run can silently move a dependency, and
+# the first sign is a failure that has nothing to do with what you changed.
+# sol-pay keeps the same line: lock changes go through their own command, which
+# refuses on a dirty lock so the diff stays legible. If install complains that
+# the lock is out of date with `composer.json`, that is the signal to run
+# `composer update` by hand, once, and commit the result.
+#
+# **Workers, plural.** `php -S` is single-process by default, which satisfies
+# §7.2's per-payer serialization for free and therefore *masks the defect §7.2
+# exists to prevent*: the two-browsers-one-wallet test passes here and fails
+# under PHP-FPM. Four workers means the dev server can actually race, so the
+# lock in `Store::withPayerLock` is doing something rather than being decorative.
+# Set PHP_CLI_SERVER_WORKERS=1 to get the old behaviour back deliberately.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+PORT="${PORT:-8000}"
+export PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}"
+
+composer install --no-interaction
+bin/build-content
+
+# Before the server, not after: `php -S` does not return until you stop it, so
+# the original line only printed on the way out.
+echo
+echo "Newsprint on http://localhost:${PORT}/ — ${PHP_CLI_SERVER_WORKERS} workers, devnet, ctrl-c to stop"
+echo
+
+php -S "localhost:${PORT}" -t public
