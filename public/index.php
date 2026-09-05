@@ -14,6 +14,8 @@ declare(strict_types=1);
  */
 
 use Newsprint\Chain\Rpc;
+use Newsprint\Chain\SiteReader;
+use Newsprint\Chain\SiteState;
 use Newsprint\Chain\RpcException;
 use Newsprint\Chain\Submitter;
 use Newsprint\Content\Library;
@@ -21,11 +23,13 @@ use Newsprint\Content\Piece;
 use Newsprint\Support\Alias;
 use Newsprint\Support\Config;
 use Newsprint\Setup\Provisioner;
+use Newsprint\Support\Inspector;
 use Newsprint\Support\View;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Exception\HttpNotFoundException;
 use Slim\Factory\AppFactory;
+use SolPay\Core\DecodeException;
 use SolPay\Core\Units;
 
 require __DIR__.'/../vendor/autoload.php';
@@ -38,71 +42,76 @@ $contentDir = $root.'/var/content';
 $params = $config->siteParams();
 $decimals = (int) $params['decimals'];
 
-/** Both unit forms, everywhere, for the reason §9 gives: the six-decimal scaling error is invisible until you see them side by side. */
-$site = [
-    'symbol' => (string) $params['symbol'],
-    'decimals' => $decimals,
-    'page_price_demo' => Units::fromBaseUnits((int) $params['page_price'], $decimals),
-    'min_limit_demo' => Units::fromBaseUnits((int) $params['min_limit'], $decimals),
-    'threshold_demo' => Units::fromBaseUnits((int) $params['collection_threshold'], $decimals),
-];
-
 /**
- * What the inspector can show before the site is provisioned: the deployment
- * it is configured against, and the prices it will charge. Everything else in
- * §9 — decoded accounts, preflight, the last transaction — needs a chain read,
- * and arrives with the screens that make one.
+ * One chain read per request, shared by everything on the page (SPEC §9's
+ * inspector is per-request, and §12.4 budgets about three RPC calls per
+ * metered view). Memoised so the panel and the price in the copy are the same
+ * read rather than two.
+ *
+ * A failure here is not fatal: an unmetered page owes the chain nothing, so
+ * the site keeps serving and the panel says the read failed.
  */
-$inspector = static function () use ($config, $params, $site, $decimals): array {
-    $program = $config->program();
+$state = null;
+$stateError = null;
+$read = static function () use ($config, &$state, &$stateError): ?SiteState {
+    static $done = false;
+    if ($done) {
+        return $state;
+    }
+    $done = true;
 
-    $sections = [[
-        'heading' => 'Deployment',
-        'rows' => [
-            [Alias::for(Alias::PROGRAM, $program->id), $program->id],
-            [Alias::for(Alias::TOKEN_PROGRAM, $program->tokenProgram), $program->tokenProgram],
-            ['cluster', 'devnet'],
-            ['endpoint', $config->rpcUrl()],
-        ],
-        'note' => 'The endpoint is called by this server, never by your browser. '
-            .'An RPC provider that saw your browser would learn your IP address beside a wallet address; '
-            .'seeing this server, it learns that one server asked about some accounts.',
-    ], [
-        'heading' => 'Site parameters',
-        'rows' => [
-            ['page price', sprintf('%s %s  (%d base units)', $site['page_price_demo'], $site['symbol'], (int) $params['page_price'])],
-            ['collection threshold', sprintf('%s %s  (%d base units — %d views)', $site['threshold_demo'], $site['symbol'], (int) $params['collection_threshold'], intdiv((int) $params['collection_threshold'], (int) $params['page_price']))],
-            ['minimum limit', sprintf('%s %s  (%d base units — %d views)', $site['min_limit_demo'], $site['symbol'], (int) $params['min_limit'], intdiv((int) $params['min_limit'], (int) $params['page_price']))],
-            ['mint decimals', (string) $decimals],
-        ],
-    ]];
-
-    if ($config->isProvisioned()) {
-        $addresses = $config->provisioned();
-        $sections[] = [
-            'heading' => 'This site, on chain',
-            'rows' => [
-                [Alias::for(Alias::SITE, $addresses['site'] ?? ''), (string) ($addresses['site'] ?? '')],
-                [Alias::for(Alias::MINT, $addresses['mint'] ?? ''), (string) ($addresses['mint'] ?? '')],
-                [Alias::for(Alias::TREASURY, $addresses['treasury'] ?? ''), (string) ($addresses['treasury'] ?? '')],
-            ],
-        ];
-    } else {
-        $sections[] = [
-            'heading' => 'This site, on chain',
-            'rows' => [['status', 'not provisioned']],
-            'note' => 'First-run setup has not created the mint, the treasury or the site account yet (§12.0).',
-        ];
+    if (!$config->isProvisioned()) {
+        return null;
     }
 
-    return $sections;
+    try {
+        $rpc = new Rpc(
+            $config->rpcUrl(),
+            $config->program(),
+            (string) $config->rpc()['commitment'],
+            (int) $config->rpc()['http_timeout_s'],
+        );
+        $state = (new SiteReader($config, $rpc))->read();
+    } catch (RpcException|DecodeException $e) {
+        $stateError = $e->getMessage();
+    }
+
+    return $state;
+};
+
+$panel = new Inspector($config);
+$inspector = static function () use ($panel, $read, &$stateError): array {
+    $state = $read();
+
+    return $panel->sections($state, $stateError);
+};
+
+/**
+ * The prices in the reader-facing copy. Claim 7 in §2 is that every number on
+ * the screen came from an account, so when the site is provisioned these come
+ * from the `Site` account and not from `config/site.php`. The config is the
+ * fallback for a copy that has not been set up, and for a chain that cannot be
+ * reached.
+ */
+$siteVars = static function () use ($read, $params, $decimals): array {
+    $state = $read();
+    $d = $state?->mintDecimals ?? $decimals;
+
+    return [
+        'symbol' => (string) $params['symbol'],
+        'decimals' => $d,
+        'page_price_demo' => Units::fromBaseUnits($state?->site->pagePrice ?? (int) $params['page_price'], $d),
+        'min_limit_demo' => Units::fromBaseUnits($state?->site->minLimit ?? (int) $params['min_limit'], $d),
+        'threshold_demo' => Units::fromBaseUnits($state?->site->collectionThreshold ?? (int) $params['collection_threshold'], $d),
+        'from_chain' => $state !== null,
+    ];
 };
 
 $app = AppFactory::create();
 $app->addRoutingMiddleware();
 $errorMiddleware = $app->addErrorMiddleware(true, true, true);
 
-$page = static function (Response $response, string $html, int $status = 200) use ($view, $inspector, $site): Response {
+$page = static function (Response $response, string $html, int $status = 200) use ($view, $inspector): Response {
     $response->getBody()->write($html);
 
     return $response->withStatus($status)->withHeader('Content-Type', 'text/html; charset=utf-8');
@@ -129,7 +138,7 @@ $errorMiddleware->setErrorHandler(
     },
 );
 
-$app->get('/', function (Request $request, Response $response) use ($view, $shell, $page, $contentDir, $site, $config): Response {
+$app->get('/', function (Request $request, Response $response) use ($view, $shell, $page, $contentDir, $siteVars, $config): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -138,12 +147,12 @@ $app->get('/', function (Request $request, Response $response) use ($view, $shel
 
     return $page($response, $shell('Newsprint', $view->render('index', [
         'articles' => $articles,
-        'site' => $site,
+        'site' => $siteVars(),
         'provisioned' => $config->isProvisioned(),
     ])));
 });
 
-$app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $site): Response {
+$app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $siteVars): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -162,7 +171,7 @@ $app->get('/a/{slug}', function (Request $request, Response $response, array $ar
     return $page($response, $shell($piece->title, $view->render('article', [
         'piece' => $piece,
         'body' => $body,
-        'site' => $site,
+        'site' => $siteVars(),
     ])));
 });
 
@@ -204,7 +213,7 @@ $provisioner = static function () use ($config): Provisioner {
     ));
 };
 
-$app->get('/setup', function (Request $request, Response $response) use ($view, $shell, $page, $provisioner, $config, $site): Response {
+$app->get('/setup', function (Request $request, Response $response) use ($view, $shell, $page, $provisioner, $config, $siteVars): Response {
     $error = null;
     $status = ['provisioned' => $config->isProvisioned(), 'authority' => '', 'faucet' => '', 'balance' => 0, 'needed' => 0, 'funded' => false];
 
@@ -218,7 +227,7 @@ $app->get('/setup', function (Request $request, Response $response) use ($view, 
 
     return $page($response, $shell('First run', $view->render('setup', [
         'status' => $status,
-        'site' => $site,
+        'site' => $siteVars(),
         'setup' => $config->setup(),
         'error' => $error,
     ])));
