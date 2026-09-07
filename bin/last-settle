@@ -1,0 +1,155 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Find the metering transactions that actually moved money.
+ *
+ * sol-pay's SPEC §7 holds an amendment until a metering call has **settled**,
+ * and settling is the part that carries the cross-program invocation, the
+ * delegate and the transfer. A `meter_and_settle` below the collection
+ * threshold increments `used` and moves nothing, so "a metering call was
+ * accepted" and "a metering call settled" are different claims and only the
+ * second one discharges the condition.
+ *
+ * This site deliberately does not keep a log of its metering transactions —
+ * §10.4 enumerates its stores and a per-wallet record of them would be exactly
+ * the reading history the design exists to avoid holding. So the evidence is
+ * where it always was: on chain, against the treasury. This script reads it
+ * back.
+ *
+ *   bin/last-settle          # the last 10 transactions touching the treasury
+ *   bin/last-settle 40       # look further back
+ *
+ * Needs network, which means it runs on your machine and nowhere else.
+ */
+
+use Newsprint\Chain\Rpc;
+use Newsprint\Chain\RpcException;
+use Newsprint\Support\Config;
+
+$root = dirname(__DIR__);
+require $root.'/vendor/autoload.php';
+
+$limit = max(1, min(100, (int) ($argv[1] ?? 10)));
+$config = Config::load($root);
+
+if (!$config->isProvisioned()) {
+    fwrite(STDERR, "not provisioned: there is no treasury to look at yet\n");
+    exit(1);
+}
+
+$addresses = $config->provisioned();
+$treasury = $addresses['treasury'];
+$program = $config->program()->id;
+$decimals = (int) $config->siteParams()['decimals'];
+$symbol = (string) $config->siteParams()['symbol'];
+
+$rpc = new Rpc($config->rpcUrl(), $config->program(), (string) $config->rpc()['commitment'], (int) $config->rpc()['http_timeout_s']);
+
+echo "treasury  {$treasury}\n";
+echo "program   {$program}\n\n";
+
+try {
+    $signatures = $rpc->call('getSignaturesForAddress', [$treasury, ['limit' => $limit]]);
+} catch (RpcException $e) {
+    fwrite(STDERR, 'the endpoint did not answer: '.$e->getMessage()."\n");
+    exit(1);
+}
+
+if (!is_array($signatures) || $signatures === []) {
+    echo "no transactions against the treasury yet.\n";
+    exit(0);
+}
+
+$settles = 0;
+
+foreach ($signatures as $entry) {
+    $signature = (string) ($entry['signature'] ?? '');
+    if ($signature === '') {
+        continue;
+    }
+
+    try {
+        $tx = $rpc->call('getTransaction', [$signature, [
+            'encoding' => 'json',
+            'commitment' => 'confirmed',
+            'maxSupportedTransactionVersion' => 0,
+        ]]);
+    } catch (RpcException $e) {
+        printf("%s  could not be read (%s)\n", substr($signature, 0, 12).'…', $e->getMessage());
+
+        continue;
+    }
+
+    if (!is_array($tx)) {
+        continue;
+    }
+
+    // The treasury's token balance before and after. A settle is exactly the
+    // case where it went up: that is the `transfer_checked` CPI landing.
+    $moved = self_delta($tx, $treasury);
+    $keys = $tx['transaction']['message']['accountKeys'] ?? [];
+    $metering = is_array($keys) && in_array($program, $keys, true);
+    $failed = ($tx['meta']['err'] ?? null) !== null;
+
+    $when = isset($entry['blockTime']) ? gmdate('Y-m-d H:i:s', (int) $entry['blockTime']).'Z' : 'unknown time';
+
+    printf(
+        "%s  %s  %s%s\n",
+        $signature,
+        $when,
+        $failed ? 'FAILED' : ($moved > 0 ? 'SETTLED '.format_amount($moved, $decimals).' '.$symbol : 'no transfer'),
+        $metering ? '' : '   (not a metering transaction)',
+    );
+
+    if ($moved > 0 && !$failed && $metering) {
+        $settles += 1;
+    }
+}
+
+echo "\n";
+if ($settles === 0) {
+    echo "No settling metering call in the last {$limit}. Advance the meter until the\n";
+    echo "unpaid balance crosses the collection threshold, then look again.\n";
+    exit(2);
+}
+
+echo "{$settles} settling metering call(s) above. The topmost one is the citation\n";
+echo "sol-pay's SPEC §7 has been waiting for.\n";
+
+/**
+ * How much the treasury's token balance moved, in base units.
+ *
+ * `pre`/`postTokenBalances` are indexed into the transaction's account list,
+ * so the treasury is found by matching the index rather than by name.
+ */
+function self_delta(array $tx, string $treasury): int
+{
+    $keys = $tx['transaction']['message']['accountKeys'] ?? [];
+    $index = is_array($keys) ? array_search($treasury, $keys, true) : false;
+    if ($index === false) {
+        return 0;
+    }
+
+    $before = 0;
+    $after = 0;
+    foreach (($tx['meta']['preTokenBalances'] ?? []) as $balance) {
+        if ((int) ($balance['accountIndex'] ?? -1) === $index) {
+            $before = (int) ($balance['uiTokenAmount']['amount'] ?? 0);
+        }
+    }
+    foreach (($tx['meta']['postTokenBalances'] ?? []) as $balance) {
+        if ((int) ($balance['accountIndex'] ?? -1) === $index) {
+            $after = (int) ($balance['uiTokenAmount']['amount'] ?? 0);
+        }
+    }
+
+    return $after - $before;
+}
+
+function format_amount(int $base, int $decimals): string
+{
+    return \SolPay\Core\Units::fromBaseUnits($base, $decimals);
+}
