@@ -182,7 +182,7 @@ funds them:
   setup page airdropped at first run — rather than requested from the public
   devnet faucet on the visitor's behalf. One reader against their own copy would
   probably survive the public faucet; routing it through the site keeps the
-  faucet screen honest about who is paying, which is the site.
+  faucet honest about who is paying, which is the site.
 - **0.60 DEMO**, minted to the visitor's associated token account, creating
   that account idempotently in the same transaction. A little over one full
   minimum limit, and well under two.
@@ -201,18 +201,28 @@ naming, because it is the only part that gives anything away. What it gives
 away is worthless, so the limit exists to keep the operator wallet solvent, not
 to protect an asset.
 
-**Two steps, on purpose.** A button opens a screen that says what is about to
-happen — which wallet, how much SOL, how much DEMO, that it is once per wallet,
-and that none of it is worth anything — and a second button on that screen
-fires it. The screen carries its own way out that is not the browser's back
-button.
+**Nothing is behind a click.** What is about to happen — which wallet, how much
+SOL, how much DEMO, that it is once per wallet, that none of it is worth
+anything, and that the SOL is for the contract's rent and fees — is on the
+screen *before* the reader touches anything, and a single button fires it.
 
 One click that silently moves tokens into someone's wallet is exactly the
 interaction pattern a reader should be suspicious of everywhere else. A demo
 that trains the reflex out of them is teaching the wrong thing, whatever the
-tokens are worth.
+tokens are worth. **That is the property being protected, and the count of
+buttons was only ever a means to it.**
 
-The faucet is a demo affordance and is marked as one on the screen. No
+**Amended 2026-09-07: one step, not two.** This section originally specified a
+button that opens an explaining screen and a second button on that screen. That
+shape assumed the reader arrives at the faucet by asking for it — which was
+true when there was a sign-in screen to be sent onward from. With the meter in
+the article (§5, §6), the reader arrives at the explanation without clicking
+anything: it is simply the state the panel is in when they hold no DEMO. There
+is no prior click for the explanation to sit behind, so a confirm step would
+add a click without adding a disclosure, and the paragraph above is satisfied
+as written.
+
+The faucet is a demo affordance and is marked as one in the panel. No
 integrator should copy it.
 
 ### 4.4 Keys the server holds
@@ -377,8 +387,7 @@ diagram never had a sign-in node to begin with.
 | screen | reached when | the payer signs |
 | --- | --- | --- |
 | index | always public | — |
-| faucet | asked for, once per wallet | — (the site pays) |
-| faucet confirm | from the faucet screen | — |
+| faucet | in the meter panel, when the reader holds no DEMO | — (the site pays) |
 | `set_meter` | on a metered article, no contract | the SIWS message if not yet identified, then `approve_and_open` |
 | `metered_page` | session, contract, `can_meter` passes | — |
 | `manage_meter` | limit reached, or navigated to at any time | `approve_and_renew` or `close_and_revoke` |
@@ -1604,7 +1613,8 @@ is stingy.
 
 The design questions raised in the first draft are closed. The site is
 **Newsprint** (§1, renamed from Penny Press on 2026-09-05, with the naming
-argument kept as a working note); the faucet is a two-step screen (§4.3);
+argument kept as a working note); the faucet is one step inside the meter
+panel (§4.3, amended 2026-09-07);
 `manage_meter` is reachable at any time (§6); mobile is in scope (§6.3); the
 inspector is per-request and addresses carry aliases (§9); the front end is
 conventional JavaScript, server-rendered (§12.2); identifying happens in the
