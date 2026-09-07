@@ -82,6 +82,12 @@ final class Config
         return $this->static['setup'];
     }
 
+    /** @return array<string, int|string> */
+    public function auth(): array
+    {
+        return $this->static['auth'];
+    }
+
     /** @return array<string, int> */
     public function metering(): array
     {

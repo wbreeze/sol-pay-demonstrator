@@ -3,6 +3,7 @@
  * @var string $title
  * @var string $content
  * @var array<int, array{heading: string, rows: array<int, array{0: string, 1: string}>}> $inspector
+ * @var string|null $wallet
  * @var \Newsprint\Support\View $view
  */
 use Newsprint\Support\View;
@@ -27,6 +28,14 @@ use Newsprint\Support\View;
 <header class="masthead">
     <a class="wordmark" href="/">Newsprint</a>
     <p class="tagline">A cent an article, and no record of which ones.</p>
+<?php /* §5: who the site thinks you are, on every page, because a site that
+         can charge you should not make you hunt for that. */ ?>
+    <nav class="who">
+<?php if (($wallet ?? null) !== null): ?>
+        <span class="signed-in">signed in as <code><?= View::e(substr($wallet, 0, 4).'…'.substr($wallet, -4)) ?></code></span>
+        <form method="post" action="/signout"><button type="submit" class="linkish">sign out</button></form>
+<?php endif; ?>
+    </nav>
 </header>
 
 <main>

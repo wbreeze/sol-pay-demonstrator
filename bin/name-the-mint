@@ -1,0 +1,108 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Give the DEMO mint a name, so a wallet's approval screen says "0.5 DEMO"
+ * rather than "0.5 Unknown".
+ *
+ * Out of band on purpose. It is not part of first-run setup, because setup is
+ * the worked example of `initialize_site` and this has nothing to do with
+ * sol-pay: it is one Metaplex instruction, run once, that the metering path
+ * never touches. The site is complete without it. Run it, or don't.
+ *
+ *   bin/name-the-mint            # what it would do
+ *   bin/name-the-mint --write    # do it
+ *
+ * Signed by the faucet key, which setup made the mint authority — so it is
+ * also the payer for the metadata account's rent and its update authority.
+ * Three slots in the instruction, one signer.
+ */
+
+use Newsprint\Chain\Keypair;
+use Newsprint\Chain\Rpc;
+use Newsprint\Chain\RpcException;
+use Newsprint\Chain\SubmitStatus;
+use Newsprint\Chain\Submitter;
+use Newsprint\Chain\TokenMetadata;
+use Newsprint\Support\Config;
+
+$root = dirname(__DIR__);
+require $root.'/vendor/autoload.php';
+
+$write = in_array('--write', $argv, true);
+$config = Config::load($root);
+
+if (!$config->isProvisioned()) {
+    fwrite(STDERR, "not provisioned: run first-run setup at /setup first\n");
+    exit(1);
+}
+
+$addresses = $config->provisioned();
+$params = $config->siteParams();
+$mint = $addresses['mint'];
+$metadata = TokenMetadata::address($mint);
+
+$name = (string) ($params['token_name'] ?? 'Newsprint DEMO');
+$symbol = (string) $params['symbol'];
+$uri = (string) ($params['token_uri'] ?? '');
+
+echo "mint      {$mint}\n";
+echo "metadata  {$metadata}\n";
+echo "name      {$name}\n";
+echo "symbol    {$symbol}\n";
+echo 'uri       '.($uri === '' ? '(none — a wallet shows the name and symbol without it)' : $uri)."\n\n";
+
+$rpc = new Rpc(
+    $config->rpcUrl(),
+    $config->program(),
+    (string) $config->rpc()['commitment'],
+    (int) $config->rpc()['http_timeout_s'],
+);
+
+try {
+    if ($rpc->accountExists($metadata)) {
+        echo "The metadata account already exists. Nothing to do.\n";
+        echo "(Changing it would be UpdateMetadataAccountV2, which this script does not do.)\n";
+        exit(0);
+    }
+} catch (RpcException $e) {
+    fwrite(STDERR, 'the endpoint did not answer: '.$e->getMessage()."\n");
+    exit(1);
+}
+
+if (!$write) {
+    echo "Dry run. Nothing was sent. Pass --write to create the metadata account.\n";
+    exit(0);
+}
+
+$faucet = Keypair::load($config->keypairPath('faucet'));
+
+$outcome = (new Submitter(
+    $rpc,
+    (int) $config->rpc()['confirm_timeout_ms'],
+    (int) $config->rpc()['confirm_poll_ms'],
+))->send([
+    TokenMetadata::createV3(
+        mint: $mint,
+        mintAuthority: $faucet->address,
+        payer: $faucet->address,
+        updateAuthority: $faucet->address,
+        name: $name,
+        symbol: $symbol,
+        uri: $uri,
+    ),
+], $faucet);
+
+if (!$outcome->ok()) {
+    fwrite(STDERR, 'failed: '.$outcome->detail."\n");
+    if ($outcome->signature !== null) {
+        fwrite(STDERR, "signature {$outcome->signature}\n");
+    }
+    exit(1);
+}
+
+echo ($outcome->status === SubmitStatus::Confirmed ? "confirmed\n" : "sent, not confirmed inside the window\n");
+echo "signature {$outcome->signature}\n\n";
+echo "Reconnect the wallet, or reopen the approval screen, and it should name the token.\n";

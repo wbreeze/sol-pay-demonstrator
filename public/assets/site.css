@@ -133,3 +133,94 @@ button:hover { filter: brightness(1.1); }
 .step-already { border-left-color: var(--rule); }
 .step-blocked, .step-failed { border-left-color: #b3261e; }
 .step-blocked .badge, .step-failed .badge { color: #b3261e; }
+
+/* --- §5 sign-in ---------------------------------------------------------- */
+
+/*
+ * Who the site thinks you are, on the masthead of every page. A site that can
+ * draw from your wallet should not make you hunt for that, and §6's
+ * `manage_meter` decision — reachable at any time, not only at the limit —
+ * is the same argument one screen further on.
+ */
+.who {
+    display: flex;
+    gap: 0.6rem;
+    align-items: baseline;
+    justify-content: center;
+    margin: 0.6rem 0 0;
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+}
+.who form { display: inline; margin: 0; }
+.signed-in code { font-size: 0.8rem; }
+
+.linkish {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    color: var(--accent);
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.wallets { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 1rem 0; }
+
+.wallet {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--rule);
+    border-radius: 0.3rem;
+    background: var(--paper);
+    color: var(--ink);
+    font: inherit;
+    font-size: 0.95rem;
+    cursor: pointer;
+}
+.wallet:hover { border-color: var(--accent); color: var(--accent); }
+.wallet:disabled { opacity: 0.55; cursor: default; }
+.wallet img { border-radius: 0.2rem; }
+
+[data-status][data-kind="error"] { color: var(--accent); }
+
+.fine { font-size: 0.85rem; color: var(--ink-soft); }
+.fine summary { cursor: pointer; }
+
+.secondary {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--rule);
+    border-radius: 0.3rem;
+    background: var(--paper);
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+.secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+.report {
+    max-height: 28rem;
+    overflow: auto;
+    padding: 0.75rem;
+    border: 1px solid var(--rule);
+    background: var(--paper-sunk);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    white-space: pre;
+}
+
+.meter .limit { display: inline-flex; align-items: baseline; gap: 0.4rem; font-size: 0.95rem; }
+.meter .limit input {
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--rule);
+    border-radius: 0.25rem;
+    background: var(--paper);
+    color: var(--ink);
+    font: inherit;
+    font-size: 1rem;
+    text-align: right;
+}
+.meter [data-wallet-choices] { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+.meter [data-meter-status][data-kind="error"] { color: var(--accent); font-style: normal; }

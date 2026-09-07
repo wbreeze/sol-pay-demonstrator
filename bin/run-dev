@@ -23,6 +23,11 @@
 # under PHP-FPM. Four workers means the dev server can actually race, so the
 # lock in `Store::withPayerLock` is doing something rather than being decorative.
 # Set PHP_CLI_SERVER_WORKERS=1 to get the old behaviour back deliberately.
+#
+# **A router script**, \`bin/dev-router.php\`, so static files are served with
+# \`Cache-Control: no-store\` and \`.wasm\` with \`application/wasm\`. Without it a
+# browser can keep a cached \`assets/meter.js\` across a restart, which means the
+# page runs code that is not the code on disk and nothing on screen says so.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -39,4 +44,4 @@ echo
 echo "Newsprint on http://localhost:${PORT}/ — ${PHP_CLI_SERVER_WORKERS} workers, devnet, ctrl-c to stop"
 echo
 
-php -S "localhost:${PORT}" -t public
+php -S "localhost:${PORT}" -t public bin/dev-router.php

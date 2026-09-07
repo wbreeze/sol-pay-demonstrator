@@ -11,6 +11,8 @@
  * @var \Newsprint\Content\Piece $piece
  * @var string|null $body       rendered HTML, or null when this reader may not have it
  * @var array<string, int|string> $site
+ * @var array<string, mixed> $meter what the meter panel draws (SPEC §6, and
+ *                                  sol-pay's `set_meter` / `authorize` states)
  */
 use Newsprint\Support\View;
 ?>
@@ -33,18 +35,6 @@ use Newsprint\Support\View;
 <?php else: ?>
     <?php /* The body is not on this page at all — not hidden, not delivered
              and covered. A reader who has not paid never receives it. */ ?>
-    <section class="gate">
-        <h2>The rest is metered</h2>
-        <p>
-            Reading on costs <?= View::e((string) $site['page_price_demo']) ?>
-            <?= View::e((string) $site['symbol']) ?>, drawn from a limit you set
-            yourself and can close at any time.
-        </p>
-        <p class="pending">
-            The meter is not built yet. Sign-in, the wallet and
-            <code>set_meter</code> come next; this page is the shape they arrive
-            into.
-        </p>
-    </section>
+<?= $view->render('meter', ['meter' => $meter, 'site' => $site]) ?>
 <?php endif ?>
 </article>

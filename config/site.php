@@ -45,6 +45,15 @@ return [
         'page_price' => 10_000,           // 0.01 DEMO
         'collection_threshold' => 100_000, // 0.10 DEMO — settles on the tenth view
         'min_limit' => 500_000,            // 0.50 DEMO — fifty views
+
+        // Metaplex Token Metadata, written once by `bin/name-the-mint` so a
+        // wallet's approval screen names the token instead of saying
+        // "Unknown". Nothing on the metering path reads these.
+        'token_name' => 'Newsprint DEMO',
+        // Deliberately empty: it would point at a JSON file describing the
+        // token, and §10.3 leaves this site nowhere to host one it approves
+        // of. A wallet shows the name and symbol without it.
+        'token_uri' => '',
     ],
 
     // SPEC §4.3. Stingy on purpose: a generous faucet makes §13.2's
@@ -61,6 +70,28 @@ return [
         'airdrop_lamports' => 1_000_000_000,        // 1 SOL; devnet's faucet refuses more often than it works
         'authority_minimum_lamports' => 300_000_000, // enough for setup's transactions and a long session of metering
         'faucet_reserve_lamports' => 250_000_000,    // five visitors at §4.3's 0.05 SOL each
+    ],
+
+    // SPEC §5. Sign In With Solana, required with no fallback: a wallet
+    // without the feature is refused by name rather than failed obscurely.
+    'auth' => [
+        // The Wallet Standard chain identifier, and the string the wallet
+        // echoes into the signed message as "Chain ID". The type is an
+        // unconstrained string in the specification, so this is a value the
+        // two sides must agree on rather than one the format dictates; it
+        // matches what `signAndSendTransaction` is given, which is the
+        // agreement worth having.
+        'chain_id' => 'solana:devnet',
+        // What the wallet shows the reader. Kept to one sentence: a statement
+        // nobody reads is a consent nobody gave.
+        'statement' => 'Sign in to Newsprint. This proves you hold this wallet. It authorizes nothing and moves no money.',
+        // Five minutes to complete the wallet dialog. Long enough for a first
+        // approval on a phone, short enough that an abandoned challenge is
+        // not a replay window.
+        'challenge_ttl_s' => 300,
+        // The server side of the session. The cookie itself is a session
+        // cookie with no expiry (§5), so this is what bounds it.
+        'session_ttl_s' => 43_200, // twelve hours
     ],
 
     // SPEC §7.1 and §7.4. Both are policy numbers with no chain meaning.

@@ -13,6 +13,13 @@ declare(strict_types=1);
  * SAPI, before concluding the two-browsers-one-wallet test passes.
  */
 
+use Newsprint\Auth\Session;
+use Newsprint\Auth\SignInException;
+use Newsprint\Auth\SignInInput;
+use Newsprint\Auth\Verifier;
+use Newsprint\Chain\Faucet;
+use Newsprint\Chain\PayerReader;
+use Newsprint\Chain\PayerState;
 use Newsprint\Chain\Rpc;
 use Newsprint\Chain\SiteReader;
 use Newsprint\Chain\SiteState;
@@ -23,6 +30,8 @@ use Newsprint\Content\Piece;
 use Newsprint\Support\Alias;
 use Newsprint\Support\Config;
 use Newsprint\Setup\Provisioner;
+use Newsprint\Store\Database;
+use Newsprint\Store\Store;
 use Newsprint\Support\Inspector;
 use Newsprint\Support\View;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -107,6 +116,161 @@ $siteVars = static function () use ($read, $params, $decimals): array {
     ];
 };
 
+/**
+ * The one SQLite file (§12.5), opened lazily: an unmetered page that never
+ * asks who the reader is should not create a database to find out.
+ */
+$store = static function () use ($config): Store {
+    static $store = null;
+
+    return $store ??= new Store(Database::open($config->dbPath()));
+};
+
+/**
+ * The viewer-to-wallet map (§5), which is the integrator's one obligation and
+ * here is a cookie and a row. Null means nobody is signed in, which is the
+ * ordinary state of every public page on this site.
+ */
+$wallet = static function (Request $request) use ($store): ?string {
+    $id = Session::idFrom($request);
+
+    return $id === null ? null : $store()->walletForSession($id);
+};
+
+$json = static function (Response $response, array $payload, int $status = 200): Response {
+    $response->getBody()->write((string) json_encode($payload, JSON_UNESCAPED_SLASHES));
+
+    return $response->withStatus($status)->withHeader('Content-Type', 'application/json');
+};
+
+/**
+ * SPEC §12.4: one RPC client, built where it is needed. The endpoint is a
+ * config value rather than an architectural one.
+ */
+$rpcFactory = static function () use ($config): Rpc {
+    return new Rpc(
+        $config->rpcUrl(),
+        $config->program(),
+        (string) $config->rpc()['commitment'],
+        (int) $config->rpc()['http_timeout_s'],
+    );
+};
+
+/**
+ * `find_contract` from sol-pay's state diagram, run on every article request
+ * that has a wallet address to run it with.
+ *
+ * Note what makes a returning reader work: the contract address is *derived*
+ * from the site and the wallet, so a reader who authorized last week and
+ * arrives today with an empty cookie jar identifies once and lands on the
+ * contract they already have. The session was only ever the map to it, and
+ * the site remembers nothing else.
+ */
+$payerState = static function (Request $request) use ($wallet, $read, $config, $rpcFactory): ?PayerState {
+    $address = $wallet($request);
+    $state = $read();
+    if ($address === null || $state === null) {
+        return null;
+    }
+
+    try {
+        return (new PayerReader($config, $rpcFactory()))->read($address, $state);
+    } catch (RpcException|DecodeException $e) {
+        return null;
+    }
+};
+
+/**
+ * Everything the meter panel draws, in the units the reader sees.
+ *
+ * The panel replaces the sign-in screen entirely (2026-09-07). sol-pay's state
+ * diagram has no sign-in node: `identified` is a choice, not a screen, and
+ * "viewer not identified" goes straight to `set_meter`. A separate sign-in
+ * page also reads as identification for tracking, which is precisely the thing
+ * this site exists to argue against — the identification here is real but
+ * narrow, and putting it inside the meter is what makes the narrowness
+ * visible.
+ */
+$meterVars = static function (Request $request) use ($wallet, $read, $payerState, $config, $store): array {
+    $params = $config->siteParams();
+    $state = $read();
+    $decimals = $state?->mintDecimals ?? (int) $params['decimals'];
+    $faucet = $config->faucet();
+
+    $panel = [
+        'wallet' => $wallet($request),
+        'stage' => 'anonymous',
+        'symbol' => (string) $params['symbol'],
+        'decimals' => $decimals,
+        'balance' => '0',
+        'limit_floor' => Units::fromBaseUnits((int) $params['min_limit'], $decimals),
+        'views_remaining' => null,
+        'blocked' => null,
+        'contract' => null,
+        'faucet' => [
+            'demo' => Units::fromBaseUnits((int) $faucet['demo_base_units'], $decimals),
+            'sol' => rtrim(rtrim(number_format((int) $faucet['sol_lamports'] / 1_000_000_000, 9, '.', ''), '0'), '.'),
+            'available' => false,
+        ],
+        'provisioned' => $config->isProvisioned(),
+        // The Wallet Standard chain identifier, handed to the panel so the
+        // browser can tell a wallet that speaks it from a same-named sibling
+        // the same extension registered for another network.
+        'chain' => (string) $config->auth()['chain_id'],
+        // So the panel can load the wasm client before the reader clicks.
+        // Both libraries are fetched while they are choosing a limit, which
+        // takes the download out of the window between the blockhash and the
+        // wallet dialog — the window §6.3 says is the one that expires.
+        'program' => $config->program()->id,
+        'token_program' => $config->program()->tokenProgram,
+    ];
+
+    if ($panel['wallet'] === null) {
+        return $panel;
+    }
+
+    $panel['faucet']['available'] = !$store()->faucetGranted($panel['wallet']);
+
+    $payer = $payerState($request);
+    if ($payer === null) {
+        // The chain could not be read. An unmetered page owes it nothing, so
+        // the article still serves and the panel says what happened (§9's
+        // "a failed read does not take the site down" — which stops being
+        // true at the metering path, and should).
+        $panel['stage'] = 'unreadable';
+
+        return $panel;
+    }
+
+    $panel['balance'] = Units::fromBaseUnits($payer->balance(), $payer->decimals);
+    $panel['limit_floor'] = Units::fromBaseUnits($payer->limitFloor(), $payer->decimals);
+
+    if ($payer->hasContract()) {
+        $contract = $payer->contract;
+        $panel['contract'] = [
+            'address' => $payer->contractAddress,
+            'limit' => Units::fromBaseUnits($contract->limit, $payer->decimals),
+            'used' => Units::fromBaseUnits($contract->used, $payer->decimals),
+            'paid' => Units::fromBaseUnits($contract->paid, $payer->decimals),
+            'unpaid' => Units::fromBaseUnits($contract->unpaid(), $payer->decimals),
+        ];
+        $panel['views_remaining'] = $payer->viewsRemaining();
+
+        $blocked = $payer->blocked();
+        $panel['stage'] = $blocked === null ? 'metered' : 'limit';
+        $panel['blocked'] = $blocked?->reason;
+
+        return $panel;
+    }
+
+    // Identified, no contract. §4.3's faucet is the branch before `set_meter`,
+    // because `approve_checked` against a token account that does not exist
+    // fails at the runtime and the reader would never learn why.
+    $panel['stage'] = $payer->isFunded() ? 'set-meter' : 'unfunded';
+
+    return $panel;
+};
+
 $app = AppFactory::create();
 $app->addRoutingMiddleware();
 $errorMiddleware = $app->addErrorMiddleware(true, true, true);
@@ -117,11 +281,12 @@ $page = static function (Response $response, string $html, int $status = 200) us
     return $response->withStatus($status)->withHeader('Content-Type', 'text/html; charset=utf-8');
 };
 
-$shell = static function (string $title, string $content) use ($view, $inspector): string {
+$shell = static function (string $title, string $content, ?string $wallet = null) use ($view, $inspector): string {
     return $view->render('layout', [
         'title' => $title,
         'content' => $content,
         'inspector' => $inspector(),
+        'wallet' => $wallet,
     ]);
 };
 
@@ -138,7 +303,7 @@ $errorMiddleware->setErrorHandler(
     },
 );
 
-$app->get('/', function (Request $request, Response $response) use ($view, $shell, $page, $contentDir, $siteVars, $config): Response {
+$app->get('/', function (Request $request, Response $response) use ($view, $shell, $page, $contentDir, $siteVars, $config, $wallet): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -149,10 +314,10 @@ $app->get('/', function (Request $request, Response $response) use ($view, $shel
         'articles' => $articles,
         'site' => $siteVars(),
         'provisioned' => $config->isProvisioned(),
-    ])));
+    ]), $wallet($request)));
 });
 
-$app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $siteVars): Response {
+$app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $siteVars, $wallet, $meterVars): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -172,7 +337,266 @@ $app->get('/a/{slug}', function (Request $request, Response $response, array $ar
         'piece' => $piece,
         'body' => $body,
         'site' => $siteVars(),
-    ])));
+        'meter' => $meterVars($request),
+    ]), $wallet($request)));
+});
+
+/**
+ * SPEC §5, without the screen §5 imagined (2026-09-07). Identifying is three
+ * round trips inside the meter panel, and the order is what makes the
+ * verifier possible: the server issues fields, the *wallet* builds and signs a
+ * message from them, and the server reads back what was actually signed. There
+ * is no step in which the server compares the bytes to bytes it composed,
+ * because it composed none — which is the property §5 takes on knowingly when
+ * it requires `signIn` with no fallback.
+ *
+ * There is no `GET /signin`. sol-pay's state diagram has no sign-in node —
+ * `identified` is a <<choice>>, and "viewer not identified" goes straight to
+ * `set_meter` — and a page whose only purpose is to collect an identity reads
+ * as identification for tracking, which is the thing this site argues against.
+ * The identification here is real but narrow, and it happens inside the panel
+ * that is about to spend the reader's money, where its narrowness is visible.
+ */
+$app->post('/signin/challenge', function (Request $request, Response $response) use ($json, $store, $config): Response {
+    $auth = $config->auth();
+    $uri = $request->getUri();
+
+    // The domain the wallet will put in the message is the one the browser is
+    // looking at, which is the authority — host and port — and not the
+    // configured URL. Behind a reverse proxy this is only right if the proxy
+    // sets Host; §6.3's HTTPS requirement is where that starts to matter.
+    $issued = $store()->issueSignIn(
+        static fn (string $nonce): array => SignInInput::issue(
+            domain: $uri->getAuthority(),
+            uri: (string) $uri->withPath('/signin')->withQuery('')->withFragment(''),
+            chainId: (string) $auth['chain_id'],
+            statement: (string) $auth['statement'],
+            nonce: $nonce,
+            now: time(),
+            ttlSeconds: (int) $auth['challenge_ttl_s'],
+        )->toArray(),
+        (int) $auth['challenge_ttl_s'],
+    );
+
+    return $json($response, ['input' => $issued['input']]);
+});
+
+$app->post('/signin/verify', function (Request $request, Response $response) use ($json, $store, $config): Response {
+    $body = json_decode((string) $request->getBody(), true);
+    if (!is_array($body)) {
+        return $json($response, ['message' => 'unreadable request'], 400);
+    }
+
+    $nonce = (string) ($body['nonce'] ?? '');
+    $address = (string) ($body['address'] ?? '');
+    $signedMessage = base64_decode((string) ($body['signedMessage'] ?? ''), true);
+    $signature = base64_decode((string) ($body['signature'] ?? ''), true);
+
+    if ($nonce === '' || $address === '' || $signedMessage === false || $signature === false) {
+        return $json($response, ['message' => 'incomplete sign-in'], 400);
+    }
+
+    // Spent first. A verifier that checks the message and only then marks the
+    // nonce used has a window in which the same signature is accepted twice.
+    $issuedJson = $store()->consumeSignIn($nonce);
+    if ($issuedJson === null) {
+        return $json($response, ['message' => 'that sign-in request has expired or was already used; ask for another'], 400);
+    }
+
+    $decoded = json_decode($issuedJson, true);
+    if (!is_array($decoded) || !isset($decoded['nonce'])) {
+        return $json($response, ['message' => 'that sign-in request is unusable; ask for another'], 400);
+    }
+
+    try {
+        (new Verifier())->verify(
+            SignInInput::fromArray($decoded),
+            $address,
+            $signedMessage,
+            $signature,
+            time(),
+        );
+    } catch (SignInException $e) {
+        // The nonce is already spent, deliberately: a failed verification does
+        // not hand back a challenge to try again against.
+        return $json($response, ['message' => $e->getMessage(), 'reason' => $e->reason], 400);
+    }
+
+    $id = $store()->createSession($address, (int) $config->auth()['session_ttl_s']);
+
+    // No redirect: the panel is on the page the reader is already reading.
+    return Session::issue($json($response, ['ok' => true, 'wallet' => $address]), $id, Session::isSecure($request));
+});
+
+/**
+ * §10.4 signs a reader out when they close their contract, and a reader who
+ * simply wants to leave is owed the same thing without one. This drops the
+ * session row and the cookie; it touches nothing on chain.
+ */
+$app->post('/signout', function (Request $request, Response $response) use ($store): Response {
+    $id = Session::idFrom($request);
+    if ($id !== null) {
+        $store()->destroySession($id);
+    }
+
+    return Session::clear($response->withStatus(302)->withHeader('Location', '/'), Session::isSecure($request));
+});
+
+/**
+ * `set_meter` → `authorize`, step two. The server hands over everything the
+ * browser needs to build the pair of instructions and compile the message, and
+ * fetches the blockhash **here**, immediately before the handoff.
+ *
+ * That timing is §6.3's point about mobile: a blockhash has to survive an
+ * application switch, and one fetched when the page rendered has already spent
+ * part of its life. The reader taking thirty seconds in their wallet is the
+ * normal case, not the edge one.
+ */
+$app->post('/meter/prepare', function (Request $request, Response $response) use ($json, $wallet, $read, $payerState, $config, $rpcFactory): Response {
+    $address = $wallet($request);
+    if ($address === null) {
+        return $json($response, ['message' => 'identify first'], 401);
+    }
+
+    $state = $read();
+    if ($state === null) {
+        return $json($response, ['message' => 'this site is not provisioned'], 409);
+    }
+
+    $payer = $payerState($request);
+    if ($payer === null) {
+        return $json($response, ['message' => 'the endpoint did not answer; nothing was signed'], 502);
+    }
+
+    $body = json_decode((string) $request->getBody(), true);
+    $requested = is_array($body) ? (string) ($body['limit'] ?? '') : '';
+
+    try {
+        $limit = Units::toBaseUnits($requested, $payer->decimals);
+    } catch (\Throwable $e) {
+        return $json($response, ['message' => 'that is not an amount'], 400);
+    }
+
+    // The program enforces this and would refuse the transaction, but a reader
+    // should not have to open a wallet dialog to be told a number is too
+    // small (§4.2, and the diagram's "enforce minimum on limit amount" which
+    // sits in `set_meter`, before `authorize`).
+    $floor = $payer->limitFloor();
+    if ($limit < $floor) {
+        return $json($response, [
+            'message' => 'the smallest limit you can set is '.Units::fromBaseUnits($floor, $payer->decimals),
+        ], 400);
+    }
+
+    $addresses = $config->provisioned();
+    $program = $config->program();
+    $blockhash = $rpcFactory()->latestBlockhash();
+
+    return $json($response, [
+        'action' => $payer->hasContract() ? 'renew' : 'open',
+        'programAddress' => $program->id,
+        'tokenProgram' => $program->tokenProgram,
+        'site' => $state->address,
+        'mint' => $addresses['mint'],
+        'payer' => $payer->wallet,
+        'payerTokenAccount' => $payer->tokenAccount,
+        'contract' => $payer->contractAddress,
+        'decimals' => $payer->decimals,
+        // u64 as a string. A JS number loses precision above 2^53 and a
+        // payment library that silently truncates is not one anybody can
+        // audit — the wasm client crosses these as BigInt for the same reason.
+        'limit' => (string) $limit,
+        'allowance' => (string) $payer->requiredAllowance($limit),
+        'blockhash' => $blockhash['blockhash'],
+        'lastValidBlockHeight' => $blockhash['lastValidBlockHeight'] ?? null,
+        'chain' => (string) $config->auth()['chain_id'],
+    ]);
+});
+
+/**
+ * The wallet signed and sent it; this is the server finding out whether it
+ * landed.
+ *
+ * The signature is not taken as proof of anything. What is checked is the
+ * chain: the contract account this site derives for this reader now exists and
+ * says what it should. A signature the browser reports is a claim; an account
+ * is a fact.
+ */
+$app->post('/meter/opened', function (Request $request, Response $response) use ($json, $wallet, $read, $payerState, $rpcFactory, $config): Response {
+    $address = $wallet($request);
+    if ($address === null) {
+        return $json($response, ['message' => 'identify first'], 401);
+    }
+
+    $body = json_decode((string) $request->getBody(), true);
+    $signature = is_array($body) ? (string) ($body['signature'] ?? '') : '';
+    if ($signature === '') {
+        return $json($response, ['message' => 'no signature'], 400);
+    }
+
+    $rpc = $rpcFactory();
+    $deadline = microtime(true) + ((int) $config->rpc()['confirm_timeout_ms']) / 1000;
+    $pollMs = (int) $config->rpc()['confirm_poll_ms'];
+    $confirmed = false;
+    $failed = null;
+
+    while (microtime(true) < $deadline) {
+        $status = $rpc->signatureStatuses([$signature])[0] ?? null;
+        if ($status !== null) {
+            if (($status['err'] ?? null) !== null) {
+                $failed = 'the transaction landed and failed';
+
+                break;
+            }
+            if (in_array($status['confirmationStatus'] ?? '', ['confirmed', 'finalized'], true)) {
+                $confirmed = true;
+
+                break;
+            }
+        }
+        usleep($pollMs * 1000);
+    }
+
+    if ($failed !== null) {
+        return $json($response, ['message' => $failed], 409);
+    }
+
+    $payer = $payerState($request);
+    if ($payer !== null && $payer->hasContract()) {
+        return $json($response, ['ok' => true, 'confirmed' => $confirmed]);
+    }
+
+    // §7.3's shape: sent, not confirmed inside the window, and the account is
+    // not there yet. Not an error and not a success — the reader reloads and
+    // the chain answers.
+    return $json($response, [
+        'ok' => false,
+        'pending' => true,
+        'message' => 'sent, but the contract is not on chain yet; reload in a moment',
+    ], 202);
+});
+
+/**
+ * SPEC §4.3. The site signs this one, so it is a button and not a wallet
+ * interaction — nothing here spends the reader's money.
+ */
+$app->post('/faucet', function (Request $request, Response $response) use ($json, $wallet, $store, $config, $rpcFactory): Response {
+    $address = $wallet($request);
+    if ($address === null) {
+        return $json($response, ['message' => 'identify first'], 401);
+    }
+    if (!$config->isProvisioned()) {
+        return $json($response, ['message' => 'this site is not provisioned'], 409);
+    }
+
+    $rpc = $rpcFactory();
+    $result = (new Faucet($config, new Submitter(
+        $rpc,
+        (int) $config->rpc()['confirm_timeout_ms'],
+        (int) $config->rpc()['confirm_poll_ms'],
+    ), $store()))->grant($address);
+
+    return $json($response, $result, $result['granted'] ? 200 : 409);
 });
 
 /** §10.2: the site carries a page at the URL a privacy policy would occupy. */
@@ -244,6 +668,36 @@ $app->post('/setup', function (Request $request, Response $response) use ($view,
         'steps' => $steps,
         'provisioned' => $provisioned,
     ])));
+});
+
+/**
+ * A workbench, not a screen (§6 lists five and this is none of them).
+ *
+ * Claude reasons from specifications and cannot open a browser; this is where
+ * the browser answers back. `GET` renders the page, `POST` lands what it found
+ * in `var/`, which Claude can read and which git ignores.
+ */
+$app->get('/diagnostics/wallets', function (Request $request, Response $response) use ($view, $shell, $page, $wallet): Response {
+    return $page($response, $shell('Wallet diagnostics', $view->render('diagnostics'), $wallet($request)));
+});
+
+$app->post('/diagnostics/report', function (Request $request, Response $response) use ($json, $config): Response {
+    $body = (string) $request->getBody();
+    if ($body === '' || json_decode($body) === null) {
+        return $json($response, ['message' => 'unreadable report'], 400);
+    }
+
+    $dir = $config->root.'/var/wallet-reports';
+    if (!is_dir($dir) && !mkdir($dir, 0o700, true) && !is_dir($dir)) {
+        return $json($response, ['message' => 'could not create var/wallet-reports'], 500);
+    }
+
+    $name = gmdate('Ymd-His').'.json';
+    if (file_put_contents($dir.'/'.$name, $body."\n") === false) {
+        return $json($response, ['message' => 'could not write the report'], 500);
+    }
+
+    return $json($response, ['path' => 'var/wallet-reports/'.$name]);
 });
 
 /** Operator-facing, and deliberately not keyed to any reader (§10.4). */

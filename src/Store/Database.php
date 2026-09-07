@@ -73,7 +73,11 @@ final class Database
                 nonce      TEXT PRIMARY KEY,
                 issued_at  INTEGER NOT NULL,
                 expires_at INTEGER NOT NULL,
-                used_at    INTEGER
+                used_at    INTEGER,
+                -- The \`SolanaSignInInput\` issued with this nonce. §5 step 3
+                -- checks the signed message against what was issued, so what
+                -- was issued has to outlive the request that issued it.
+                input      TEXT NOT NULL DEFAULT '{}'
             );
 
             -- §7.1. A receipt, not a profile: it answers "has this wallet
@@ -117,5 +121,24 @@ final class Database
                 purchases INTEGER NOT NULL DEFAULT 0
             );
         SQL);
+
+        self::addColumn($pdo, 'signin_nonces', 'input', "TEXT NOT NULL DEFAULT '{}'");
+    }
+
+    /**
+     * \`CREATE TABLE IF NOT EXISTS\` does nothing to a table that already
+     * exists, so a column added after someone has run the site is invisible to
+     * it. This is the whole migration story the demo needs: no versions table,
+     * no down migrations, just the columns that arrived late.
+     */
+    private static function addColumn(PDO $pdo, string $table, string $column, string $definition): void
+    {
+        $stmt = $pdo->prepare('SELECT 1 FROM pragma_table_info(?) WHERE name = ?');
+        $stmt->execute([$table, $column]);
+        if ($stmt->fetch() !== false) {
+            return;
+        }
+
+        $pdo->exec("ALTER TABLE {$table} ADD COLUMN {$column} {$definition}");
     }
 }

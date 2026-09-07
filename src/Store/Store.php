@@ -60,17 +60,49 @@ final class Store
 
     // ---- §5 sign-in nonce ------------------------------------------------
 
-    public function issueNonce(int $ttlSeconds): string
+    /**
+     * @param string $input the \`SolanaSignInInput\` issued with this nonce, as JSON.
+     *                      It is stored rather than recomposed because SPEC §5
+     *                      step 3 compares the signed message against *the input
+     *                      this server issued*, and an input rebuilt at
+     *                      verification time from the current clock is a
+     *                      different input.
+     */
+    public function issueNonce(int $ttlSeconds, string $input = '{}'): string
     {
         $nonce = bin2hex(random_bytes(16));
         $now = $this->now();
         $this->pdo->prepare(
-            'INSERT INTO signin_nonces (nonce, issued_at, expires_at) VALUES (?, ?, ?)'
-        )->execute([$nonce, $now, $now + $ttlSeconds]);
+            'INSERT INTO signin_nonces (nonce, issued_at, expires_at, input) VALUES (?, ?, ?, ?)'
+        )->execute([$nonce, $now, $now + $ttlSeconds, $input]);
 
         return $nonce;
     }
 
+    /**
+     * Issue a sign-in challenge: a nonce, and the input composed around it,
+     * stored together.
+     *
+     * The composition happens inside because the two cannot be separated
+     * safely. The input names the nonce, so the nonce has to exist first; and
+     * a nonce that exists without its input is a challenge a verifier cannot
+     * check against anything. One INSERT, or neither.
+     *
+     * @param callable(string): array<string, mixed> $compose
+     *
+     * @return array{nonce: string, input: array<string, mixed>}
+     */
+    public function issueSignIn(callable $compose, int $ttlSeconds): array
+    {
+        $nonce = bin2hex(random_bytes(16));
+        $input = $compose($nonce);
+        $now = $this->now();
+        $this->pdo->prepare(
+            'INSERT INTO signin_nonces (nonce, issued_at, expires_at, input) VALUES (?, ?, ?, ?)'
+        )->execute([$nonce, $now, $now + $ttlSeconds, json_encode($input, JSON_UNESCAPED_SLASHES)]);
+
+        return ['nonce' => $nonce, 'input' => $input];
+    }
     /**
      * True exactly once per nonce, and never after it expires. Both halves
      * matter: SPEC §5 step 3 says a verifier that checks neither accepts a
@@ -84,6 +116,29 @@ final class Store
         $stmt->execute([$this->now(), $nonce, $this->now()]);
 
         return $stmt->rowCount() === 1;
+    }
+
+    /**
+     * Consume the nonce and hand back the input it was issued with, or null if
+     * the nonce is unknown, already used, or expired.
+     *
+     * One call rather than two, because the two have to be indivisible: a
+     * verifier that reads the input, does its checks, and only then marks the
+     * nonce used has a window in which the same signed message is accepted
+     * twice. Here the nonce is spent first and the input is a consequence of
+     * having spent it.
+     */
+    public function consumeSignIn(string $nonce): ?string
+    {
+        if (!$this->consumeNonce($nonce)) {
+            return null;
+        }
+
+        $stmt = $this->pdo->prepare('SELECT input FROM signin_nonces WHERE nonce = ?');
+        $stmt->execute([$nonce]);
+        $row = $stmt->fetch();
+
+        return $row === false ? null : (string) $row['input'];
     }
 
     // ---- §7.1 view grants ------------------------------------------------

@@ -1,0 +1,5 @@
+ The smallest limit you can set is 0.5 DEMO.
+
+Authorize
+
+your wallet is on a different account than the one this site identified; reconnect

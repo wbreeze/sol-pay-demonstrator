@@ -237,19 +237,79 @@ The library takes a wallet address and is silent about where it came from
 With Solana** over a server session, because §6.6 recommends exactly that and
 ships none of it. The missing worked example is the one this repository owes.
 
+**Decided 2026-09-05: `signIn`, and no fallback.** A wallet that does not
+offer the Wallet Standard `signIn` feature is not supported here, and the
+meter panel says so and names a wallet that does. A demonstration is
+entitled to require its dependencies; a product is not, and the difference is
+worth stating rather than blurring. The consequences are in "What requiring it
+costs" below.
+
+**Decided 2026-09-07: there is no sign-in screen.** Identifying happens inside
+the meter panel on the article, one click before the limit.
+
+Two reasons, and the first is that sol-pay's own diagram never had one.
+`state-machine.plantuml` has no sign-in node: `identified` is a `<<choice>>`,
+and "viewer not identified" goes straight to `set_meter`. The screen was this
+document's addition, and §6 admitted as much.
+
+The second is the site's own argument. A page whose only purpose is to collect
+an identity reads as identifying for tracking, which is the thing §10 disputes.
+The identification here is real but narrow — one address, one session id — and
+putting it where the money is about to move is what makes the narrowness
+visible. A reader who declines has lost nothing and is still reading the lede.
+
+**What was not dropped is the signature.** It is tempting, with no screen, to
+let the contract itself be the identity: the browser reports the signature of
+the transaction that opened it, and the server reads the payer off the account.
+That is not authentication. Signatures are public, so anyone watching the
+cluster could claim another reader's contract and read against their limit.
+First-claim-wins narrows the window to about a second and does nothing at all
+for renewals; a race is not a boundary. So the wallet still signs something the
+server issued, and everything below is unchanged.
+
+The cost is **two wallet dialogs on a first visit** — one proving who you are,
+one authorizing the spend — behind two clicks rather than one. No wallet offers
+both in a single prompt, and after the first `await` the second call is no
+longer inside a user gesture, which §6.3 records as an outright blocker on
+Android. One dialog per click is also the more honest description of what is
+happening.
+
 The flow, all of it outside sol-pay:
 
 1. Server generates a nonce, stores it against the pending sign-in with an
-   expiry, and builds the SIWS message: domain, address, statement, uri,
-   version, chainId, nonce, issuedAt, expirationTime.
-2. Wallet displays and signs it, through the Wallet Standard `signIn` feature
-   where present and connect-plus-`signMessage` over the same bytes where it is
-   not. §6.6 notes Phantom has had `signIn` since extension 23.11.0; the
-   fallback exists for everything older and for wallets that never added it.
-3. Server verifies the signature against the message it issued, checks the
-   nonce is one it generated and has not seen used, and **checks
-   `expirationTime`**. A verifier that skips the expiry accepts a replay
-   forever.
+   expiry, and composes the **`signInInput`** — domain, statement, uri,
+   version, chainId, nonce, issuedAt, expirationTime. **`address` is omitted**
+   (amended 2026-09-07): a first-time reader has not connected, so the server
+   does not know it, and asking for it would mean `connect` and *then*
+   `signIn` — the two-gesture flow this section dropped the fallback to avoid.
+   The wallet fills it in, and step 3 binds it. Note what this is
+   not: it is a set of fields, not a message. `signIn` "shifts the
+   responsibility of message construction from apps to the wallet", in
+   Phantom's words, and the SIWS specification is explicit that "the wallet
+   constructs a message in the ABNF format using the message parameter
+   strings".
+2. Wallet constructs the message from those fields, displays it, and signs it.
+   `signInOutput` returns three things: the `account`, the `signedMessage`
+   bytes, and the `signature`.
+3. Server verifies the signature over **the bytes the wallet returned** — not
+   over anything the server composed, because it composed no message — then
+   parses that message and checks every field against the input it issued:
+   domain, uri, version, chainId, nonce, `issuedAt` and `expirationTime`. The
+   **address** is the one field the server did not issue, so it is checked
+   against the account the wallet returned instead: the message must name the
+   wallet that signed it. It checks the nonce is one it generated and has not
+   seen used, and **checks `expirationTime`**. A verifier that skips the expiry
+   accepts a replay forever; a verifier that skips the field comparison accepts
+   a signature over a message about somebody else's domain.
+
+   Then one check this section did not originally require (added 2026-09-07):
+   the parsed fields are **re-rendered and must equal the signed bytes
+   exactly**. Field equality alone accepts a message carrying the right fields
+   with extra content around them; byte equality does not. Against a wallet
+   that builds the canonical text this recovers most of what the dropped
+   `signMessage` fallback would have given for free, and against one that does
+   not it is a clear refusal rather than a silent acceptance — which is the
+   direction a second implementation of a byte-exact format should fail in.
 4. Server sets a session cookie holding the verified wallet address. Session
    cookie, `HttpOnly`, `SameSite=Lax`, `Secure`, no persistent "remember me".
 
@@ -260,11 +320,45 @@ entitled to that argument if the cookie actually behaves that way. It carries a
 session id and nothing else. (Not legal advice; an integrator's counsel
 decides.)
 
-Neither the message construction nor the verification is written here. §6.6
-names what to use — `@solana/wallet-standard-util`'s `verifySignIn` in the
-browser, an existing `siws` crate on the server — and the reason is that two
-implementations of one byte-exact format disagree eventually. The demo takes
-that advice rather than demonstrating the thing the library declined to ship.
+**The verification is written here, and §6.6's advice does not reach this
+server.** It names `@solana/wallet-standard-util`'s `verifySignIn` for the
+browser and an existing `siws` crate for the server, and its reason is sound —
+two implementations of one byte-exact format disagree eventually. But that was
+written for a Rust server, and §12.1 chose PHP, which has no such crate.
+Deferring is not available, so the parser is written here, and it is the worked
+example the 70% §12.1 exists to reach cannot get anywhere else.
+
+`verifySignIn` in the browser is not used either, and would add nothing: the
+browser is not the party that needs convincing. A page that verifies its own
+wallet's response and then asks the server to trust the result has verified
+nothing.
+
+### What requiring it costs
+
+Stated plainly, because the decision to drop the fallback is what buys them.
+
+- **Wallet availability is narrower than it looks.** The SIWS specification's
+  own note says support is "currently only … Phantom extension (version
+  >=23.11.0)", and Phantom's page says mobile support is coming rather than
+  shipped. Other wallets may have added the feature since; that is a claim to
+  verify against a wallet, not to assume. The panel therefore feature-detects,
+  names what it was tested against, and refuses clearly rather than failing
+  obscurely. **Measured 2026-09-07:** Phantom's extension in Firefox 155 offers
+  `solana:signIn`, and the message it builds is byte-identical to the canonical
+  text — so the desktop half of this doubt is now settled by observation rather
+  than by a vendor's note.
+- **§6.3's mobile paths are affected and the resolution is deferred.** The
+  Android table there assumes `signIn` with a fallback for wallets that lack
+  it, and iOS depends on whichever wallet's in-app browser the reader arrives
+  in. If those wallets do not offer `signIn`, mobile does not sign in at all.
+  This is not resolvable from a desk: it needs a device and a wallet build, and
+  it is the first thing §6.3 should test.
+- **The fallback that was dropped was the stronger check.** `connect` plus
+  `signMessage` over server-composed bytes would have been verified
+  byte-for-byte, with no parser in existence to disagree. Requiring `signIn`
+  means the format risk §6.6 warns about is taken on deliberately, in exchange
+  for one user gesture instead of two and for demonstrating the feature the
+  ecosystem actually recommends.
 
 **The session is the viewer-to-wallet map.** That is the integrator's one
 obligation (§4.1), and in this demo it is a cookie and a session store. A
@@ -273,17 +367,19 @@ nothing else in this design would change.
 
 ## 6. The viewer's path
 
-Five screens. Three of them are the cyan nodes in the sol-pay state diagram;
-the other two exist because a demo needs a front door and a wallet needs a
-sign-in.
+Four screens. Three of them are the cyan nodes in the sol-pay state diagram;
+the fourth exists because a demo needs a front door.
+
+**There were five (2026-09-07).** The sign-in screen is gone, and identifying
+now happens inside `set_meter` — see §5 for why, and note that the state
+diagram never had a sign-in node to begin with.
 
 | screen | reached when | the payer signs |
 | --- | --- | --- |
 | index | always public | — |
-| sign in | no session | the SIWS message |
 | faucet | asked for, once per wallet | — (the site pays) |
 | faucet confirm | from the faucet screen | — |
-| `set_meter` | session, no contract | `approve_and_open` |
+| `set_meter` | on a metered article, no contract | the SIWS message if not yet identified, then `approve_and_open` |
 | `metered_page` | session, contract, `can_meter` passes | — |
 | `manage_meter` | limit reached, or navigated to at any time | `approve_and_renew` or `close_and_revoke` |
 | privacy | always public | — |
@@ -341,7 +437,7 @@ It is not one extra path. It is two, and they share almost nothing.
 | mechanism | Mobile Wallet Adapter, from mobile Chrome | none — the page must be opened *inside* a wallet's own browser |
 | library | `@solana-mobile/wallet-standard-mobile`, `registerMwa()` | nothing; the in-app browser injects a Wallet Standard provider |
 | how the reader arrives | normally | a user-clicked "open in Phantom / Solflare" link |
-| SIWS `signIn` | supported | feature-detect, fall back to `connect` + `signMessage` |
+| SIWS `signIn` | required (§5); untested on a device | required (§5); depends on the wallet browser the reader arrives in |
 
 **Android.** MWA registers as a Wallet Standard wallet and the rest of the
 integration is the desktop one. Four constraints that are not obvious and each
@@ -357,7 +453,9 @@ of which breaks the flow outright:
 - **Every wallet call must originate from a real user gesture.** Android
   Chrome's trusted-event policy blocks the intent navigation otherwise, which
   rules out connecting from an effect on page load — and is a second reason to
-  use `signIn`, which is one gesture rather than connect-then-sign.
+  use `signIn`, which is one gesture rather than connect-then-sign — and §5
+  now requires it outright, which makes verifying that the mobile wallets offer
+  it the first thing to test on a device.
 - **Register it client-side only**, never during server rendering.
 
 **iOS has no Mobile Wallet Adapter and is not going to have one soon.** MWA
@@ -1251,27 +1349,88 @@ it anyway: Mobile Wallet Adapter, the wallet adapters, and the in-app browser
 providers are all JavaScript, so a JavaScript layer exists no matter what. Going
 with convention means one layer instead of two with a boundary between them.
 
-*Remaining, and genuinely open:* whether rendering is server-side with
-JavaScript only where the wallet is involved, or a full client framework. §7's
-constraint stands either way — the metered body is delivered by the server after
-a successful meter, never fetched by the client afterwards.
+**Decided 2026-09-05: server-rendered, with ES modules only where the wallet
+is involved.** No client framework.
+
+Two decisions already made take the work a framework would do away from the
+browser. §12.4 puts RPC on the server, so the page needs no RPC client — which
+is most of what a modern Solana SDK is for. §7 requires the metered body to be
+delivered by the server after a successful meter and never fetched afterwards,
+so the article route cannot be a client-side render whatever else is true. What
+is left for JavaScript is the wallet: discover it, sign in, and sign three
+transactions. That is a script on two screens, not an application.
+
+### What the browser loads, and from where
+
+§10.3 forbids loading anything from a domain this site does not control, and
+§12.0 promises one language runtime. Both hold, because neither dependency
+needs a build step:
+
+- **sol-pay's npm package** is `wasm-pack --target web` output — plain ESM plus
+  a `.wasm` file. `pkg/sol_pay_client.js` imports directly from a
+  `<script type="module">` and `init()` fetches the wasm beside it. Copied into
+  `public/vendor/`.
+- **`@solana/kit`** publishes `dist/index.production.min.js`: a self-contained
+  IIFE, ~221 KB minified, no bare specifiers, exposing `globalThis.solanaWeb3`.
+  One `<script src>` from this origin. Checked 2026-09-05 — the ESM build
+  (`index.browser.mjs`, 23 KB) is only an aggregator over fifteen sibling
+  `@solana/*` packages, so vendoring *that* would mean an import map over the
+  whole graph. The bundle avoids it.
+
+**Both are committed**, which is a deliberate exception to the rule that
+generated output stays out of the repository (§12.7 puts the rendered content
+under `var/`). The reasoning differs: rendered content is this repository's own
+output and rebuilding it costs one command, while these are third-party
+artifacts whose absence would put npm, a lockfile and a bundler between a clone
+and a running page. A vendored file is also the only form §10.3 permits, since
+the alternative is a CDN.
+
+**A cheaper bundle is available later and is not worth chasing now.** This site
+uses kit for one thing — compiling a transaction message — and 221 KB is most
+of an SDK. Trimming it means vendoring the two or three `@solana/*` packages
+that actually matter and writing the import map the aggregator would have
+needed, which is a size optimisation on a demo, not a correctness question.
 
 ### 12.3 Wallet integration
 
-*Constraints.* Must support the `signIn` feature and fall back to connect plus
-`signMessage` (§5). Must sign a two-instruction transaction in order.
+*Constraints.* Must support the Wallet Standard `signIn` feature, which §5
+requires with no fallback. Must sign a two-instruction transaction in order.
 
-*Options.* Wallet Standard directly, or `@solana/wallet-adapter` for the
-multi-wallet UI. Plus the SIWS verification pair: `@solana/wallet-standard-util`
-in the browser and a `siws` crate on the server, per §6.6 — that half is
-recommended rather than open.
+**Decided 2026-09-05: Wallet Standard directly, and `@solana/kit` for one
+job.** `@solana/wallet-adapter` is not used.
 
-*One thing to check before choosing.* Solana's own frontend documentation now
-describes `@solana/wallet-adapter` and web3.js v1 as legacy, pointing new work
-at `@solana/kit` with Wallet Standard discovery. Wallet-adapter is not
-deprecated and remains the reference for its stack, but picking it in 2026 is
-picking the older of two supported paths, and §6.3's Android requirements
+*Why not wallet-adapter.* Solana's own frontend documentation now says plainly
+that "web3.js v1 and wallet-adapter are legacy" and that new work should prefer
+`@solana/kit` with Wallet Standard discovery. Choosing it in 2026 would be
+choosing the older of two supported paths, and §6.3's Android requirements
 impose their own version floors on it.
+
+*Why no wallet library at all for discovery.* Wallet Standard discovery is two
+`window` events: the page dispatches `wallet-standard:app-ready` carrying a
+`register` function and listens for `wallet-standard:register-wallet`, whose
+detail is a callback the page invokes with that API. `@wallet-standard/app` is
+a wrapper over those two lines. Once a wallet has registered, `connect`,
+`signIn`, `signMessage` and `signAndSendTransaction` are functions it supplied.
+Reaching them costs no dependency.
+
+*What kit is actually for.* Exactly one thing: `signAndSendTransaction` takes
+**serialized transaction bytes**, and sol-pay ships no message compilation in
+any language on purpose (`wasm-client/SPEC.md` §7 — `core::tx` pairs
+instructions in the order the program requires, which is ordering and not wire
+format). Something has to compile the message, and in the browser that is kit.
+
+*The alternative that was rejected, and why it is tempting.* This server now
+compiles messages in PHP, devnet-proven, and `Tx::wire` accepts placeholder
+signatures — so the server could hand the browser finished bytes and the page
+would need no npm at all. It is rejected on two grounds. `php-client`
+deliberately omits the payer-signed instructions (`open_contract`,
+`renew_contract`, `close_contract`, `approve_checked`, `revoke`) because a
+wallet adapter signs them in the browser regardless of what the server runs, so
+this route reopens a settled decision in the library and grows it. And the
+demonstrator would then never exercise the npm package, which is half of §3's
+two consumers and half of what an integrator comes here to read. Reusing code
+because it exists is not a reason to move a boundary the library drew
+deliberately.
 
 ### 12.4 RPC — decided
 
@@ -1390,12 +1549,11 @@ way, and an unreachable branch is an untested one.
 The demo is done when a person who has never seen it can do all of this from a
 link, in one sitting, with no instructions beyond what the site tells them:
 
-1. Sign in with their wallet, and see their address in the inspector under an
-   alias they can read.
-2. Reach the faucet, read what it is about to do, confirm it, and see 0.05 SOL
-   and 0.60 DEMO arrive.
-3. Open an article, meet `set_meter`, choose a limit at or above the floor of
-   0.50, and sign once.
+1. Open an article, meet the meter beside the lede, connect a wallet from it,
+   and see their address in the inspector under an alias they can read.
+2. Be offered the faucet in the same panel, read what it is about to do,
+   confirm it, and see 0.05 SOL and 0.60 DEMO arrive.
+3. Choose a limit at or above the floor of 0.50, and sign once.
 4. Read that article and nine more without a single further wallet interaction.
 5. Watch the tenth view settle, and open the transfer on the explorer.
 6. Advance the meter with the seven-view control, and see the settle fire on
@@ -1446,25 +1604,50 @@ is stingy.
 
 The design questions raised in the first draft are closed. The site is
 **Newsprint** (§1, renamed from Penny Press on 2026-09-05, with the naming
-argument kept as a working note); the faucet is a two-step screen (§4.3); `manage_meter` is
-reachable at any time (§6); mobile is in scope (§6.3); the inspector is
-per-request and addresses carry aliases (§9); the front end is conventional
-JavaScript (§12.2); and closing a contract erases the site's record of the
-reader (§10.4), which subsumes the grant-after-close case.
+argument kept as a working note); the faucet is a two-step screen (§4.3);
+`manage_meter` is reachable at any time (§6); mobile is in scope (§6.3); the
+inspector is per-request and addresses carry aliases (§9); the front end is
+conventional JavaScript, server-rendered (§12.2); identifying happens in the
+meter panel rather than on a screen of its own (§5 and §6, amended 2026-09-07);
+and closing a contract erases the site's record of the reader (§10.4), which
+subsumes the grant-after-close case.
 
-**§12 is now closed as well.** The server language was the last of it: both
-spikes passed, and the decision went to PHP with Slim 4 on reach (§12.1).
-§12.5 was revised in the same pass, from an in-memory store to SQLite, because
-PHP is share-nothing per request and the original could not survive the
-language choice.
+**§12 is now closed as well**, and it took two passes rather than one. The
+server language went to PHP with Slim 4 on reach (§12.1), and §12.5 was revised
+in the same pass from an in-memory store to SQLite, because PHP is
+share-nothing per request and the original could not survive the language
+choice. §12.2 and §12.3 were closed later, on 2026-09-05: server-rendered pages
+with ES modules only at the wallet, Wallet Standard directly rather than
+`@solana/wallet-adapter`, and `@solana/kit` vendored as a single self-contained
+file for the one job the browser cannot avoid — compiling a transaction
+message.
+
+Closing those two answered a question **this document never asked**, which is
+worth recording as a lesson about the shape of §12: §12.0 promised one language
+runtime, §12.2 wanted an npm package in the browser, and §10.3 forbade loading
+it from a CDN. Nothing in §12 required anyone to notice that those three
+constraints have to be satisfied *together*, and they nearly cost a bundler and
+a second toolchain. They are compatible only because both dependencies ship a
+form that needs no build step, which was a fact to check rather than a thing to
+assume.
 
 What is genuinely still open:
 
 **The site authority key**, tabled at §15.
 
+That is the only one left on this list, but §5 closed with a **risk rather than
+a resolution**, and it should be read as such: requiring `signIn` with no
+fallback narrows the demo to wallets that offer the feature, and the only
+primary source found says that is Phantom's extension, with its mobile support
+described as coming rather than shipped. The desktop half has since been
+settled by measurement (§5, 2026-09-07); whether §6.3's Android and iOS paths
+can sign in at all is still unknown until someone tries it on a device.
+That is a test, not a decision, which is why it is not a §14 question — but it
+is the one that could send §5 back here.
+
 That is the whole list. The grant lifetime was on it and is now settled at
 thirty minutes for the reasons in §7.1; the platform choice was on it and is
-settled at §12.1.
+settled at §12.1; the front end was on it and is settled at §12.2 and §12.3.
 
 ## 15. Deferred: the site authority key
 

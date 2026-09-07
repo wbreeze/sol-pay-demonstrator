@@ -1,5 +1,9 @@
-SPEC.pdf
-handoff
-vendor
-var
-.phpunit.result.cache
+# Anchored to the repository root, all of them, and that is not cosmetic:
+# an unanchored `vendor` also ignores `public/vendor`, which SPEC §12.2
+# requires to be committed. The rule would have hidden the two vendored files
+# from git with no error anywhere.
+/SPEC.pdf
+/handoff/
+/vendor/
+/var/
+/.phpunit.result.cache
