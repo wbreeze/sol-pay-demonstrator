@@ -89,10 +89,10 @@ $read = static function () use ($config, &$state, &$stateError): ?SiteState {
 };
 
 $panel = new Inspector($config);
-$inspector = static function () use ($panel, $read, &$stateError): array {
+$inspector = static function (?PayerState $payer = null) use ($panel, $read, &$stateError): array {
     $state = $read();
 
-    return $panel->sections($state, $stateError);
+    return $panel->sections($state, $stateError, $payer);
 };
 
 /**
@@ -167,6 +167,15 @@ $rpcFactory = static function () use ($config): Rpc {
  * the site remembers nothing else.
  */
 $payerState = static function (Request $request) use ($wallet, $read, $config, $rpcFactory): ?PayerState {
+    // One read per request. The meter panel asks, and so does the inspector,
+    // and §12.4 budgets about three RPC calls per metered view rather than six.
+    static $done = false;
+    static $payer = null;
+    if ($done) {
+        return $payer;
+    }
+    $done = true;
+
     $address = $wallet($request);
     $state = $read();
     if ($address === null || $state === null) {
@@ -174,10 +183,12 @@ $payerState = static function (Request $request) use ($wallet, $read, $config, $
     }
 
     try {
-        return (new PayerReader($config, $rpcFactory()))->read($address, $state);
+        $payer = (new PayerReader($config, $rpcFactory()))->read($address, $state);
     } catch (RpcException|DecodeException $e) {
-        return null;
+        $payer = null;
     }
+
+    return $payer;
 };
 
 /**
@@ -281,11 +292,14 @@ $page = static function (Response $response, string $html, int $status = 200) us
     return $response->withStatus($status)->withHeader('Content-Type', 'text/html; charset=utf-8');
 };
 
-$shell = static function (string $title, string $content, ?string $wallet = null) use ($view, $inspector): string {
+$shell = static function (string $title, string $content, ?string $wallet = null, ?PayerState $payer = null) use ($view, $inspector): string {
     return $view->render('layout', [
         'title' => $title,
         'content' => $content,
-        'inspector' => $inspector(),
+        // The reader's own accounts appear in the inspector only where a page
+        // has already read them. A page with nothing to say about them does
+        // not spend an RPC call to say nothing.
+        'inspector' => $inspector($payer),
         'wallet' => $wallet,
     ]);
 };
@@ -317,7 +331,7 @@ $app->get('/', function (Request $request, Response $response) use ($view, $shel
     ]), $wallet($request)));
 });
 
-$app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $siteVars, $wallet, $meterVars): Response {
+$app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $siteVars, $wallet, $meterVars, $payerState): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -338,7 +352,7 @@ $app->get('/a/{slug}', function (Request $request, Response $response, array $ar
         'body' => $body,
         'site' => $siteVars(),
         'meter' => $meterVars($request),
-    ]), $wallet($request)));
+    ]), $wallet($request), $payerState($request)));
 });
 
 /**
@@ -610,7 +624,7 @@ $app->get('/meter', function (Request $request, Response $response) use ($view, 
             'stage' => 'no-contract',
             'site' => $siteVars(),
             'wallet' => $address,
-        ]), $address));
+        ]), $address, $payer));
     }
 
     $contract = $payer->contract;
@@ -635,11 +649,16 @@ $app->get('/meter', function (Request $request, Response $response) use ($view, 
         'blocked' => $blocked?->reason,
         'limit_floor' => Units::fromBaseUnits($payer->limitFloor(), $decimals),
         'balance' => Units::fromBaseUnits($payer->balance(), $decimals),
+        // The delegate, which is the whole of what authorizing gave away, and
+        // which a wallet will show a balance without ever mentioning.
+        'token_account' => $payer->tokenAccount,
+        'delegate' => $payer->funds?->delegate,
+        'approved' => Units::fromBaseUnits($payer->funds?->delegatedAmount ?? 0, $decimals),
         // §10.4 qualification 2: the reader is told what closing costs them
         // *before* they click, and told the true number rather than "an
         // article".
         'live_grants' => $store()->liveGrantCount($address),
-    ]), $address));
+    ]), $address, $payer));
 });
 
 /**
@@ -742,6 +761,11 @@ $app->post('/meter/close/done', function (Request $request, Response $response) 
         'confirmed' => $confirmed,
         'signature' => $signature,
         'erased' => $erased,
+        // Read back from the token account after the close, not asserted: this
+        // is the line claim 6 in §2 is actually about, and it is the one a
+        // wallet is least likely to show the reader itself.
+        'delegate' => $payer->funds?->delegate,
+        'tokenAccount' => $payer->tokenAccount,
     ]), Session::isSecure($request));
 });
 

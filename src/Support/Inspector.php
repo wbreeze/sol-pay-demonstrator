@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Newsprint\Support;
 
+use Newsprint\Chain\PayerState;
 use Newsprint\Chain\SiteState;
 use SolPay\Core\Units;
 
@@ -29,7 +30,7 @@ final class Inspector
     /**
      * @return list<array{heading: string, rows: list<array{0: string, 1: string}>, note?: string}>
      */
-    public function sections(?SiteState $state = null, ?string $error = null): array
+    public function sections(?SiteState $state = null, ?string $error = null, ?PayerState $payer = null): array
     {
         $program = $this->config->program();
         $params = $this->config->siteParams();
@@ -133,7 +134,69 @@ final class Inspector
             ];
         }
 
+        if ($payer !== null) {
+            $sections[] = $this->reader($payer, $amount);
+        }
+
         return $sections;
+    }
+
+    /**
+     * You, on chain.
+     *
+     * **The delegate is the row that matters and the one nothing else shows.**
+     * `approve_checked` names this site's contract PDA as the delegate on the
+     * reader's token account and sets how much it may draw; `revoke` clears
+     * both. That is the whole of what authorizing gave away and the whole of
+     * what closing takes back — and a wallet will happily show a balance
+     * without ever mentioning it.
+     *
+     * So it is here, read from the account on every request, in both unit
+     * forms, beside the address a reader can paste into any explorer. Claim 6
+     * in §2 is only checkable if the thing it is about is visible somewhere.
+     *
+     * @param callable(int): string $amount both unit forms, at the mint's own decimals
+     *
+     * @return array{heading: string, rows: list<array{0: string, 1: string}>, note?: string}
+     */
+    private function reader(PayerState $payer, callable $amount): array
+    {
+        $rows = [
+            [Alias::for(Alias::PAYER, $payer->wallet), $payer->wallet],
+            [Alias::for(Alias::PAYER_TOKEN_ACCOUNT, $payer->tokenAccount), $payer->tokenAccount],
+        ];
+
+        if ($payer->funds === null) {
+            $rows[] = ['token account', 'does not exist yet — the faucet creates it'];
+        } else {
+            $rows[] = ['balance', $amount($payer->funds->amount)];
+            $rows[] = [
+                'delegate',
+                $payer->funds->delegate === null
+                    ? 'none — nothing may draw from this account'
+                    : Alias::for(Alias::CONTRACT, $payer->funds->delegate).'  '.$payer->funds->delegate,
+            ];
+            $rows[] = ['approved', $amount($payer->funds->delegatedAmount)];
+        }
+
+        if ($payer->contract === null) {
+            $rows[] = ['contract', 'none — the address is derived, the account is not there'];
+        } else {
+            $rows[] = [Alias::for(Alias::CONTRACT, $payer->contractAddress), $payer->contractAddress];
+            $rows[] = ['limit', $amount($payer->contract->limit)];
+            $rows[] = ['used', $amount($payer->contract->used)];
+            $rows[] = ['paid', $amount($payer->contract->paid)];
+            $rows[] = ['unpaid', $amount($payer->contract->unpaid())];
+        }
+
+        return [
+            'heading' => 'You, on chain',
+            'rows' => $rows,
+            'note' => 'The delegate line is what authorizing gave this site and what closing takes back. '
+                .'It lives on your token account, not in the contract, and most wallets never show it — so it '
+                .'is here, read back from the account on every request, and the address beside it is the one to '
+                .'paste into an explorer if you would rather not take this page\'s word for it.',
+        ];
     }
 
     /** @param array<string, int|string> $params @return array{heading: string, rows: list<array{0: string, 1: string}>} */

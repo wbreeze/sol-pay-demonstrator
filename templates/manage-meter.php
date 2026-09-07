@@ -66,6 +66,17 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
             <tr><th scope="row">settled</th><td><?= View::e((string) $contract['paid']) ?> <?= $symbol ?></td></tr>
             <tr><th scope="row">unpaid</th><td><?= View::e((string) $contract['unpaid']) ?> <?= $symbol ?> — carried, not owed until it settles</td></tr>
             <tr><th scope="row">balance</th><td><?= View::e((string) $balance) ?> <?= $symbol ?></td></tr>
+            <tr>
+                <th scope="row">delegate</th>
+                <td>
+<?php if ($delegate === null): ?>
+                    none — nothing may draw from your token account
+<?php else: ?>
+                    <code><?= View::e(substr((string) $delegate, 0, 4).'…'.substr((string) $delegate, -4)) ?></code>
+                    may draw up to <?= View::e((string) $approved) ?> <?= $symbol ?>
+<?php endif ?>
+                </td>
+            </tr>
 <?php if ($views_remaining !== null): ?>
             <tr><th scope="row">views left</th><td><?= View::e((string) $views_remaining) ?></td></tr>
 <?php endif ?>
@@ -77,6 +88,36 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
             Renewing raises the limit; closing ends it.
         </p>
 <?php endif ?>
+
+        <?php /* The delegate is the whole of what authorizing gave away, and
+                 §2's claim 6 is about it — but it lives on the SPL token
+                 account rather than in the contract, and a wallet will show a
+                 balance without ever mentioning it. So the site shows it, and
+                 then points somewhere the site does not control.
+
+                 The explorer link is a link, not a resource this page loads:
+                 §10.3 forbids the second and says nothing about the first. */ ?>
+        <details class="fine">
+            <summary>What "delegate" means, and how to check it yourself</summary>
+            <p>
+                Authorizing did two things. It created a contract account, and
+                it named that contract as a <strong>delegate</strong> on your
+                token account, allowed to draw up to the limit you chose.
+                Closing removes both — that is what <code>revoke</code> is for.
+            </p>
+            <p>
+                The delegate is a field on the token account, not on the
+                contract, and most wallets never display it. Rather than ask
+                you to take this page's word for it, here is the account:
+            </p>
+            <p>
+                <code><?= View::e((string) $token_account) ?></code><br>
+                <a href="https://explorer.solana.com/address/<?= View::e((string) $token_account) ?>?cluster=devnet"
+                   rel="noreferrer noopener" target="_blank">Open it on the Solana explorer</a>
+                and look for the delegate. Before you close it names this site's
+                contract; afterwards there should be none.
+            </p>
+        </details>
 
         <div data-controls>
             <h2>Raise the limit</h2>

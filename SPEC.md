@@ -82,11 +82,21 @@ one of these, it has failed, whatever else it does.
 | 3 | The site charges only when a charge is worth making | The settle fires on the tenth view, not the first |
 | 4 | The payer's exposure is bounded by a number they chose | The limit stops metering, on chain, and the demo shows the block |
 | 5 | Reaching the limit is an ordinary screen, not an error | `manage_meter` offers renew or close |
-| 6 | Leaving costs nothing and leaves nothing behind | `close_and_revoke`, and the wallet shows no delegate afterwards |
+| 6 | Leaving costs nothing and leaves nothing behind | `close_and_revoke`, and the payer's token account shows no delegate afterwards — in the inspector, and on any explorer |
 | 7 | Every number on the screen came from an account, not from the server's memory | The inspector shows the decode beside the render |
 
 Claim 7 is the one that makes the other six credible. A demo that reports its
 own state proves nothing; this one reports what it read.
+
+**Claim 6 named the wrong witness until 2026-09-07**, and it is worth saying
+why rather than quietly editing it. It read "the wallet shows no delegate
+afterwards". It does not: the delegate is two fields on the payer's **SPL token
+account** — `delegate` and `delegated_amount` — and a wallet shows balances.
+Tested against Phantom, the reader could not perform the check the claim
+required. So the claim now points at the account, which §9 was already going to
+decode, and at an explorer, so the check does not depend on this site's own
+rendering either. A falsifiable claim whose test nobody can run is not
+falsifiable.
 
 ## 3. Shape
 
@@ -1570,7 +1580,8 @@ link, in one sitting, with no instructions beyond what the site tells them:
 7. Be blocked on the eighth click at 0.49 against a limit of 0.50, and land on
    `manage_meter` rather than an error.
 8. Renew at 0.50, and see `used` carry 0.07 forward while `paid` resets to zero.
-9. Close and revoke, and confirm in their wallet that no delegate remains.
+9. Close and revoke, and confirm on the token account — in the inspector, and
+   on an explorer — that no delegate remains.
 10. At every step, open the inspector and find the account field that explains
     what they just saw.
 
