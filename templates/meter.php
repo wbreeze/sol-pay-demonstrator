@@ -20,6 +20,7 @@
  * @var array<string, int|string> $site
  */
 use Newsprint\Support\View;
+use SolPay\Core\Units;
 
 $symbol = View::e((string) $meter['symbol']);
 $contract = $meter['contract'];
@@ -120,6 +121,53 @@ $contract = $meter['contract'];
 
     <p>
         <button type="button" class="wallet" data-authorize>Authorize</button>
+    </p>
+
+<?php elseif ($meter['stage'] === 'failed'): ?>
+    <?php /* §8.2. `InsufficientFunds` is ambiguous by construction: SPL
+             reports a short balance and a short allowance identically and the
+             two need opposite responses, so the site reads the account rather
+             than guessing from the code. Both can be short at once, and then
+             both are shown in this order — a re-approval the balance cannot
+             cover fixes nothing. */ ?>
+    <h2>The charge did not go through</h2>
+<?php $shortfall = $meter['result']?->shortfall; ?>
+<?php if ($shortfall !== null && $shortfall->balanceShort > 0): ?>
+    <p>
+        Your balance is short by
+        <?= View::e(Units::fromBaseUnits($shortfall->balanceShort, (int) $meter['decimals'])) ?>
+        <?= $symbol ?>. On a real site this is where it would say "top up"; here
+        the faucet is the top-up, if this wallet has not already had its one grant.
+    </p>
+<?php if ($meter['faucet']['available']): ?>
+    <p><button type="button" class="wallet" data-faucet>Send me <?= View::e((string) $meter['faucet']['demo']) ?> <?= $symbol ?></button></p>
+<?php endif ?>
+<?php endif ?>
+<?php if ($shortfall !== null && $shortfall->allowanceShort > 0): ?>
+    <p>
+        The amount you approved no longer covers what is owed — short by
+        <?= View::e(Units::fromBaseUnits($shortfall->allowanceShort, (int) $meter['decimals'])) ?>
+        <?= $symbol ?>. Renewing re-approves.
+    </p>
+    <p><a href="/meter">Renew the meter</a></p>
+<?php endif ?>
+<?php if ($shortfall !== null && !$shortfall->delegatePresent): ?>
+    <p>
+        This site is no longer a delegate on your token account — the approval
+        was revoked, or SPL cleared it when the approved amount reached zero.
+        Renewing re-approves.
+    </p>
+    <p><a href="/meter">Renew the meter</a></p>
+<?php endif ?>
+<?php if ($meter['result']?->cause !== null): ?>
+    <p class="fine">The chain said: <code><?= View::e((string) $meter['result']->cause) ?></code></p>
+<?php else: ?>
+    <p class="fine"><?= View::e((string) ($meter['result']?->detail ?? '')) ?></p>
+<?php endif ?>
+    <p class="fine">
+        Nothing was charged for this page. Transaction logs are not copied into
+        this site's own logs (§8.1) — if you want to read them, they are yours,
+        on the explorer.
     </p>
 
 <?php elseif ($meter['stage'] === 'limit'): ?>

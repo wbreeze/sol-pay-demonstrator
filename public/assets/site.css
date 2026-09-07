@@ -229,3 +229,8 @@ button:hover { filter: brightness(1.1); }
 .receipt { margin: 0.75rem 0 1rem; }
 .receipt dt { font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
 .receipt dd { margin: 0.1rem 0 0.7rem; }
+
+.meter-strip { margin: 1.5rem 0 0; padding: 0.9rem 0 0; border-top: 1px solid var(--rule); font-size: 0.9rem; }
+.meter-strip p { margin: 0 0 0.5rem; }
+.advance { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: baseline; margin-top: 0.75rem; }
+.advance .fine { flex: 1 1 16rem; }

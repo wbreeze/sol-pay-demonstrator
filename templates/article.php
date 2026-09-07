@@ -32,6 +32,8 @@ use Newsprint\Support\View;
     <div class="body">
 <?= $body ?>
     </div>
+<?php /* What the metering step did, reported under the thing it paid for. */ ?>
+<?= $view->render('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]) ?>
 <?php else: ?>
     <?php /* The body is not on this page at all — not hidden, not delivered
              and covered. A reader who has not paid never receives it. */ ?>

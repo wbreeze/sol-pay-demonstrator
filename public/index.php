@@ -29,6 +29,10 @@ use Newsprint\Content\Library;
 use Newsprint\Content\Piece;
 use Newsprint\Support\Alias;
 use Newsprint\Support\Config;
+use Newsprint\Metering\Meter;
+use Newsprint\Metering\MeterMiddleware;
+use Newsprint\Metering\MeterOutcome;
+use Newsprint\Metering\MeterResult;
 use Newsprint\Setup\Provisioner;
 use Newsprint\Store\Database;
 use Newsprint\Store\Store;
@@ -202,7 +206,22 @@ $payerState = static function (Request $request) use ($wallet, $read, $config, $
  * narrow, and putting it inside the meter is what makes the narrowness
  * visible.
  */
-$meterVars = static function (Request $request) use ($wallet, $read, $payerState, $config, $store): array {
+/**
+ * SPEC §7's decision, assembled. Built lazily: a request that is not going
+ * to meter should not construct an RPC client and load a keypair to find
+ * that out.
+ */
+$meterFactory = static function () use ($config, $rpcFactory, $store): Meter {
+    $rpc = $rpcFactory();
+
+    return new Meter($config, $rpc, new Submitter(
+        $rpc,
+        (int) $config->rpc()['confirm_timeout_ms'],
+        (int) $config->rpc()['confirm_poll_ms'],
+    ), $store());
+};
+
+$meterVars = static function (Request $request, ?MeterResult $result = null) use ($wallet, $read, $payerState, $config, $store): array {
     $params = $config->siteParams();
     $state = $read();
     $decimals = $state?->mintDecimals ?? (int) $params['decimals'];
@@ -234,6 +253,10 @@ $meterVars = static function (Request $request) use ($wallet, $read, $payerState
         // wallet dialog — the window §6.3 says is the one that expires.
         'program' => $config->program()->id,
         'token_program' => $config->program()->tokenProgram,
+        // What the metering step did, when there was one (§7).
+        'result' => $result,
+        'page_price' => Units::fromBaseUnits((int) $params['page_price'], $decimals),
+        'step_views' => (int) $config->metering()['demo_step_views'],
     ];
 
     if ($panel['wallet'] === null) {
@@ -269,7 +292,21 @@ $meterVars = static function (Request $request) use ($wallet, $read, $payerState
 
         $blocked = $payer->blocked();
         $panel['stage'] = $blocked === null ? 'metered' : 'limit';
-        $panel['blocked'] = $blocked?->reason;
+        $panel['blocked'] = $blocked === null ? null : (string) $blocked;
+
+        // §8: every branch that leaves the happy path early is a screen, so
+        // what the chain actually said outranks what the preflight predicted.
+        if ($result !== null) {
+            $panel['stage'] = match ($result->outcome) {
+                MeterOutcome::Blocked => 'limit',
+                MeterOutcome::Failed => 'failed',
+                MeterOutcome::Unreadable => 'unreadable',
+                default => 'metered',
+            };
+            if ($result->blocked !== null) {
+                $panel['blocked'] = (string) $result->blocked;
+            }
+        }
 
         return $panel;
     }
@@ -331,7 +368,7 @@ $app->get('/', function (Request $request, Response $response) use ($view, $shel
     ]), $wallet($request)));
 });
 
-$app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $siteVars, $wallet, $meterVars, $payerState): Response {
+$article = $app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $siteVars, $wallet, $meterVars, $payerState): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -341,18 +378,72 @@ $app->get('/a/{slug}', function (Request $request, Response $response, array $ar
         return $page($response, $shell('Not found', $view->render('not-found')), 404);
     }
 
-    // §7's decision goes here, and there is nothing to decide with yet: no
-    // session, no wallet, no contract. Until there is, the body is withheld
-    // from everyone, which is the correct behaviour for a reader who has not
-    // paid and an honest placeholder for one who has.
-    $body = null;
+    // §7's decision was made by the middleware, before this handler ran, and
+    // this is the whole of what the handler does with it. Anything else here —
+    // a second read, a "just in case" charge — would be metering per request,
+    // which is §7.1's defect.
+    $metering = $request->getAttribute(MeterMiddleware::ATTRIBUTE);
+    $result = $metering instanceof MeterResult ? $metering : null;
+    $body = $result !== null && $result->serves() ? $piece->body() : null;
 
     return $page($response, $shell($piece->title, $view->render('article', [
         'piece' => $piece,
         'body' => $body,
         'site' => $siteVars(),
-        'meter' => $meterVars($request),
+        'meter' => $meterVars($request, $result),
     ]), $wallet($request), $payerState($request)));
+});
+
+/**
+ * §12.1: the metering decision is a middleware, in front of the handler that
+ * renders the body. It runs after routing, so the slug is available, and it
+ * sets one attribute rather than rendering anything — every branch is a value
+ * the handler turns into a screen (§8).
+ */
+$article->add(new MeterMiddleware(
+    static fn (string $slug): ?Piece => Library::isBuilt($contentDir)
+        ? Library::load($contentDir)->find($slug)
+        : null,
+    $wallet,
+    $read,
+    $meterFactory,
+));
+
+/**
+ * SPEC §7.4: seven views in one instruction, so the collection threshold is
+ * reachable in a handful of clicks rather than fifty page loads.
+ *
+ * Seven and not ten. Ten is the threshold, so a ten-view step would settle on
+ * every click and teach the reader that metering means a transaction per
+ * charge — the opposite of what the design is for. Seven settles on some
+ * clicks and not others, which is the whole economic argument made visible.
+ *
+ * It charges honestly. Seven views is seven views, `used` moves by 0.07 DEMO,
+ * and the transfer that results is a real transfer. It is not a simulation;
+ * it is the same instruction the site would send if the reader had read seven
+ * articles, which is exactly why it belongs in a demonstration of the API.
+ */
+$app->post('/meter/advance', function (Request $request, Response $response) use ($wallet, $read, $config, $meterFactory): Response {
+    // A form and a redirect, not JSON and a script. §12.2 puts JavaScript
+    // where the wallet is and nowhere else, and this one is signed by the site
+    // — the reader's wallet is not involved at all.
+    $body = (array) $request->getParsedBody();
+    $slug = (string) ($body['slug'] ?? '');
+    $back = $slug === '' ? '/' : '/a/'.rawurlencode($slug);
+
+    $address = $wallet($request);
+    $state = $read();
+
+    if ($address !== null && $state !== null) {
+        // The outcome is not passed back through the URL. The article page
+        // re-reads the contract anyway, so a successful advance shows as
+        // `used` having moved and a refused one shows as whatever the fresh
+        // preflight says — `LimitReached` arrives as §8.2's screen rather
+        // than as a message about a screen.
+        $meterFactory()->advance($address, $state, (int) $config->metering()['demo_step_views']);
+    }
+
+    return $response->withStatus(303)->withHeader('Location', $back);
 });
 
 /**
@@ -646,7 +737,7 @@ $app->get('/meter', function (Request $request, Response $response) use ($view, 
             'unpaid' => Units::fromBaseUnits($contract->unpaid(), $decimals),
         ],
         'views_remaining' => $payer->viewsRemaining(),
-        'blocked' => $blocked?->reason,
+        'blocked' => $blocked === null ? null : (string) $blocked,
         'limit_floor' => Units::fromBaseUnits($payer->limitFloor(), $decimals),
         'balance' => Units::fromBaseUnits($payer->balance(), $decimals),
         // The delegate, which is the whole of what authorizing gave away, and
