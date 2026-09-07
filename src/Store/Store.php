@@ -192,6 +192,23 @@ final class Store
         ]);
     }
 
+    /**
+     * How many live grants this wallet holds.
+     *
+     * Not a reading history being read — a count, and the only place it is
+     * used is the close confirmation, where §10.4 qualification 2 requires
+     * the reader to be told *before* they click that closing costs them the
+     * articles they have already paid for. Saying "one article" when it is
+     * three would be a disclosure that misleads.
+     */
+    public function liveGrantCount(string $wallet): int
+    {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) AS n FROM grants WHERE wallet = ? AND expires_at > ?');
+        $stmt->execute([$wallet, $this->now()]);
+
+        return (int) $stmt->fetch()['n'];
+    }
+
     /** Expiry does the work; this is the sweep that makes it visible (§10.4 q.1). */
     public function sweepExpired(): int
     {

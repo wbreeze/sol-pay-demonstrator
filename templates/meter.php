@@ -130,10 +130,9 @@ $contract = $meter['contract'];
         of which <?= View::e((string) $contract['paid']) ?> has settled and
         <?= View::e((string) $contract['unpaid']) ?> has not.
     </p>
-    <p class="pending">
-        Renewing and closing are <code>manage_meter</code>, which is the next
-        rung. Closing forgives the unpaid residue and erases what this site
-        holds about you.
+    <p>
+        <a href="/meter">Raise the limit, or close it</a>. Closing forgives the
+        unpaid residue and erases what this site holds about you.
     </p>
 
 <?php else: ?>
@@ -149,6 +148,11 @@ $contract = $meter['contract'];
         next rung. Your contract is on chain and the arithmetic above is read
         from it.
     </p>
+    <?php /* §6: manage_meter carries a permanent link from the meter widget,
+             not only at the limit. A reader who has authorized a site to draw
+             from their wallet should not have to exhaust something to find the
+             exit. */ ?>
+    <p class="fine"><a href="/meter">The meter</a> — what you have spent, and the way out.</p>
 <?php endif ?>
 
     <p class="pending" data-meter-status hidden></p>

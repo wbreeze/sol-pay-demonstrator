@@ -577,6 +577,175 @@ $app->post('/meter/opened', function (Request $request, Response $response) use 
 });
 
 /**
+ * `manage_meter` (§6). Reachable at any time, not only at the limit — decided
+ * 2026-09-02, reversing an earlier decision, because a reader who has
+ * authorized a site to draw from their wallet may reasonably expect to find,
+ * at any moment and without exhausting anything first, a page that says what
+ * they have spent and offers a way out. Making them hit a limit to reach the
+ * exit is not a defensible product, whatever the state diagram omits.
+ */
+$app->get('/meter', function (Request $request, Response $response) use ($view, $shell, $page, $wallet, $payerState, $read, $store, $config, $siteVars): Response {
+    $address = $wallet($request);
+    if ($address === null) {
+        return $page($response, $shell('The meter', $view->render('manage-meter', [
+            'stage' => 'anonymous',
+            'site' => $siteVars(),
+        ]), null));
+    }
+
+    $payer = $payerState($request);
+    $state = $read();
+    $params = $config->siteParams();
+    $decimals = $payer?->decimals ?? ($state?->mintDecimals ?? (int) $params['decimals']);
+
+    if ($payer === null) {
+        return $page($response, $shell('The meter', $view->render('manage-meter', [
+            'stage' => 'unreadable',
+            'site' => $siteVars(),
+        ]), $address));
+    }
+
+    if (!$payer->hasContract()) {
+        return $page($response, $shell('The meter', $view->render('manage-meter', [
+            'stage' => 'no-contract',
+            'site' => $siteVars(),
+            'wallet' => $address,
+        ]), $address));
+    }
+
+    $contract = $payer->contract;
+    $blocked = $payer->blocked();
+
+    return $page($response, $shell('The meter', $view->render('manage-meter', [
+        'stage' => 'open',
+        'site' => $siteVars(),
+        'wallet' => $address,
+        'chain' => (string) $config->auth()['chain_id'],
+        'program' => $config->program()->id,
+        'token_program' => $config->program()->tokenProgram,
+        'symbol' => (string) $params['symbol'],
+        'contract' => [
+            'address' => $payer->contractAddress,
+            'limit' => Units::fromBaseUnits($contract->limit, $decimals),
+            'used' => Units::fromBaseUnits($contract->used, $decimals),
+            'paid' => Units::fromBaseUnits($contract->paid, $decimals),
+            'unpaid' => Units::fromBaseUnits($contract->unpaid(), $decimals),
+        ],
+        'views_remaining' => $payer->viewsRemaining(),
+        'blocked' => $blocked?->reason,
+        'limit_floor' => Units::fromBaseUnits($payer->limitFloor(), $decimals),
+        'balance' => Units::fromBaseUnits($payer->balance(), $decimals),
+        // §10.4 qualification 2: the reader is told what closing costs them
+        // *before* they click, and told the true number rather than "an
+        // article".
+        'live_grants' => $store()->liveGrantCount($address),
+    ]), $address));
+});
+
+/**
+ * `close_and_revoke`, prepared. Two instructions and no arguments — there is
+ * nothing to choose, which is why this endpoint takes no body.
+ */
+$app->post('/meter/close/prepare', function (Request $request, Response $response) use ($json, $wallet, $read, $payerState, $config, $rpcFactory): Response {
+    $address = $wallet($request);
+    if ($address === null) {
+        return $json($response, ['message' => 'identify first'], 401);
+    }
+
+    $state = $read();
+    $payer = $payerState($request);
+    if ($state === null || $payer === null) {
+        return $json($response, ['message' => 'the endpoint did not answer; nothing was signed'], 502);
+    }
+    if (!$payer->hasContract()) {
+        return $json($response, ['message' => 'there is no contract to close'], 409);
+    }
+
+    $program = $config->program();
+    $blockhash = $rpcFactory()->latestBlockhash();
+
+    return $json($response, [
+        'action' => 'close',
+        'programAddress' => $program->id,
+        'tokenProgram' => $program->tokenProgram,
+        'site' => $state->address,
+        'payer' => $payer->wallet,
+        'payerTokenAccount' => $payer->tokenAccount,
+        'contract' => $payer->contractAddress,
+        'blockhash' => $blockhash['blockhash'],
+        'lastValidBlockHeight' => $blockhash['lastValidBlockHeight'] ?? null,
+        'chain' => (string) $config->auth()['chain_id'],
+    ]);
+});
+
+/**
+ * The chain confirmed it; now §10.4 runs.
+ *
+ * The order matters and it is the reverse of the metering path's. Here the
+ * site waits for the chain **before** deleting anything, because a purge on
+ * the strength of an unconfirmed transaction would erase a reader whose
+ * contract is still open and still spending. The proof is the account: the
+ * contract PDA is gone, which no report from a browser could establish.
+ */
+$app->post('/meter/close/done', function (Request $request, Response $response) use ($json, $wallet, $payerState, $rpcFactory, $store, $config): Response {
+    $address = $wallet($request);
+    if ($address === null) {
+        return $json($response, ['message' => 'identify first'], 401);
+    }
+
+    $body = json_decode((string) $request->getBody(), true);
+    $signature = is_array($body) ? (string) ($body['signature'] ?? '') : '';
+    if ($signature === '') {
+        return $json($response, ['message' => 'no signature'], 400);
+    }
+
+    $rpc = $rpcFactory();
+    $deadline = microtime(true) + ((int) $config->rpc()['confirm_timeout_ms']) / 1000;
+    $pollMs = (int) $config->rpc()['confirm_poll_ms'];
+    $confirmed = false;
+
+    while (microtime(true) < $deadline) {
+        $status = $rpc->signatureStatuses([$signature])[0] ?? null;
+        if ($status !== null) {
+            if (($status['err'] ?? null) !== null) {
+                return $json($response, ['message' => 'the transaction landed and failed; nothing was deleted'], 409);
+            }
+            if (in_array($status['confirmationStatus'] ?? '', ['confirmed', 'finalized'], true)) {
+                $confirmed = true;
+
+                break;
+            }
+        }
+        usleep($pollMs * 1000);
+    }
+
+    $payer = $payerState($request);
+    if ($payer === null || $payer->hasContract()) {
+        // Sent, and the account is still there. Nothing is deleted on a maybe.
+        return $json($response, [
+            'ok' => false,
+            'pending' => true,
+            'message' => 'sent, but the contract is still on chain; reload in a moment and close again if it is still here',
+        ], 202);
+    }
+
+    // §10.4. Session, grants and the lock row go; the faucet ledger survives
+    // for the published reason.
+    $erased = $store()->eraseReader($address);
+    $id = Session::idFrom($request);
+    if ($id !== null) {
+        $store()->destroySession($id);
+    }
+
+    return Session::clear($json($response, [
+        'ok' => true,
+        'confirmed' => $confirmed,
+        'signature' => $signature,
+        'erased' => $erased,
+    ]), Session::isSecure($request));
+});
+
+/**
  * SPEC §4.3. The site signs this one, so it is a button and not a wallet
  * interaction — nothing here spends the reader's money.
  */

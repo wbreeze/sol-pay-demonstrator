@@ -224,3 +224,8 @@ button:hover { filter: brightness(1.1); }
 }
 .meter [data-wallet-choices] { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
 .meter [data-meter-status][data-kind="error"] { color: var(--accent); font-style: normal; }
+
+/* §10.4's receipt: the DELETE, reported rather than asserted. */
+.receipt { margin: 0.75rem 0 1rem; }
+.receipt dt { font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
+.receipt dd { margin: 0.1rem 0 0.7rem; }
