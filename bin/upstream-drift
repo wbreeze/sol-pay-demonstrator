@@ -1,0 +1,235 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Has the library this site demonstrates moved without it?
+ *
+ * This repository exists to be a working example of `sol-pay-client`, and an
+ * example pinned to a version nobody installs any more is worse than no
+ * example: it compiles, its tests pass, and it teaches the wrong API. Nothing
+ * in the suite can notice, because the drift happens in someone else's
+ * repository. So this asks the registries directly.
+ *
+ * Three pins, in two package managers, because §12.2 put the browser half in
+ * `public/vendor/` as committed files rather than a lockfile:
+ *
+ *   composer.lock             wbreeze/sol-pay-client   the server half
+ *   public/vendor/README.md   sol-pay-client (npm)     the wasm the page loads
+ *   public/vendor/README.md   @solana/kit              message compilation
+ *
+ * Being behind is not an emergency and this does not pretend it is — a new
+ * version is news, and the answer may well be "not yet". It is here so the
+ * answer is a decision rather than a thing discovered months later.
+ *
+ * Usage:  bin/upstream-drift
+ *
+ *   0   every pin is current
+ *   1   at least one pin is behind a published release
+ *   75  EX_TEMPFAIL — a registry did not answer; nothing was learned
+ *
+ * No autoloader on purpose: this runs before `composer install` and says
+ * something useful about a checkout that has not been installed yet.
+ */
+
+const DRIFT_OK = 0;
+const DRIFT_BEHIND = 1;
+const DRIFT_TEMPFAIL = 75;
+
+$root = dirname(__DIR__);
+
+/** @return array{0: ?string, 1: ?string} body and error, exactly one of them null */
+function fetch(string $url): array
+{
+    $curl = curl_init($url);
+    curl_setopt_array($curl, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 20,
+        CURLOPT_FOLLOWLOCATION => true,
+        // Both registries want one; npm's in particular answers differently
+        // without it.
+        CURLOPT_USERAGENT => 'sol-pay-demonstrator upstream-drift (+https://github.com/wbreeze/sol-pay-demonstrator)',
+        CURLOPT_HTTPHEADER => ['Accept: application/json'],
+    ]);
+    $raw = curl_exec($curl);
+    $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    $transport = curl_error($curl);
+
+    if ($raw === false) {
+        return [null, $transport];
+    }
+    if ($status !== 200) {
+        return [null, "HTTP {$status}"];
+    }
+
+    return [(string) $raw, null];
+}
+
+function decode(string $body): ?array
+{
+    $decoded = json_decode($body, true);
+
+    return is_array($decoded) ? $decoded : null;
+}
+
+/** Strip a leading `v` and anything after a `+`; compare what is left. */
+function normalise(string $version): string
+{
+    return preg_replace('/^v/', '', explode('+', trim($version))[0]) ?? $version;
+}
+
+function isStable(string $version): bool
+{
+    return !preg_match('/-(alpha|beta|rc|dev|next|canary)/i', $version);
+}
+
+// --- what this checkout is pinned to ---------------------------------------
+
+/** The server half, from the lockfile rather than composer.json: a caret range is not a pin. */
+function lockedVersion(string $root, string $package): ?string
+{
+    $lock = decode((string) @file_get_contents($root.'/composer.lock'));
+    foreach (array_merge($lock['packages'] ?? [], $lock['packages-dev'] ?? []) as $entry) {
+        if (($entry['name'] ?? null) === $package) {
+            return normalise((string) $entry['version']);
+        }
+    }
+
+    return null;
+}
+
+/** The browser half, from the provenance table `bin/vendor-assets` writes. */
+function vendoredVersion(string $root, string $package): ?string
+{
+    $readme = (string) @file_get_contents($root.'/public/vendor/README.md');
+    $quoted = preg_quote($package, '/');
+    if (preg_match('/^\|\s*'.$quoted.'\s*\|\s*([^|\s]+)\s*\|/m', $readme, $m) !== 1) {
+        return null;
+    }
+    $version = normalise($m[1]);
+
+    // `bin/vendor-assets` writes `unknown` when node could not read the
+    // package.json, and a comparison against that is meaningless.
+    return $version === 'unknown' ? null : $version;
+}
+
+// --- what the registries have ----------------------------------------------
+
+function latestOnPackagist(string $package): array
+{
+    [$body, $error] = fetch("https://repo.packagist.org/p2/{$package}.json");
+    if ($body === null) {
+        return [null, $error];
+    }
+    $decoded = decode($body);
+    $versions = $decoded['packages'][$package] ?? null;
+    if (!is_array($versions)) {
+        return [null, 'no versions in the packagist response'];
+    }
+
+    $best = null;
+    foreach ($versions as $release) {
+        $version = normalise((string) ($release['version'] ?? ''));
+        if ($version === '' || !isStable($version)) {
+            continue;
+        }
+        if ($best === null || version_compare($version, $best, '>')) {
+            $best = $version;
+        }
+    }
+
+    return [$best, $best === null ? 'no stable release on packagist' : null];
+}
+
+function latestOnNpm(string $package): array
+{
+    [$body, $error] = fetch('https://registry.npmjs.org/'.str_replace('/', '%2f', $package).'/latest');
+    if ($body === null) {
+        return [null, $error];
+    }
+    $decoded = decode($body);
+    $version = isset($decoded['version']) ? normalise((string) $decoded['version']) : null;
+
+    return [$version, $version === null ? 'no version in the npm response' : null];
+}
+
+// --- the three pins ---------------------------------------------------------
+
+$pins = [
+    [
+        'what' => 'wbreeze/sol-pay-client',
+        'where' => 'composer.lock',
+        'pinned' => lockedVersion($root, 'wbreeze/sol-pay-client'),
+        'latest' => static fn () => latestOnPackagist('wbreeze/sol-pay-client'),
+        'fix' => 'composer update wbreeze/sol-pay-client',
+    ],
+    [
+        'what' => 'sol-pay-client (npm)',
+        'where' => 'public/vendor/',
+        'pinned' => vendoredVersion($root, 'sol-pay-client'),
+        'latest' => static fn () => latestOnNpm('sol-pay-client'),
+        'fix' => 'SOL_PAY_VERSION=<new> bin/vendor-assets, then commit public/vendor/',
+    ],
+    [
+        'what' => '@solana/kit',
+        'where' => 'public/vendor/',
+        'pinned' => vendoredVersion($root, '@solana/kit'),
+        'latest' => static fn () => latestOnNpm('@solana/kit'),
+        'fix' => 'bin/vendor-assets, then commit public/vendor/',
+    ],
+];
+
+printf("%-24s %-18s %-10s %-10s %s\n", 'package', 'pinned in', 'pinned', 'latest', '');
+$behind = [];
+$unreachable = [];
+
+foreach ($pins as $pin) {
+    [$latest, $error] = ($pin['latest'])();
+
+    if ($pin['pinned'] === null) {
+        printf("%-24s %-18s %-10s %-10s %s\n", $pin['what'], $pin['where'], '?', $latest ?? '?', 'cannot read the pin');
+        $unreachable[] = "{$pin['what']}: this checkout's pinned version could not be read from {$pin['where']}";
+        continue;
+    }
+    if ($latest === null) {
+        printf("%-24s %-18s %-10s %-10s %s\n", $pin['what'], $pin['where'], $pin['pinned'], '?', $error);
+        $unreachable[] = "{$pin['what']}: {$error}";
+        continue;
+    }
+
+    $drifted = version_compare($latest, $pin['pinned'], '>');
+    printf(
+        "%-24s %-18s %-10s %-10s %s\n",
+        $pin['what'],
+        $pin['where'],
+        $pin['pinned'],
+        $latest,
+        $drifted ? 'BEHIND' : 'current',
+    );
+
+    if ($drifted) {
+        $behind[] = "{$pin['what']} is at {$latest}; this repository pins {$pin['pinned']} in {$pin['where']}. To move: {$pin['fix']}";
+    }
+}
+
+echo "\n";
+
+if ($behind !== []) {
+    foreach ($behind as $note) {
+        echo "behind: {$note}\n";
+    }
+    // Deliberately louder than the unreachable case below and quieter than
+    // `devnet-canary`'s exit 1: nothing is broken, something is available.
+    exit(DRIFT_BEHIND);
+}
+
+if ($unreachable !== []) {
+    foreach ($unreachable as $note) {
+        fwrite(STDERR, "not checked: {$note}\n");
+    }
+    exit(DRIFT_TEMPFAIL);
+}
+
+echo "current — every pin matches the newest published release.\n";
+exit(DRIFT_OK);

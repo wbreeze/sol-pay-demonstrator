@@ -1,0 +1,182 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Is the ground this demo stands on still there?
+ *
+ * Everything in `tests/` runs against fixed vectors and no network, which is
+ * the right shape for a suite: it answers "did we change something" and it
+ * answers the same way in a year. It cannot answer the other question. The
+ * sol-pay program is deployed to devnet at one address and this site's every
+ * metering call goes to it; devnet is reset periodically, a redeploy changes
+ * the id, and the public endpoint rate-limits. None of that is a commit to
+ * this repository, so no test will ever fail because of it — the site will
+ * simply stop working, quietly, between one day and the next.
+ *
+ * That is the gap this fills. It is read-only and it is not a smoke test:
+ * `bin/devnet-smoke` pays a fee and needs a funded key, and a scheduled job
+ * that spends money is a scheduled job someone eventually turns off. This one
+ * costs nothing, needs no key, and can therefore run every day forever.
+ *
+ * Usage:  bin/devnet-canary
+ *
+ * Exit status is the point, because a canary is read by a machine:
+ *
+ *   0   everything this repository assumes about devnet is still true
+ *   1   a claim is false — the program is not deployed at the configured id,
+ *       or is deployed and not executable. Someone has to look.
+ *   75  EX_TEMPFAIL. The endpoint did not answer, or answered 429. Nothing was
+ *       learned, and nothing is known to be wrong. SPEC §12.4 already says a
+ *       rate-limited endpoint looks like the site being broken; a monitor that
+ *       cannot tell those apart teaches its reader to ignore it.
+ */
+
+use Newsprint\Chain\Rpc;
+use Newsprint\Chain\RpcException;
+use Newsprint\Support\Config;
+
+require __DIR__.'/../vendor/autoload.php';
+
+const CANARY_OK = 0;
+const CANARY_BROKEN = 1;
+const CANARY_TEMPFAIL = 75;
+
+$root = dirname(__DIR__);
+$config = Config::load($root);
+$program = $config->program();
+$rpc = new Rpc(
+    $config->rpcUrl(),
+    $program,
+    (string) $config->rpc()['commitment'],
+    (int) $config->rpc()['http_timeout_s'],
+);
+
+/**
+ * One retry policy for the whole script, in one place.
+ *
+ * The public endpoint's 429 is not an event, it is weather. Three attempts
+ * with a widening gap is enough to ride out the common case; past that the
+ * honest answer is that we did not get to ask.
+ */
+function attempt(callable $call): mixed
+{
+    $delays = [0, 2, 5];
+    $last = null;
+
+    foreach ($delays as $delay) {
+        if ($delay > 0) {
+            sleep($delay);
+        }
+        try {
+            return $call();
+        } catch (RpcException $e) {
+            $last = $e;
+        }
+    }
+
+    throw new RuntimeException($last?->getMessage() ?? 'no answer', CANARY_TEMPFAIL);
+}
+
+function line(string $label, string $value): void
+{
+    printf("%-12s %s\n", $label, $value);
+}
+
+$findings = [];
+
+line('endpoint', $config->rpcUrl());
+line('commitment', (string) $config->rpc()['commitment']);
+echo "\n";
+
+// --- the endpoint answers at all -------------------------------------------
+try {
+    $health = (string) attempt(static fn () => $rpc->call('getHealth'));
+    $version = attempt(static fn () => $rpc->call('getVersion'));
+    line('health', $health);
+    line('validator', (string) ($version['solana-core'] ?? 'unknown'));
+} catch (RuntimeException $e) {
+    fwrite(STDERR, "the endpoint did not answer: {$e->getMessage()}\n");
+    fwrite(STDERR, "nothing was checked, and nothing is known to be wrong.\n");
+    exit(CANARY_TEMPFAIL);
+}
+
+// --- it is serving current state, not a stale snapshot ---------------------
+try {
+    $blockhash = attempt(static fn () => $rpc->latestBlockhash());
+    line('blockhash', $blockhash['blockhash']);
+    line('height', (string) $blockhash['lastValidBlockHeight']);
+} catch (RuntimeException $e) {
+    fwrite(STDERR, "no current blockhash: {$e->getMessage()}\n");
+    exit(CANARY_TEMPFAIL);
+}
+
+echo "\n";
+
+// --- the two programs every metering call touches ---------------------------
+// `programDeployed` and not `accountExists`, for the reason `Rpc` gives where
+// it defines them: an address with nothing at it and an address holding
+// something non-executable fail identically at the runtime, and this is the
+// one place that distinction can still be drawn cheaply.
+$programs = [
+    'sol-pay' => $program->id,
+    'spl-token' => $program->tokenProgram,
+];
+
+foreach ($programs as $name => $address) {
+    try {
+        $deployed = attempt(static fn () => $rpc->programDeployed($address));
+    } catch (RuntimeException $e) {
+        fwrite(STDERR, "could not read {$name} ({$address}): {$e->getMessage()}\n");
+        exit(CANARY_TEMPFAIL);
+    }
+
+    line($name, $address.'  '.($deployed ? 'deployed' : 'NOT DEPLOYED'));
+
+    if (!$deployed) {
+        $findings[] = "{$name} is not deployed and executable at {$address} on ".$config->rpcUrl();
+    }
+}
+
+// --- and, if this checkout has been provisioned, its own accounts -----------
+// Skipped in CI, where `var/site.json` does not exist and should not: those
+// addresses are the result of a first run on someone's machine (SPEC §12.0),
+// not a decision this repository carries.
+if ($config->isProvisioned()) {
+    echo "\n";
+    $addresses = $config->provisioned();
+    foreach (['mint', 'treasury', 'site'] as $which) {
+        if (!isset($addresses[$which])) {
+            continue;
+        }
+        try {
+            $exists = attempt(static fn () => $rpc->accountExists($addresses[$which]));
+        } catch (RuntimeException $e) {
+            fwrite(STDERR, "could not read {$which}: {$e->getMessage()}\n");
+            exit(CANARY_TEMPFAIL);
+        }
+        line($which, $addresses[$which].'  '.($exists ? 'present' : 'GONE'));
+        if (!$exists) {
+            // Devnet is reset. This is the expected way for a demo to die, and
+            // the fix is to run setup again rather than to debug anything.
+            $findings[] = "this site's {$which} account is gone from devnet — the cluster was probably reset; re-run first-run setup";
+        }
+    }
+} else {
+    echo "\nnot provisioned here, so this checkout's own accounts were not checked.\n";
+}
+
+echo "\n";
+
+if ($findings === []) {
+    echo "ok — devnet still holds what this repository assumes it holds.\n";
+    exit(CANARY_OK);
+}
+
+fwrite(STDERR, "\n");
+foreach ($findings as $finding) {
+    fwrite(STDERR, "broken: {$finding}\n");
+}
+
+exit(CANARY_BROKEN);

@@ -1,0 +1,203 @@
+# The suite, on every push and pull request.
+#
+# Two claims are checked here and they are different claims. The `test` matrix
+# checks that the code works on the versions the suite can run on; `floor`
+# checks README's other sentence — that `composer install --no-dev` resolves on
+# PHP 8.1 — which is how a reader who only wants to *run* the site installs it.
+# Testing only 8.4 would leave both ends unproven.
+#
+# The top of the matrix is 8.5 on purpose. `src/Chain/Rpc.php` names the gap it
+# closes: `curl_close` is deprecated as of 8.5, sol-pay's `php-conformance.yml`
+# would have caught it there, and this repository had no equivalent. It does now.
+
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only. Nothing in this workflow writes to the repository, and a token
+# that cannot write is one fewer thing to reason about when a pull request
+# comes from a fork.
+permissions:
+  contents: read
+
+# A second push to the same branch cancels the first. The default branch is
+# excluded: those runs are the record of what master did, and cancelling them
+# loses it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  test:
+    name: php ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3', '8.4', '8.5']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: set up php
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          # composer.json's platform requirements, spelled out rather than
+          # assumed: sodium signs, pdo_sqlite is the whole store, curl is the
+          # only way this code talks to an RPC endpoint.
+          extensions: curl, json, pdo_sqlite, sodium
+          coverage: none
+          ini-values: error_reporting=E_ALL, display_errors=On
+
+      - name: composer.json and composer.lock agree
+        run: composer validate --strict
+
+      - name: install
+        uses: ramsey/composer-install@v3
+
+      - name: content renders
+        # `bin/build-content` is a build step a clone has to run, so a change
+        # that breaks it breaks the site without breaking a test. Twelve files
+        # through commonmark costs a second.
+        run: bin/build-content --quiet
+
+      - name: phpunit
+        run: composer test
+
+  analyse:
+    # The third incident of one shape is the one that buys a tool. `php -l`
+    # proves a file parses; the suite proves the paths it reaches behave. What
+    # escaped both, three times, is a well-formed program that is wrong on a
+    # branch no test reaches — a property that does not exist, an object cast to
+    # a string it declines to become. `phpstan.neon` names all three.
+    name: phpstan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: curl, json, pdo_sqlite, sodium
+          coverage: none
+
+      - name: install
+        # With dev dependencies: `tests/` is analysed too, and PHPUnit's
+        # classes have to resolve for that to mean anything.
+        uses: ramsey/composer-install@v3
+
+      - name: fetch phpstan
+        # The PHAR from the release, at a pinned version, rather than a
+        # `require-dev` entry. Two reasons, and the second is the real one:
+        # nothing about this repository's own dependency graph changes, so
+        # `composer.lock` stays a record of what the *site* needs; and an
+        # analyser that floats picks its own version, which means CI can go red
+        # on a morning when nobody committed anything. Bump the number here on
+        # purpose, the way `bin/vendor-assets` is run on purpose.
+        env:
+          PHPSTAN_VERSION: '2.2.7'
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/phpstan.phar \
+            "https://github.com/phpstan/phpstan/releases/download/${PHPSTAN_VERSION}/phpstan.phar"
+          php /tmp/phpstan.phar --version
+
+      - name: analyse
+        run: php /tmp/phpstan.phar analyse --no-progress --memory-limit=1G --error-format=github
+
+  floor:
+    # README: "PHP 8.1 or later ... the suite needs 8.2, because PHPUnit 11
+    # does; `composer install --no-dev` resolves on the floor, which is how a
+    # reader on 8.1 would install." That sentence is a promise to a reader with
+    # a stock PHP, and this is the only place it is kept honest.
+    name: php 8.1 floor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: set up php
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          extensions: curl, json, pdo_sqlite, sodium
+          coverage: none
+
+      - name: runtime dependencies resolve on the floor
+        run: composer install --no-dev --no-interaction --no-progress
+
+      - name: everything committed parses on the floor
+        # `php -l` and not a linter with opinions: the question here is whether
+        # 8.1 can parse what 8.4 accepted, which is a different question from
+        # style and the only one this job is entitled to answer.
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r f; do
+            php -l "$f" > /dev/null || { echo "::error file=$f::does not parse on PHP 8.1"; fail=1; }
+          done < <(find src bin config public templates tests -type f -name '*.php' -print)
+          # The `bin/` scripts with no extension are PHP too; find by shebang.
+          while IFS= read -r f; do
+            php -l "$f" > /dev/null || { echo "::error file=$f::does not parse on PHP 8.1"; fail=1; }
+          done < <(grep -rl '^#!/usr/bin/env php' bin)
+          exit $fail
+
+      - name: the site boots
+        # Not a browser test: start the server the README tells a reader to
+        # start, ask for one page, and require an answer. It catches a fatal in
+        # the front controller, which is the failure a reader meets first.
+        run: |
+          set -euo pipefail
+          bin/build-content --quiet
+          php -S 127.0.0.1:8123 -t public > /tmp/server.log 2>&1 &
+          server=$!
+          trap 'kill $server 2>/dev/null || true' EXIT
+
+          code=''
+          for _ in $(seq 1 40); do
+            code="$(curl -sS -o /tmp/index.html -w '%{http_code}' http://127.0.0.1:8123/ || true)"
+            [ -n "$code" ] && [ "$code" != "000" ] && break
+            sleep 0.25
+          done
+
+          echo "GET / -> ${code:-no answer}"
+          if [ "$code" != "200" ]; then
+            # 503 here is the site saying `var/content/` is empty, which would
+            # mean build-content silently produced nothing; anything else is a
+            # fatal in the front controller. Both are worth the server log.
+            echo '--- server log ---'; cat /tmp/server.log
+            echo '--- body ---'; head -c 2000 /tmp/index.html
+            exit 1
+          fi
+          grep -qi '<title' /tmp/index.html || { echo 'the answer was 200 but not a page'; exit 1; }
+
+  vendored-assets:
+    # SPEC §12.2 commits `public/vendor/` on purpose, and the reason it gives is
+    # that a clone must not need npm. A missing file there is not a build
+    # failure anywhere else — the page just silently loads nothing — so it is
+    # checked here instead.
+    name: vendored assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: the committed browser dependencies are present
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in \
+            public/vendor/README.md \
+            public/vendor/sol-pay-client/sol_pay_client.js \
+            public/vendor/sol-pay-client/sol_pay_client_bg.wasm \
+            public/vendor/solana-kit/kit.min.js
+          do
+            if [ -s "$f" ]; then
+              printf '  %8s  %s\n' "$(wc -c < "$f" | tr -d ' ')" "$f"
+            else
+              echo "::error file=$f::missing or empty — re-run bin/vendor-assets and commit the result"
+              missing=1
+            fi
+          done
+          exit $missing

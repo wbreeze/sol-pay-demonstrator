@@ -1,0 +1,262 @@
+# The checks that fail without anyone committing anything.
+#
+# `ci.yml` answers "did this change break it". Nothing there can answer "did the
+# world move underneath it", and for a site whose whole function is a call to a
+# program deployed on a cluster that gets reset, that second question is the one
+# that decides whether the demo works on a given morning.
+#
+# Two canaries, deliberately kept apart because they mean different things:
+#
+#   devnet   the program this site calls is deployed and executable, and the
+#            endpoint answers. A failure here means the demo is down now.
+#   drift    the published sol-pay-client has moved past what this repository
+#            pins. A failure here means the demo is teaching an old API. It is
+#            news, not an outage.
+#
+# Neither spends money. `bin/devnet-smoke` does, needs a funded key, and is not
+# on a schedule for exactly that reason — it is available below on demand.
+
+name: canary
+
+on:
+  schedule:
+    # 06:40 UTC daily. Not on the hour: GitHub's scheduler queues everything
+    # written `0 * * * *` together and drops runs under load.
+    - cron: '40 6 * * *'
+  workflow_dispatch:
+    inputs:
+      smoke:
+        description: 'Also run bin/devnet-smoke (spends devnet SOL; needs the DEVNET_AUTHORITY_KEYPAIR secret)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  # Only so a failure can leave a trace somewhere other than a run log nobody
+  # opens. See the `report` job.
+  issues: write
+
+concurrency:
+  group: canary
+  cancel-in-progress: false
+
+jobs:
+  devnet:
+    name: devnet still holds what we assume
+    runs-on: ubuntu-latest
+    outputs:
+      state: ${{ steps.run.outputs.state }}
+      detail: ${{ steps.run.outputs.detail }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: curl, json, pdo_sqlite, sodium
+          coverage: none
+
+      - name: install
+        uses: ramsey/composer-install@v3
+        with:
+          # The canary reads; it does not test. PHPUnit has no part in it.
+          composer-options: '--no-dev'
+
+      - name: bin/devnet-canary
+        id: run
+        run: |
+          set +e
+          bin/devnet-canary 2>&1 | tee /tmp/canary.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          {
+            echo '### devnet canary'
+            echo
+            echo '```'
+            cat /tmp/canary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          case "$status" in
+            0)  echo 'state=ok'       >> "$GITHUB_OUTPUT" ;;
+            75) echo 'state=tempfail' >> "$GITHUB_OUTPUT" ;;
+            *)  echo 'state=broken'   >> "$GITHUB_OUTPUT" ;;
+          esac
+
+          {
+            echo 'detail<<CANARY_EOF'
+            cat /tmp/canary.txt
+            echo 'CANARY_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+          # 75 is EX_TEMPFAIL: the endpoint did not answer, which is weather.
+          # Failing the job on it would train everyone to ignore this workflow,
+          # which costs more than the missed check. The summary still says so.
+          if [ "$status" = "75" ]; then
+            echo "::warning::devnet endpoint did not answer — nothing was checked"
+            exit 0
+          fi
+          exit "$status"
+
+  drift:
+    name: pins against published releases
+    runs-on: ubuntu-latest
+    outputs:
+      state: ${{ steps.run.outputs.state }}
+      detail: ${{ steps.run.outputs.detail }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: curl, json
+          coverage: none
+
+      # No `composer install`: bin/upstream-drift takes no autoloader on
+      # purpose, so this job says something useful even when installing is what
+      # is broken.
+      - name: bin/upstream-drift
+        id: run
+        run: |
+          set +e
+          bin/upstream-drift 2>&1 | tee /tmp/drift.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          {
+            echo '### upstream drift'
+            echo
+            echo '```'
+            cat /tmp/drift.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          case "$status" in
+            0)  echo 'state=ok'       >> "$GITHUB_OUTPUT" ;;
+            75) echo 'state=tempfail' >> "$GITHUB_OUTPUT" ;;
+            *)  echo 'state=behind'   >> "$GITHUB_OUTPUT" ;;
+          esac
+
+          {
+            echo 'detail<<DRIFT_EOF'
+            cat /tmp/drift.txt
+            echo 'DRIFT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+          # Being behind a release is not a failed build. The job stays green
+          # and `report` opens an issue, which is the right place for a thing
+          # that needs a decision rather than a fix.
+          exit 0
+
+  smoke:
+    # The paying one. Manual, and it says out loud that it costs something.
+    # It needs a devnet keypair as a secret: the 64-byte array
+    # `Keypair::loadOrCreate` writes to `var/authority.json`, as JSON, in
+    # DEVNET_AUTHORITY_KEYPAIR.
+    # If the secret is absent the job skips rather than fails — a fork has no
+    # secrets and should not see a red run because of it.
+    name: paying smoke (manual)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke }}
+    runs-on: ubuntu-latest
+    environment: devnet
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: curl, json, pdo_sqlite, sodium
+          coverage: none
+
+      - name: install
+        uses: ramsey/composer-install@v3
+        with:
+          composer-options: '--no-dev'
+
+      - name: place the authority keypair
+        env:
+          KEYPAIR: ${{ secrets.DEVNET_AUTHORITY_KEYPAIR }}
+        run: |
+          if [ -z "${KEYPAIR:-}" ]; then
+            echo "::notice::DEVNET_AUTHORITY_KEYPAIR is not set — skipping the paying smoke"
+            echo "SKIP=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          mkdir -p var
+          printf '%s' "$KEYPAIR" > var/authority.json
+          chmod 600 var/authority.json
+
+      - name: bin/devnet-smoke
+        if: ${{ env.SKIP != '1' }}
+        run: bin/devnet-smoke --airdrop
+
+      - name: shred the key
+        if: ${{ always() }}
+        run: rm -f var/authority.json
+
+  report:
+    # One issue, reopened and updated rather than a new one every morning. A
+    # canary that files a fresh issue daily is a canary someone mutes in a week.
+    name: report
+    needs: [devnet, drift]
+    if: ${{ always() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: open or refresh the issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          DEVNET_STATE: ${{ needs.devnet.outputs.state }}
+          DEVNET_DETAIL: ${{ needs.devnet.outputs.detail }}
+          DRIFT_STATE: ${{ needs.drift.outputs.state }}
+          DRIFT_DETAIL: ${{ needs.drift.outputs.detail }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          note() { # title, label, body-file
+            local title="$1" label="$2" body="$3"
+            gh label create "$label" --description 'opened by the canary workflow' --color 'ededed' 2>/dev/null || true
+            local existing
+            existing="$(gh issue list --state open --label "$label" --limit 1 --json number --jq '.[0].number // empty')"
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --body-file "$body"
+              echo "commented on #$existing"
+            else
+              gh issue create --title "$title" --label "$label" --body-file "$body"
+            fi
+          }
+
+          if [ "$DEVNET_STATE" = "broken" ]; then
+            {
+              echo "The daily canary found that devnet no longer holds what this repository assumes."
+              echo
+              echo '```'
+              printf '%s\n' "$DEVNET_DETAIL"
+              echo '```'
+              echo
+              echo "Run: $RUN_URL"
+              echo
+              echo "If the accounts are gone rather than the program, devnet was reset and the fix is to run first-run setup again (SPEC §12.0)."
+            } > /tmp/devnet-issue.md
+            note 'canary: devnet is not holding' 'canary:devnet' /tmp/devnet-issue.md
+          fi
+
+          if [ "$DRIFT_STATE" = "behind" ]; then
+            {
+              echo "A pinned dependency is behind its newest published release."
+              echo
+              echo '```'
+              printf '%s\n' "$DRIFT_DETAIL"
+              echo '```'
+              echo
+              echo "Run: $RUN_URL"
+              echo
+              echo "Not urgent. This repository is an example of sol-pay-client, so the question is whether the example should move, not whether anything is broken."
+            } > /tmp/drift-issue.md
+            note 'canary: pinned behind a published release' 'canary:drift' /tmp/drift-issue.md
+          fi
+
+          if [ "$DEVNET_STATE" != "broken" ] && [ "$DRIFT_STATE" != "behind" ]; then
+            echo "nothing to report (devnet=$DEVNET_STATE drift=$DRIFT_STATE)"
+          fi

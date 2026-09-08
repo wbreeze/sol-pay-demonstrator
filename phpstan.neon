@@ -1,0 +1,60 @@
+# Static analysis, added 2026-09-08 after the third incident of the same shape.
+#
+# The three, in order, all of them invisible to `php -l` and to every test in
+# `tests/`:
+#
+#   slice 5   `chain => $x` instead of `'chain' => $x`. A bareword is a
+#             constant lookup, which is valid PHP and a fatal at runtime on one
+#             page. `tests/Support/BarewordTest.php` now catches this one
+#             specifically; an analyser catches the whole class it belongs to.
+#   slice 7   `$blocked->reason` on a `Blocked` that carries a `kind` and a
+#             `__toString()`. Reading an undefined property is a warning and a
+#             null in PHP 8, so the blocked message was silently empty on the
+#             one screen nobody had reached.
+#   —         `Cause` cast to a string. It is deliberately not stringable —
+#             `Newsprint\Support\Causes` exists because the library declines to
+#             answer "what should a reader be told" — so the cast produced
+#             nothing where a sentence belonged.
+#
+# What they have in common is that the program is *well-formed* and wrong, and
+# that the wrong branch is one a test would have to reach to see. §8's whole
+# design makes those branches rare by construction: they are the failure paths,
+# and the failure paths are exactly what does not run on a good day.
+#
+# Level 5 rather than the maximum, deliberately. It reaches property and method
+# existence, return types and argument types — which is where all three of the
+# above live — without demanding the array-shape annotations that level 6 wants
+# from every `array<string, mixed>` this site passes around as configuration.
+# Raising it later is a decision with evidence behind it; starting there would
+# be a decision with a wall of noise behind it.
+parameters:
+    level: 5
+
+    paths:
+        - src
+        - tests
+        - config
+        - public/index.php
+        # The `bin/` scripts have no extension, so a directory scan misses
+        # them. They are named one by one, which is also a list worth having to
+        # keep up to date.
+        - bin/build-content
+        - bin/dev-router.php
+        - bin/devnet-canary
+        - bin/devnet-smoke
+        - bin/last-settle
+        - bin/name-the-mint
+        - bin/upstream-drift
+
+    # `templates/` is not analysed and should not be. `View` renders them with
+    # `extract()`, so every variable in a template is undefined as far as any
+    # analyser is concerned — the reported errors would all be false and the
+    # real ones would be buried among them. That gap is covered from the other
+    # side: `TemplateRenderTest` renders every template in every state under a
+    # strict error handler, where an undefined variable is an exception rather
+    # than an empty string.
+
+    # PHPDoc is documentation here, not a second type system. Where a docblock
+    # and the code disagree the code wins, and an analyser that trusts the
+    # comment reports a contradiction that does not exist.
+    treatPhpDocTypesAsCertain: false
