@@ -43,6 +43,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Exception\HttpNotFoundException;
 use Slim\Factory\AppFactory;
 use SolPay\Core\DecodeException;
+use SolPay\Core\Shortfall;
 use SolPay\Core\Units;
 
 require __DIR__.'/../vendor/autoload.php';
@@ -257,6 +258,8 @@ $meterVars = static function (Request $request, ?MeterResult $result = null) use
         'result' => $result,
         'page_price' => Units::fromBaseUnits((int) $params['page_price'], $decimals),
         'step_views' => (int) $config->metering()['demo_step_views'],
+        // Filled in below when there is a contract to diagnose against.
+        'solvency' => null,
     ];
 
     if ($panel['wallet'] === null) {
@@ -281,6 +284,32 @@ $meterVars = static function (Request $request, ?MeterResult $result = null) use
 
     if ($payer->hasContract()) {
         $contract = $payer->contract;
+
+        // **What would stop the next settle, asked before it is attempted.**
+        //
+        // `can_meter` answers a question about the *limit* — whether `used`
+        // plus the charge stays under what the reader authorized. It knows
+        // nothing about whether the reader can actually pay, because the
+        // payment happens inside a `transfer_checked` CPI and SPL is the one
+        // that refuses. §8.2 describes reading the token account *after* that
+        // refusal; nothing stops the site reading it before, and the
+        // difference to a reader is between a button that fails and a button
+        // that says why it would.
+        //
+        // The amount asked about is what a settle would move: the residue
+        // already carried, plus what the demo control is about to add.
+        $step = (int) $config->metering()['demo_step_views'];
+        $wouldMove = $contract->unpaid() + (int) $params['page_price'] * $step;
+        $shortfall = $payer->funds === null ? null : Shortfall::diagnose($payer->funds, $wouldMove);
+        $panel['solvency'] = $shortfall === null ? null : [
+            'would_move' => Units::fromBaseUnits($wouldMove, $decimals),
+            'balance_short' => $shortfall->balanceShort,
+            'balance_short_demo' => Units::fromBaseUnits($shortfall->balanceShort, $decimals),
+            'allowance_short' => $shortfall->allowanceShort,
+            'allowance_short_demo' => Units::fromBaseUnits($shortfall->allowanceShort, $decimals),
+            'delegate_present' => $shortfall->delegatePresent,
+            'clear' => $shortfall->isClear(),
+        ];
         $panel['contract'] = [
             'address' => $payer->contractAddress,
             'limit' => Units::fromBaseUnits($contract->limit, $payer->decimals),
@@ -386,11 +415,24 @@ $article = $app->get('/a/{slug}', function (Request $request, Response $response
     $result = $metering instanceof MeterResult ? $metering : null;
     $body = $result !== null && $result->serves() ? $piece->body() : null;
 
+    // What the seven-view control just did, carried back from its redirect and
+    // shown once. Signature-shaped or nothing: a query string is reader-supplied.
+    $query = $request->getQueryParams();
+    $tx = (string) ($query['tx'] ?? '');
+    $outcome = MeterOutcome::tryFrom((string) ($query['advance'] ?? ''));
+    $advanced = $outcome === null ? null : [
+        'outcome' => $outcome,
+        'views' => max(0, min(999, (int) ($query['views'] ?? 0))),
+        // Signature-shaped or nothing: a query string is reader-supplied.
+        'signature' => preg_match('/^[1-9A-HJ-NP-Za-km-z]{64,90}$/', $tx) === 1 ? $tx : null,
+        'settled' => ($query['settled'] ?? '') === '1',
+    ];
+
     return $page($response, $shell($piece->title, $view->render('article', [
         'piece' => $piece,
         'body' => $body,
         'site' => $siteVars(),
-        'meter' => $meterVars($request, $result),
+        'meter' => $meterVars($request, $result) + ['advanced' => $advanced],
     ]), $wallet($request), $payerState($request)));
 });
 
@@ -435,12 +477,35 @@ $app->post('/meter/advance', function (Request $request, Response $response) use
     $state = $read();
 
     if ($address !== null && $state !== null) {
-        // The outcome is not passed back through the URL. The article page
-        // re-reads the contract anyway, so a successful advance shows as
-        // `used` having moved and a refused one shows as whatever the fresh
-        // preflight says — `LimitReached` arrives as §8.2's screen rather
-        // than as a message about a screen.
-        $meterFactory()->advance($address, $state, (int) $config->metering()['demo_step_views']);
+        $result = $meterFactory()->advance($address, $state, (int) $config->metering()['demo_step_views']);
+
+        // The *state* is not passed back through the URL — the article page
+        // re-reads the contract anyway, so a refusal arrives as §8.2's screen
+        // rather than as a message about a screen. The **signature** is,
+        // because it is the one thing the page cannot re-derive and the site
+        // deliberately does not keep.
+        //
+        // Not stored, and that is the point: §10.4 enumerates this site's
+        // stores and says a table added here is a claim on the privacy page.
+        // A per-wallet log of metering transactions is precisely the reading
+        // history the rest of this design exists to avoid holding, so the
+        // signature is handed to the reader once and forgotten. It is public
+        // on chain either way; what would be new is *this site* keeping it.
+        // **The outcome comes back too, and it has to.** The original version
+        // carried only a signature, on the reasoning that the article page
+        // re-reads the contract and a refusal would show up in the fresh
+        // preflight. That is true of `LimitReached` and false of everything
+        // else: a settle that fails leaves the contract exactly as it was, so
+        // the re-read says all is well and the click appears to have done
+        // nothing at all. `can_meter` is a *limit* check, not a solvency one —
+        // §8.2 is explicit that a short balance surfaces from inside the
+        // transfer CPI and nowhere earlier.
+        $back .= '?advance='.rawurlencode($result->outcome->value)
+            .'&views='.$result->pageViews;
+        if ($result->signature !== null) {
+            $back .= '&tx='.rawurlencode($result->signature)
+                .($result->settles ? '&settled=1' : '');
+        }
     }
 
     return $response->withStatus(303)->withHeader('Location', $back);

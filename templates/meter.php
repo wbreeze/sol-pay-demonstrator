@@ -19,6 +19,7 @@
  * @var array<string, mixed> $meter
  * @var array<string, int|string> $site
  */
+use Newsprint\Support\Causes;
 use Newsprint\Support\View;
 use SolPay\Core\Units;
 
@@ -159,8 +160,9 @@ $contract = $meter['contract'];
     </p>
     <p><a href="/meter">Renew the meter</a></p>
 <?php endif ?>
-<?php if ($meter['result']?->cause !== null): ?>
-    <p class="fine">The chain said: <code><?= View::e((string) $meter['result']->cause) ?></code></p>
+<?php $said = Causes::describe($meter['result']?->cause); ?>
+<?php if ($said !== null): ?>
+    <p class="fine">The chain said: <code><?= View::e($said) ?></code></p>
 <?php else: ?>
     <p class="fine"><?= View::e((string) ($meter['result']?->detail ?? '')) ?></p>
 <?php endif ?>
