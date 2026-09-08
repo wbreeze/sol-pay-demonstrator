@@ -1,5 +1,18 @@
 /**
- * One fetch, the first time the inspector is opened (SPEC §9).
+ * Two small jobs in the inspector: copying an address, and reading the event.
+ *
+ * ---- copying ----
+ *
+ * §9: "The full base58 is always one click away and always what gets copied —
+ * a copy button never yields an alias." The address comes from the button's
+ * own data attribute rather than from the cell's text, so no later change to
+ * how the row is laid out can quietly make it copy the short name.
+ *
+ * Delegated from the document, because the panel is inside a `<details>` and
+ * the rows exist whether or not it is open. One listener rather than one per
+ * address.
+ *
+ * ---- reading the event ----
  *
  * The panel is rendered whole by the server; the only thing missing is the
  * decoded `Metered` / `Renewed` / `Closed` event, which needs `getTransaction`
@@ -13,6 +26,31 @@
  * contents. Without JavaScript the row keeps the sentence the server put
  * there, which stays true rather than becoming a spinner that never resolves.
  */
+
+/* §9's copy rule, in eight lines. `navigator.clipboard` needs a secure
+   context, and `http://localhost` is one — measured, not assumed. If it is
+   refused anyway the button says so rather than failing silently, because a
+   button that looks like it worked is worse than one that admits it did not. */
+document.addEventListener('click', async (event) => {
+    const button = event.target.closest?.('[data-copy-address]');
+    if (!button) return;
+
+    const said = (word) => {
+        button.textContent = word;
+        button.dataset.said = '';
+        setTimeout(() => {
+            button.textContent = 'copy';
+            delete button.dataset.said;
+        }, 1200);
+    };
+
+    try {
+        await navigator.clipboard.writeText(button.dataset.copyAddress);
+        said('copied');
+    } catch {
+        said('cannot copy');
+    }
+});
 
 const panel = document.querySelector('details.inspector');
 const row = document.querySelector('[data-event-for]');

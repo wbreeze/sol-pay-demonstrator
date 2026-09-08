@@ -886,8 +886,15 @@ An alias is a role prefix plus a nonsense syllable:
 | `PAYR` | the reader's wallet |
 | `PATA` | the reader's token account |
 | `TKPG` | the token program |
+| `AUTH` | the site authority (added 2026-09-08) |
 
 giving `PIDalpha`, `SPDApep`, `CPDAcat`, `PAYRfig`.
+
+`AUTH` was missing until 2026-09-08, and its absence is the argument for this
+table made twice over: the authority is the site account's `authority`, the
+treasury token account's `owner` and the signer on every metering call, so it
+is the one address a reader meets in three sections at once — and it was the
+one with no short name in any of them.
 
 **The syllable is derived from the address, not assigned in order.** Index a
 fixed word list by a byte of the address's hash, so the same address always

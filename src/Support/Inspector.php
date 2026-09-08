@@ -35,23 +35,33 @@ final class Inspector
      * makes the preflight section evidence rather than a readout: a number
      * with no claim beside it cannot be wrong about anything.
      *
+     * The value is a string, or — for a row whose value *is* an address — the
+     * shape {@see address()} returns. The label is then always the role, which
+     * is the rework of 2026-09-08: an alias used to be the label on some rows
+     * and a prefix inside the value on others, so the same thing had two
+     * anatomies and the label column meant two different things.
+     *
      * A section may also carry a `link` (§9 asks for the explorer beside a
      * signature) and an `event` — a signature whose decoded event the panel
      * fetches when it is opened rather than on the request that made it. See
      * {@see lastTransaction()} for why that read is deferred.
      *
-     * @return list<array{heading: string, rows: list<array{0: string, 1: string, 2?: string}>, note?: string, link?: array{href: string, text: string}, event?: string}>
+     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool}, 2?: string}>, note?: string, link?: array{href: string, text: string}, event?: string}>
      */
     public function sections(?SiteState $state = null, ?string $error = null, ?PayerState $payer = null, ?MeterResult $result = null): array
     {
         $program = $this->config->program();
         $params = $this->config->siteParams();
 
+        // One map for the whole panel, built before any row is. Every address
+        // row resolves its short name from this and from nothing else.
+        $aliases = $this->aliasesFor($state, $payer);
+
         $sections = [[
             'heading' => 'Deployment',
             'rows' => [
-                [Alias::for(Alias::PROGRAM, $program->id), $program->id],
-                [Alias::for(Alias::TOKEN_PROGRAM, $program->tokenProgram), $program->tokenProgram],
+                ['metering program', $this->address($program->id, $aliases)],
+                ['token program', $this->address($program->tokenProgram, $aliases)],
                 ['cluster', 'devnet'],
                 ['endpoint', $this->config->rpcUrl()],
             ],
@@ -96,10 +106,10 @@ final class Inspector
         $sections[] = [
             'heading' => 'Site account, decoded',
             'rows' => [
-                [Alias::for(Alias::SITE, $state->address), $state->address],
-                ['authority', $site->authority],
-                [Alias::for(Alias::MINT, $site->mint), $site->mint],
-                [Alias::for(Alias::TREASURY, $site->treasury), $site->treasury],
+                ['site account', $this->address($state->address, $aliases)],
+                ['authority', $this->address($site->authority, $aliases)],
+                ['mint', $this->address($site->mint, $aliases)],
+                ['treasury', $this->address($site->treasury, $aliases)],
                 ['page price', $amount($site->pagePrice)],
                 ['collection threshold', $amount($site->collectionThreshold).sprintf('  — %d views', intdiv($site->collectionThreshold, max(1, $site->pagePrice)))],
                 ['minimum limit', $amount($site->minLimit).sprintf('  — %d views', intdiv($site->minLimit, max(1, $site->pagePrice)))],
@@ -114,10 +124,12 @@ final class Inspector
             $sections[] = [
                 'heading' => 'Treasury',
                 'rows' => [
-                    [Alias::for(Alias::TREASURY, $site->treasury), $site->treasury],
+                    ['treasury token account', $this->address($site->treasury, $aliases)],
                     ['balance', $amount($state->treasury->amount)],
-                    ['owner', $state->treasury->owner],
-                    ['delegate', $state->treasury->delegate ?? 'none'],
+                    ['owner', $this->address($state->treasury->owner, $aliases)],
+                    ['delegate', $state->treasury->delegate === null
+                        ? 'none'
+                        : $this->address($state->treasury->delegate, $aliases)],
                 ],
                 'note' => 'What readers have paid, so far, on this deployment.',
             ];
@@ -147,12 +159,12 @@ final class Inspector
         }
 
         if ($payer !== null) {
-            $sections[] = $this->reader($payer, $amount);
+            $sections[] = $this->reader($payer, $amount, $aliases);
             $sections[] = $this->preflight($state, $payer, $amount);
         }
 
         if ($result !== null && $result->signature !== null) {
-            $sections[] = $this->lastTransaction($result, $state, $payer);
+            $sections[] = $this->lastTransaction($result, $aliases);
         }
 
         return $sections;
@@ -193,9 +205,9 @@ final class Inspector
      * carries the signature and `assets/inspector.js` reads the event on
      * first open. The row below is what a reader sees until then.
      *
-     * @return array{heading: string, rows: list<array{0: string, 1: string, 2?: string}>, note?: string, link?: array{href: string, text: string}, event?: string}
+     * @return array{heading: string, rows: list<array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool}, 2?: string}>, note?: string, link?: array{href: string, text: string}, event?: string}
      */
-    private function lastTransaction(MeterResult $result, ?SiteState $state, ?PayerState $payer): array
+    private function lastTransaction(MeterResult $result, array $aliases): array
     {
         $signature = (string) $result->signature;
 
@@ -213,13 +225,11 @@ final class Inspector
             ];
         }
 
-        $aliases = $this->aliasesFor($state, $payer);
-
         foreach ($result->instructions as $i => $instruction) {
             $n = $i + 1;
             $rows[] = [
                 sprintf('ix %d · program', $n),
-                $this->named($instruction->programId, $aliases),
+                $this->address($instruction->programId, $aliases),
             ];
 
             foreach ($instruction->accounts as $j => $account) {
@@ -232,7 +242,7 @@ final class Inspector
                 }
                 $rows[] = [
                     sprintf('ix %d · account %d', $n, $j + 1),
-                    $this->named($account->pubkey, $aliases),
+                    $this->address($account->pubkey, $aliases),
                     $flags === [] ? 'readonly' : implode(', ', $flags),
                 ];
             }
@@ -262,12 +272,66 @@ final class Inspector
     }
 
     /**
+     * One address, as the panel's rows carry it.
+     *
+     * **The rework of 2026-09-08.** Until now an alias lived in one of two
+     * places depending on the row: it *was* the label on an address row
+     * (`PAYRfig` → the base58), and it was a prefix jammed into the value with
+     * two spaces on a `delegate` or an instruction account. Same thing, two
+     * anatomies, and the label column meant "role" on some rows and "alias" on
+     * others. Now the label is always the role and the value is always this:
+     * alias, address, and the controls that belong to an address.
+     *
+     * That is worth more than tidiness. §9 wants a copy button, an explorer
+     * link and eventually a derivation on *every* address, and each of those
+     * needs somewhere to hang. One anatomy is one place to hang them.
+     *
+     * `explorer` is false where this site already knows the account is not
+     * there — a contract PDA before it is opened, a token account before the
+     * faucet. The address is real (it is derived), but the explorer would show
+     * "account not found", and a link that lands on nothing is worse than no
+     * link. The row says so in words beside it.
+     *
+     * **The alias is looked up, never passed in.** That changed on 2026-09-08
+     * and it closed a real gap rather than tidying one. When each call site
+     * chose its own alias, the site authority — which is the site account's
+     * `authority`, the treasury's `owner` and the signer of every metering
+     * call — went unnamed in all three places, because no single call site was
+     * obviously the one that should have named it. One map, consulted here,
+     * cannot have that shape of hole: an address either has a role in the map
+     * or it does not, and the answer is the same in every section it appears
+     * in. Which is §9's whole claim for aliases — *the same address always
+     * draws the same alias* — enforced instead of hoped for.
+     *
+     * @param array<string, string> $aliases address => alias
+     *
+     * @return array{address: string, alias: ?string, explorer: bool}
+     */
+    private function address(string $address, array $aliases, bool $onChain = true): array
+    {
+        return [
+            'address' => $address,
+            // Bare rather than invented on the spot: §9's aliases are stable
+            // per address across sessions, and one made up here for a role
+            // this panel could not identify would look exactly like the stable
+            // kind.
+            'alias' => $aliases[$address] ?? null,
+            'explorer' => $onChain,
+        ];
+    }
+
+    /**
      * Every address this request already knows, by alias.
      *
      * Matching by address rather than by position, because the instruction's
      * account order belongs to the library and a panel that assumed it would
      * mislabel every row the day it changed — silently, and in the one section
      * whose whole purpose is to be checkable.
+     *
+     * An address with no entry here is rendered bare rather than given an
+     * alias on the spot: §9's aliases are stable per address across sessions,
+     * and one invented for a role this panel could not identify would look
+     * exactly like the stable kind.
      *
      * @return array<string, string> address => alias
      */
@@ -283,6 +347,13 @@ final class Inspector
             $aliases[$state->address] = Alias::for(Alias::SITE, $state->address);
             $aliases[$state->site->mint] = Alias::for(Alias::MINT, $state->site->mint);
             $aliases[$state->site->treasury] = Alias::for(Alias::TREASURY, $state->site->treasury);
+            // Three sections show this one: the site account's authority, the
+            // treasury token account's owner, and the signer on the metering
+            // call. Named once here, it is the same short name in all of them
+            // — and if the treasury turns out to be owned by the site PDA
+            // rather than the authority, that row draws SPDA instead, which is
+            // also right and needs no change here.
+            $aliases[$state->site->authority] = Alias::for(Alias::AUTHORITY, $state->site->authority);
         }
 
         if ($payer !== null) {
@@ -292,16 +363,6 @@ final class Inspector
         }
 
         return $aliases;
-    }
-
-    /** @param array<string, string> $aliases */
-    private function named(string $address, array $aliases): string
-    {
-        // An address with no alias is shown bare rather than given one on the
-        // spot: §9's aliases are stable per address across sessions, and one
-        // invented here for a role this panel could not identify would look
-        // exactly like the stable kind.
-        return isset($aliases[$address]) ? $aliases[$address].'  '.$address : $address;
     }
 
     /**
@@ -412,15 +473,26 @@ final class Inspector
      * forms, beside the address a reader can paste into any explorer. Claim 6
      * in §2 is only checkable if the thing it is about is visible somewhere.
      *
-     * @param callable(int): string $amount both unit forms, at the mint's own decimals
+     * @param callable(int): string $amount  both unit forms, at the mint's own decimals
+     * @param array<string, string>  $aliases address => alias, for {@see address()}
      *
-     * @return array{heading: string, rows: list<array{0: string, 1: string}>, note?: string}
+     * @return array{heading: string, rows: list<array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool}, 2?: string}>, note?: string}
      */
-    private function reader(PayerState $payer, callable $amount): array
+    private function reader(PayerState $payer, callable $amount, array $aliases): array
     {
         $rows = [
-            [Alias::for(Alias::PAYER, $payer->wallet), $payer->wallet],
-            [Alias::for(Alias::PAYER_TOKEN_ACCOUNT, $payer->tokenAccount), $payer->tokenAccount],
+            ['your wallet', $this->address($payer->wallet, $aliases)],
+            [
+                'your token account',
+                $this->address(
+                    $payer->tokenAccount,
+                    $aliases,
+                    // Derived either way; only sometimes there. The explorer
+                    // link is dropped rather than pointed at "account not
+                    // found", and the row below says why in words.
+                    $payer->funds !== null,
+                ),
+            ],
         ];
 
         if ($payer->funds === null) {
@@ -431,15 +503,22 @@ final class Inspector
                 'delegate',
                 $payer->funds->delegate === null
                     ? 'none — nothing may draw from this account'
-                    : Alias::for(Alias::CONTRACT, $payer->funds->delegate).'  '.$payer->funds->delegate,
+                    : $this->address($payer->funds->delegate, $aliases),
             ];
             $rows[] = ['approved', $amount($payer->funds->delegatedAmount)];
         }
 
         if ($payer->contract === null) {
-            $rows[] = ['contract', 'none — the address is derived, the account is not there'];
+            $rows[] = [
+                'your contract',
+                $this->address($payer->contractAddress, $aliases, false),
+            ];
+            $rows[] = ['on chain', 'not yet — the address is derived, the account is not there'];
         } else {
-            $rows[] = [Alias::for(Alias::CONTRACT, $payer->contractAddress), $payer->contractAddress];
+            $rows[] = [
+                'your contract',
+                $this->address($payer->contractAddress, $aliases),
+            ];
             $rows[] = ['limit', $amount($payer->contract->limit)];
             $rows[] = ['used', $amount($payer->contract->used)];
             $rows[] = ['paid', $amount($payer->contract->paid)];

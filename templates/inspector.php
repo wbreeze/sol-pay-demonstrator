@@ -10,7 +10,8 @@
  * anything. Sections are homogeneous: every row in one either has the third
  * cell or none of them do.
  *
- * @var array<int, array{heading: string, rows: array<int, array{0: string, 1: string, 2?: string}>, note?: string}> $sections
+ * @var array<int, array{heading: string, rows: array<int, array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool}, 2?: string}>, note?: string}> $sections
+ * @var \Newsprint\Support\View $view
  */
 use Newsprint\Support\View;
 ?>
@@ -20,7 +21,9 @@ use Newsprint\Support\View;
         <p class="inspector-preamble">
             Short names like <code>SPDApep</code> are this site's own invention,
             derived from the address so they never change. They mean nothing to
-            a wallet or an explorer. The full address is always beside them.
+            a wallet or an explorer. The full address is always beside them,
+            and it is the full address that the copy button gives you — never
+            the short name.
         </p>
 <?php foreach ($sections as $section): ?>
         <section>
@@ -35,15 +38,22 @@ use Newsprint\Support\View;
 ?>
             <table<?= $mirrored ? ' class="mirrored"' : '' ?>>
 <?php foreach ($section['rows'] as $row): ?>
+<?php
+    /* An address row and a plain row differ only in what goes inside the value
+       cell, so the colspan logic above stays one branch rather than four. */
+    $cell = is_array($row[1])
+        ? $view->render('inspector-address', ['value' => $row[1]])
+        : View::e($row[1]);
+?>
                 <tr>
                     <th scope="row"><?= View::e($row[0]) ?></th>
 <?php if (isset($row[2])): ?>
-                    <td><?= View::e($row[1]) ?></td>
+                    <td><?= $cell ?></td>
                     <td class="mirrors"><?= View::e($row[2]) ?></td>
 <?php elseif ($mirrored): ?>
-                    <td colspan="2"><?= View::e($row[1]) ?></td>
+                    <td colspan="2"><?= $cell ?></td>
 <?php else: ?>
-                    <td><?= View::e($row[1]) ?></td>
+                    <td><?= $cell ?></td>
 <?php endif ?>
                 </tr>
 <?php endforeach ?>
@@ -72,9 +82,9 @@ use Newsprint\Support\View;
         </section>
 <?php endforeach ?>
     </div>
-<?php if (array_filter($sections, static fn (array $s): bool => isset($s['event'])) !== []): ?>
-    <?php /* Loaded only on a page that has a transaction to read an event for,
-             which is a small minority of them. Local file, per §10.3. */ ?>
+    <?php /* Two jobs: the copy buttons on every address row, and — on the
+             pages that have one — the deferred read of the transaction's
+             event. It used to load only for the second, which stopped being
+             true when addresses gained controls. Local file, per §10.3. */ ?>
     <script type="module" src="/assets/inspector.js"></script>
-<?php endif ?>
 </details>

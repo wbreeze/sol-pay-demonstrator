@@ -35,6 +35,16 @@ final class Alias
     public const TOKEN_PROGRAM = 'TKPG';
 
     /**
+     * The site authority (SPEC §4.4), added 2026-09-08 — the one address that
+     * appears in three sections at once and had no short name in any of them.
+     * It is the site account's `authority`, it is very likely the treasury
+     * token account's `owner`, and it is the fee payer that signs every
+     * metering call. Three sightings of one 44-character string is exactly the
+     * case §9's comparable-looking argument is about.
+     */
+    public const AUTHORITY = 'AUTH';
+
+    /**
      * Sixty-four syllables, so one byte of the hash chooses one with no
      * modulo bias. Pronounceable, short, and meaningless — a syllable that
      * looked like a word would invite someone to read significance into it.

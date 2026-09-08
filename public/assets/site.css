@@ -118,6 +118,29 @@ pre code { background: none; padding: 0; font-size: inherit; }
 .inspector table { width: 100%; border-collapse: collapse; }
 .inspector th { text-align: left; font-weight: 400; color: var(--ink-soft); padding: 0.25rem 1rem 0.25rem 0; white-space: nowrap; vertical-align: top; }
 .inspector td { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; word-break: break-all; padding: 0.25rem 0; }
+/* An address row (§9). The alias is a badge rather than two spaces of padding:
+   it is this site's invention and it should not look like part of the address
+   it sits beside. The two controls take the panel's existing UI voice — small,
+   uppercase, letter-spaced, the same treatment as the section headings — so
+   they read as controls rather than as more data, and they stay monospace
+   because inheriting anything else here means restating the whole font stack.
+   They are quiet at rest and full strength on hover or keyboard focus; not
+   hidden, because a control nobody can see on a touch screen is not a control. */
+.inspector .alias { background: var(--paper-sunk); color: var(--ink-soft); padding: 0 0.3em; border-radius: 2px; margin-right: 0.5em; }
+.inspector .copy { margin-left: 0.7em; font-family: inherit; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); opacity: 0.65; word-break: normal; white-space: nowrap; background: none; border: 0; padding: 0; cursor: pointer; }
+.inspector .copy:hover,
+.inspector .copy:focus-visible { opacity: 1; color: var(--accent); }
+.inspector .copy[data-said] { opacity: 1; color: var(--accent); }
+
+/* The address is the explorer link, and it still has to read as data. No link
+   colour at rest and a hairline underline in the rule colour — present enough
+   to be findable, quiet enough that a column of addresses does not turn into a
+   column of links. The site's accent arrives on hover and focus, where a
+   reader is asking. */
+.inspector a.base58 { color: inherit; text-decoration: none; border-bottom: 1px solid var(--rule); }
+.inspector a.base58:hover,
+.inspector a.base58:focus-visible { color: var(--accent); border-bottom-color: currentColor; }
+
 /* The check a preflight answer mirrors, beside the answer (§9). Not monospace
    and not black: it is a claim about the program, not a value read from it,
    and the two should not look like the same kind of thing.
