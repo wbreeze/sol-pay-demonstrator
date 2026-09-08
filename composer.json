@@ -5,7 +5,7 @@
     "license": "(MIT or Apache-2.0)",
     "homepage": "https://github.com/wbreeze/sol-pay-demonstrator",
     "require": {
-        "php": "^8.1",
+        "php": "^8.2",
         "ext-curl": "*",
         "ext-json": "*",
         "ext-pdo_sqlite": "*",

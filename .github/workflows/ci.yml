@@ -3,8 +3,9 @@
 # Two claims are checked here and they are different claims. The `test` matrix
 # checks that the code works on the versions the suite can run on; `floor`
 # checks README's other sentence — that `composer install --no-dev` resolves on
-# PHP 8.1 — which is how a reader who only wants to *run* the site installs it.
-# Testing only 8.4 would leave both ends unproven.
+# the stated floor — which is how a reader who only wants to *run* the site
+# installs it. Testing only 8.4 would leave both ends unproven, and the floor
+# claim was in fact false when this workflow first ran.
 #
 # The top of the matrix is 8.5 on purpose. `src/Chain/Rpc.php` names the gap it
 # closes: `curl_close` is deprecated as of 8.5, sol-pay's `php-conformance.yml`
@@ -110,11 +111,16 @@ jobs:
         run: php /tmp/phpstan.phar analyse --no-progress --memory-limit=1G --error-format=github
 
   floor:
-    # README: "PHP 8.1 or later ... the suite needs 8.2, because PHPUnit 11
-    # does; `composer install --no-dev` resolves on the floor, which is how a
-    # reader on 8.1 would install." That sentence is a promise to a reader with
-    # a stock PHP, and this is the only place it is kept honest.
-    name: php 8.1 floor
+    # The floor is a promise to a reader who only wants to *run* the site, and
+    # it is a different promise from "the suite passes": `--no-dev` install,
+    # parse, boot. The `test` matrix also has an 8.2 leg and that is not a
+    # duplicate — it runs PHPUnit, which needs the dev dependencies this job
+    # deliberately does not install.
+    #
+    # It was 8.1 until 2026-09-08, when this job's first run showed the promise
+    # was false: the constraints resolved on 8.1 but the committed lock did
+    # not, and the lock is what a reader installs. See README.
+    name: php 8.2 floor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -122,28 +128,34 @@ jobs:
       - name: set up php
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.1'
+          php-version: '8.2'
           extensions: curl, json, pdo_sqlite, sodium
           coverage: none
 
-      - name: runtime dependencies resolve on the floor
-        run: composer install --no-dev --no-interaction --no-progress
-
       - name: everything committed parses on the floor
+        # Before the install, deliberately: `php -l` needs no `vendor/`, so a
+        # lock that will not resolve on the floor does not also cost us the
+        # answer to "does this source parse there", which is a separate
+        # question — and on 2026-09-08 that ordering is exactly what was
+        # missing when the install failed first.
+        #
         # `php -l` and not a linter with opinions: the question here is whether
-        # 8.1 can parse what 8.4 accepted, which is a different question from
+        # the floor can parse what 8.4 accepted, which is a different question from
         # style and the only one this job is entitled to answer.
         run: |
           set -euo pipefail
           fail=0
           while IFS= read -r f; do
-            php -l "$f" > /dev/null || { echo "::error file=$f::does not parse on PHP 8.1"; fail=1; }
+            php -l "$f" > /dev/null || { echo "::error file=$f::does not parse on PHP 8.2"; fail=1; }
           done < <(find src bin config public templates tests -type f -name '*.php' -print)
           # The `bin/` scripts with no extension are PHP too; find by shebang.
           while IFS= read -r f; do
-            php -l "$f" > /dev/null || { echo "::error file=$f::does not parse on PHP 8.1"; fail=1; }
+            php -l "$f" > /dev/null || { echo "::error file=$f::does not parse on PHP 8.2"; fail=1; }
           done < <(grep -rl '^#!/usr/bin/env php' bin)
           exit $fail
+
+      - name: runtime dependencies resolve on the floor
+        run: composer install --no-dev --no-interaction --no-progress
 
       - name: the site boots
         # Not a browser test: start the server the README tells a reader to

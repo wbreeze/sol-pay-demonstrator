@@ -24,9 +24,31 @@ use SolPay\Core\Base58;
 final class Keypair
 {
     private function __construct(
-        private string $secret,
+        /**
+         * Nullable because `sodium_memzero` makes it so. Passing a typed
+         * property by reference to that function sets it to null and PHP does
+         * not enforce the declared type through that write — measured on
+         * 8.4.21: the property reads back as null from a `string` declaration,
+         * with no error at the point of the wipe. Declaring it `string` was
+         * therefore a lie for the object's last instant, and any read after a
+         * wipe is a TypeError rather than a wiped key. `secret()` names the
+         * wiped state instead of leaving it representable and unnamed.
+         */
+        private ?string $secret,
         public readonly string $address,
     ) {
+    }
+
+    /**
+     * The key material, or a refusal. Every use goes through here.
+     */
+    private function secret(): string
+    {
+        if ($this->secret === null) {
+            throw new \LogicException('this keypair has been wiped and cannot be used again');
+        }
+
+        return $this->secret;
     }
 
     public static function generate(): self
@@ -82,22 +104,24 @@ final class Keypair
             throw new \RuntimeException("cannot write keypair to {$path}");
         }
         @chmod($path, 0o600);
-        fwrite($handle, json_encode(array_values(unpack('C*', $this->secret))));
+        fwrite($handle, json_encode(array_values(unpack('C*', $this->secret()))));
         fclose($handle);
     }
 
     public function sign(string $message): string
     {
-        return sodium_crypto_sign_detached($message, $this->secret);
+        return sodium_crypto_sign_detached($message, $this->secret());
     }
 
     public function publicKeyBytes(): string
     {
-        return substr($this->secret, 32, 32);
+        return substr($this->secret(), 32, 32);
     }
 
     public function __destruct()
     {
-        sodium_memzero($this->secret);
+        if ($this->secret !== null) {
+            sodium_memzero($this->secret);
+        }
     }
 }

@@ -60,8 +60,10 @@ final class VerifierTest extends TestCase
 
         (new Verifier())->verify($issued, $this->address, $message, $this->sign($message), self::NOW + 5);
 
-        // No exception is the assertion; this keeps the count honest.
-        self::assertTrue(true);
+        // No exception is the assertion; this keeps the count honest without
+        // asserting a tautology, which an analyser reads as a test that tests
+        // nothing.
+        $this->addToAssertionCount(1);
     }
 
     public function testRefusesASignatureFromAnotherKey(): void

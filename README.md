@@ -35,9 +35,18 @@ bin/devnet-smoke          # airdrop, then one real transaction (see below)
 php -S localhost:8000 -t public
 ```
 
-PHP 8.1 or later, with `sodium`, `pdo_sqlite` and `curl` — all bundled. The
-suite (`composer test`) needs 8.2, because PHPUnit 11 does; `composer install
---no-dev` resolves on the floor, which is how a reader on 8.1 would install.
+PHP 8.2 or later, with `sodium`, `pdo_sqlite` and `curl` — all bundled.
+
+The floor was 8.1 until 2026-09-08, and CI is what moved it. The *constraints*
+resolved on 8.1, so the claim looked true; the committed lock did not, because
+it is resolved on 8.5 and takes the newest of each — `symfony/yaml` 7.4 and,
+transitively through commonmark, `nette/utils` 4.1, both of which require 8.2.
+A reader on stock 8.1 following the line above got exit 2 from `composer
+install`, and nothing here could have told them apart from a promise that held.
+Pinning the lock to 8.1 would have meant holding two packages back
+indefinitely, and `require-dev` could not have followed in any case: PHPUnit 11
+needs 8.2. 8.1 has been end-of-life since December 2025, so the floor moved to
+where the lock already was.
 
 `bin/devnet-smoke` is the first time `SolPay\Core\Tx` meets a validator.
 Conformance proves `compile` and `wire` agree byte-for-byte with
@@ -53,9 +62,10 @@ setup generates. They control nothing of value and the site says so.
 
 `.github/workflows/ci.yml`, on every push and pull request. The matrix is
 8.2 through 8.5 because that is the range PHPUnit 11 will run on, plus a
-separate 8.1 job that installs `--no-dev`, parses every committed file and
-boots `php -S` — the floor this README promises is a promise to someone who
-only wants to run the site, and it is checked in the only place it can be.
+separate 8.2 floor job that installs `--no-dev`, parses every committed file
+and boots `php -S` — the floor above is a promise to someone who only wants to
+run the site, which is a different promise from "the suite passes", and it is
+checked in the only place it can be. That job is what moved the floor off 8.1.
 8.5 is at the top on purpose: `Rpc::call` names the deprecation that sol-pay's
 `php-conformance.yml` would have caught and this repository had nowhere to.
 

@@ -352,7 +352,7 @@ $app = AppFactory::create();
 $app->addRoutingMiddleware();
 $errorMiddleware = $app->addErrorMiddleware(true, true, true);
 
-$page = static function (Response $response, string $html, int $status = 200) use ($view, $inspector): Response {
+$page = static function (Response $response, string $html, int $status = 200): Response {
     $response->getBody()->write($html);
 
     return $response->withStatus($status)->withHeader('Content-Type', 'text/html; charset=utf-8');
@@ -382,7 +382,7 @@ $errorMiddleware->setErrorHandler(
     },
 );
 
-$app->get('/', function (Request $request, Response $response) use ($view, $shell, $page, $contentDir, $siteVars, $config, $wallet): Response {
+$app->get('/', function (Request $request, Response $response) use ($view, $shell, $page, $contentDir, $siteVars, $config): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -396,7 +396,7 @@ $app->get('/', function (Request $request, Response $response) use ($view, $shel
     ])));
 });
 
-$article = $app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $siteVars, $wallet, $meterVars, $payerState): Response {
+$article = $app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $siteVars, $meterVars, $payerState): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -697,7 +697,7 @@ $app->post('/meter/prepare', function (Request $request, Response $response) use
  * says what it should. A signature the browser reports is a claim; an account
  * is a fact.
  */
-$app->post('/meter/opened', function (Request $request, Response $response) use ($json, $wallet, $read, $payerState, $rpcFactory, $config): Response {
+$app->post('/meter/opened', function (Request $request, Response $response) use ($json, $wallet, $payerState, $rpcFactory, $config): Response {
     $address = $wallet($request);
     if ($address === null) {
         return $json($response, ['message' => 'identify first'], 401);
@@ -1031,7 +1031,7 @@ $app->post('/setup', function (Request $request, Response $response) use ($view,
  * the browser answers back. `GET` renders the page, `POST` lands what it found
  * in `var/`, which Claude can read and which git ignores.
  */
-$app->get('/diagnostics/wallets', function (Request $request, Response $response) use ($view, $shell, $page, $wallet): Response {
+$app->get('/diagnostics/wallets', function (Request $request, Response $response) use ($view, $shell, $page): Response {
     return $page($response, $shell('Wallet diagnostics', $view->render('diagnostics')));
 });
 

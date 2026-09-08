@@ -54,6 +54,20 @@ parameters:
     # strict error handler, where an undefined variable is an exception rather
     # than an empty string.
 
+    ignoreErrors:
+        # `$state?->mintDecimals ?? $default` — PHPStan is right that `??`
+        # already suppresses the null-property access, so the `?->` is
+        # redundant *as a matter of language semantics*. It is not redundant as
+        # a matter of reading: `$state` really can be null (an unprovisioned
+        # copy, or an RPC read that failed), and the `?->` is where the code
+        # says so. Deleting it to satisfy the rule would leave the safety
+        # resting on a subtlety of `??` that a reader has to already know.
+        # Seven sites, all of that shape; none of them can hide a null
+        # dereference, because the rule only fires where the access is already
+        # safe.
+        -
+            message: '#on left side of \?\? is unnecessary#'
+
     # PHPDoc is documentation here, not a second type system. Where a docblock
     # and the code disagree the code wins, and an analyser that trusts the
     # comment reports a contradiction that does not exist.

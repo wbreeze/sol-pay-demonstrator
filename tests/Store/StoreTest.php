@@ -116,7 +116,9 @@ final class StoreTest extends TestCase
 
                 throw new \RuntimeException('meter failed');
             });
-            self::fail('the exception should propagate');
+            // No `self::fail()` here: the closure throws unconditionally, so a
+            // line after the call is unreachable and says nothing. The catch
+            // below is what asserts the exception came through.
         } catch (\RuntimeException $e) {
             self::assertSame('meter failed', $e->getMessage());
         }

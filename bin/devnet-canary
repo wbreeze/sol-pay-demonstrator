@@ -63,7 +63,10 @@ $rpc = new Rpc(
 function attempt(callable $call): mixed
 {
     $delays = [0, 2, 5];
-    $last = null;
+    // A message rather than the exception, and seeded rather than left null:
+    // the loop always runs, so `$last` is never null at the throw, and holding
+    // a nullable there only invites the null-handling this line does not need.
+    $last = 'no answer';
 
     foreach ($delays as $delay) {
         if ($delay > 0) {
@@ -72,11 +75,11 @@ function attempt(callable $call): mixed
         try {
             return $call();
         } catch (RpcException $e) {
-            $last = $e;
+            $last = $e->getMessage();
         }
     }
 
-    throw new RuntimeException($last?->getMessage() ?? 'no answer', CANARY_TEMPFAIL);
+    throw new RuntimeException($last, CANARY_TEMPFAIL);
 }
 
 function line(string $label, string $value): void
