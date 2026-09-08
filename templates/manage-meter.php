@@ -6,7 +6,7 @@
  * **before** the button, not after it, because each of them could change the
  * decision:
  *
- * 1. what is deleted, and that it signs you out;
+ * 1. what is deleted, and that the paying wallet is forgotten with it;
  * 2. that it costs you the articles you have already paid for, and how many;
  * 3. that the faucet ledger survives, and why that exception is allowed;
  * 4. that closing is itself written to a public ledger, permanently — the
@@ -44,9 +44,13 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
         manage and nothing to close.
     </p>
     <p class="fine">
-        Wallet <code><?= View::e(substr((string) $wallet, 0, 4).'…'.substr((string) $wallet, -4)) ?></code>
+        Paying wallet <code><?= View::e(substr((string) $wallet, 0, 4).'…'.substr((string) $wallet, -4)) ?></code>
     </p>
     <p><a href="/">Open an article</a> and the meter will offer you a limit.</p>
+
+    <section class="gate meter">
+<?= $view->render('forget-wallet', ['has_contract' => false]) ?>
+    </section>
 
 <?php else: ?>
     <section class="gate meter" data-manage
@@ -56,7 +60,7 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
              data-token-program="<?= View::e((string) $token_program) ?>">
 
         <p class="fine">
-            Wallet <code><?= View::e(substr((string) $wallet, 0, 4).'…'.substr((string) $wallet, -4)) ?></code>
+            Paying wallet <code><?= View::e(substr((string) $wallet, 0, 4).'…'.substr((string) $wallet, -4)) ?></code>
             · contract <code><?= View::e(substr((string) $contract['address'], 0, 4).'…'.substr((string) $contract['address'], -4)) ?></code>
         </p>
 
@@ -136,6 +140,8 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
             </label>
             <p><button type="button" class="wallet" data-renew>Renew</button></p>
 
+<?= $view->render('forget-wallet', ['has_contract' => true, 'contract' => $contract]) ?>
+
             <h2>Close and revoke</h2>
             <p>
                 Closing ends the contract and withdraws this site's authority
@@ -150,7 +156,7 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
 
             <h3>What closing deletes</h3>
             <ul class="plan">
-                <li>Your <strong>session</strong> — the row tying this browser to your wallet address. You are signed out.</li>
+                <li>Your <strong>session</strong> — the row tying this browser to your wallet address. The paying wallet is forgotten.</li>
                 <li>
                     Your <strong>view grants</strong> —
 <?php if ($live_grants > 0): ?>

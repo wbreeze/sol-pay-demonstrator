@@ -214,7 +214,7 @@ export async function accountFor(wallet, address) {
     throw new Error(
         'this site identified ' + shorten(address) + ', but your wallet is on '
         + (on || 'no account')
-        + '. Switch to that account in your wallet, or sign out and connect again.',
+        + '. Switch to that account in your wallet, or forget the stored wallet on the meter and connect again.',
     );
 }
 
@@ -284,7 +284,7 @@ export async function openOrRenew(ctx, wallet, limitText) {
     ctx.trace.timings.preparedAt = new Date(preparedAt).toISOString();
 
     if (prep.payer !== account.address) {
-        // The session moved under us — signed out in another tab, most likely.
+        // The session moved under us — the wallet was forgotten in another tab, most likely.
         throw new Error('this site is now identifying a different wallet; reload the page');
     }
 

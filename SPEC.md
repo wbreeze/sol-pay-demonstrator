@@ -278,6 +278,27 @@ The identification here is real but narrow — one address, one session id — a
 putting it where the money is about to move is what makes the narrowness
 visible. A reader who declines has lost nothing and is still reading the lede.
 
+**Decided 2026-09-08: the identity is shown on the meter, not in the
+masthead.** The site used to carry `signed in as 4xkQ…9fT` and a sign-out link
+across the top of every page. That is the same mistake one revision later. A
+name and a way out, repeated on every screen, is the furniture of an account,
+and it invites a reader to assume the account has contents — a profile, a
+history, preferences — when what exists is a cookie, a row mapping it to one
+address, and a contract on a public chain. Answering "who does this site think
+I am" only where the answer does work is the more honest placement, and
+`manage_meter` is already reachable at any time (§6), so nothing is buried.
+
+The vocabulary follows. **"Signed in" and "signed out" name a relationship this
+site does not have**, so the screens say the **paying wallet** is *stored* or
+*forgotten*. Storing one is not joining anything and forgetting one is not
+closing anything, which is why the wording has to distinguish them: the meter
+carries **Forget this wallet**, which drops the cookie and the row and touches
+nothing on chain, and it says so beside the button. The contract, the delegate
+and the unpaid residue survive it, and identifying again finds all three,
+because a contract address is derived from the site and the payer rather than
+remembered. A reader who confused the two would think they had revoked an
+authorization that is still live.
+
 **What was not dropped is the signature.** It is tempting, with no screen, to
 let the contract itself be the identity: the browser reports the signature of
 the transaction that opened it, and the server reads the payer off the account.
@@ -1027,15 +1048,24 @@ bound it, and let the bound be checked.
 
 | store | contents | goes away |
 | --- | --- | --- |
-| session | wallet address | sign out, contract close, or session end |
+| session | wallet address | forgetting the wallet, contract close, or session end |
 | view grants | wallet, article, expiry | 30 minutes — or at once, on close |
 | faucet ledger | wallet, time | never — see below |
 | request logs | IP, path, time | short rotation, never keyed to a wallet |
 
-**Closing also signs the reader out.** The session existed to tie a wallet to a
-browser so it could be charged. With nothing left to charge, it has no purpose,
-and leaving it in place while claiming to have forgotten them would be a
-contradiction sitting in a cookie.
+**Closing also forgets the paying wallet.** The session existed to tie a wallet
+to a browser so it could be charged. With nothing left to charge, it has no
+purpose, and leaving it in place while claiming to have forgotten them would be
+a contradiction sitting in a cookie.
+
+The reverse does not hold, and §5's wording exists to keep the two apart:
+forgetting the wallet on its own is not erasure. It drops the cookie and the
+session row — the browser end of the §5 mapping, and nothing else. Grants
+survive their thirty minutes, the faucet ledger is untouched, and the contract
+and its delegate stay exactly as they were. It is offered because a shared
+machine, a second wallet or a change of mind before authorizing should not
+require a transaction, and it is labelled so that no reader mistakes it for
+one.
 
 Five qualifications. The first four are why the rule is not as strong as it
 sounds; the fifth is what keeps it honest.

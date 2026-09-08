@@ -107,7 +107,7 @@ function show(result) {
         // Read back from the token account after the close rather than
         // asserted — this is the line §2's claim 6 is actually about.
         ['delegate', result.delegate ? 'STILL SET: ' + result.delegate : 'none — read back from your token account'],
-        ['session', (erased.sessions || 0) + ' row deleted — you are signed out'],
+        ['session', (erased.sessions || 0) + ' row deleted — paying wallet forgotten'],
         ['view grants', (erased.grants || 0) + ' row(s) deleted'],
         ['faucet ledger', 'kept, for the reason on the privacy page'],
     ];

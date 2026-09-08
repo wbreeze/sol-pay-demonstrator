@@ -16,7 +16,7 @@ The list is short enough to print in full, so it is printed in full.
 
 | what | why | how long |
 | --- | --- | --- |
-| A session cookie — a random id, nothing else | To remember that the wallet you signed in with is yours for this visit | Until you sign out or close the browser |
+| A session cookie — a random id, nothing else | To remember which wallet is paying for this visit | Until you forget the wallet, close your meter, or close the browser |
 | Your wallet address, against that session | It is the one thing the payment needs. Every contract is derived from it | The life of the session |
 | Which articles you have already paid for, and when | So that a refresh, a back button or a second tab doesn't charge you twice for one article | 30 minutes per article — or the moment you close your meter |
 | Your address and IP, if you used the faucet | So one visitor can't drain the demo's tokens | Long enough to enforce the limit |
@@ -66,7 +66,8 @@ missed, which is why it is written down.
 
 Closing your meter ends the arrangement, so it ends the record of it. Your
 session, your wallet address and every receipt above are deleted at that moment,
-not thirty minutes later, and you are signed out. That is what closing means.
+not thirty minutes later, and the paying wallet is forgotten. That is what
+closing means.
 
 Three honest footnotes, because a promise this clean usually has them and you
 should hear them from us.

@@ -7,7 +7,7 @@ lede: >
   This site used to have a sign-in page. It was in the specification, it was
   built, and it worked. It was also absent from the state diagram the whole
   design had been drawn against — and the diagram was right.
-reading_time: 4
+reading_time: 5
 ---
 
 # The screen the diagram never had
@@ -101,3 +101,35 @@ The narrower rule underneath it: when a design adds something its reference
 does not have, the addition should have to justify itself out loud. This one
 had — in a subordinate clause, in a section nobody was reading for that
 purpose. Which is not quite the same as being justified.
+
+## Postscript: the same mistake, one screen up
+
+The page went in one revision. The masthead went in the next, and it should
+have gone in the first.
+
+Across the top of every page, under the wordmark, the site had been saying
+`signed in as 4xkQ…9fT`, with a link to sign out beside it. Removing the
+sign-in screen had not touched it. But the objection that killed the screen
+applies to a name and an exit repeated on every page at least as well: that is
+what an account looks like, and an account is assumed to have contents. A
+profile. A history. Preferences. What is actually there is a cookie, a row
+mapping it to one address, and a contract on a public chain.
+
+Nobody had argued for the masthead. It was not in the diagram either. It
+arrived as a convention — sites that have sign-in have a signed-in indicator —
+and a convention is not asked to justify itself out loud, which is precisely
+the failure the rule above describes. The screen at least had a sentence
+admitting it was an invention. The masthead had none, because nothing had been
+asked of it.
+
+It also had a bug, and the bug is the same fact seen from underneath. Closing a
+contract erases the session, and the meter reports that erasure in place rather
+than reloading, because a reader ought to be able to watch a deletion happen.
+The masthead had rendered before any of that. It went on saying *signed in as*
+to a reader the site had just finished forgetting. One fact displayed in two
+places, and only one of them was ever told.
+
+The identity now appears where it does work: on the meter, beside what it is
+spending, next to a control that offers to forget it. The vocabulary followed.
+*Signed in* and *signed out* name a relationship this site does not have, so
+the screens say the paying wallet is **stored**, or **forgotten**.

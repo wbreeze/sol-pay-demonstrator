@@ -49,11 +49,11 @@ a successful charge should still leave the reader holding what they paid for.
 Now the mistakes swap sizes.
 
 Closing purges this site's record of the reader — the session, every live view
-grant — and signs them out. Do that on the strength of a transaction that may
-not have landed, and you have erased a reader whose contract is still open and
-whose limit is still being drawn against. They are signed out of a site that is
-still authorized to take their money, with nothing on their screen to explain
-it.
+grant — and forgets the paying wallet. Do that on the strength of a transaction
+that may not have landed, and you have erased a reader whose contract is still
+open and whose limit is still being drawn against. The site has forgotten a
+wallet it is still authorized to take money from, with nothing on the reader's
+screen to explain it.
 
 The other mistake is asking them to click a button again.
 

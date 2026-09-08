@@ -142,17 +142,25 @@ button:hover { filter: brightness(1.1); }
  * `manage_meter` decision — reachable at any time, not only at the limit —
  * is the same argument one screen further on.
  */
-.who {
-    display: flex;
-    gap: 0.6rem;
-    align-items: baseline;
-    justify-content: center;
-    margin: 0.6rem 0 0;
-    font-size: 0.8rem;
-    color: var(--ink-soft);
+/* The masthead used to carry "signed in as …" and a sign-out link. Both are
+   gone: see the note in templates/layout.php. `.linkish` survives because the
+   meter uses it for "forget this wallet", which is the same control in the one
+   place it belongs. */
+.forget { margin: 0 0 0.5rem; }
+/* Outlined like the wallet buttons beside it, not solid: forgetting a wallet
+   is the quietest thing in this box and should not be the loudest button in
+   it. It is not a `.wallet` — no wallet is opened — so it gets its own rule
+   rather than borrowing that name. */
+.forget button {
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--rule);
+    border-radius: 0.3rem;
+    background: var(--paper);
+    color: var(--ink);
+    font: inherit;
+    font-size: 0.95rem;
 }
-.who form { display: inline; margin: 0; }
-.signed-in code { font-size: 0.8rem; }
+.forget button:hover { border-color: var(--accent); color: var(--accent); filter: none; }
 
 .linkish {
     background: none;

@@ -133,8 +133,8 @@ $store = static function () use ($config): Store {
 
 /**
  * The viewer-to-wallet map (§5), which is the integrator's one obligation and
- * here is a cookie and a row. Null means nobody is signed in, which is the
- * ordinary state of every public page on this site.
+ * here is a cookie and a row. Null means no paying wallet is stored for this
+ * browser, which is the ordinary state of every public page on this site.
  */
 $wallet = static function (Request $request) use ($store): ?string {
     $id = Session::idFrom($request);
@@ -358,7 +358,7 @@ $page = static function (Response $response, string $html, int $status = 200) us
     return $response->withStatus($status)->withHeader('Content-Type', 'text/html; charset=utf-8');
 };
 
-$shell = static function (string $title, string $content, ?string $wallet = null, ?PayerState $payer = null) use ($view, $inspector): string {
+$shell = static function (string $title, string $content, ?PayerState $payer = null) use ($view, $inspector): string {
     return $view->render('layout', [
         'title' => $title,
         'content' => $content,
@@ -366,7 +366,6 @@ $shell = static function (string $title, string $content, ?string $wallet = null
         // has already read them. A page with nothing to say about them does
         // not spend an RPC call to say nothing.
         'inspector' => $inspector($payer),
-        'wallet' => $wallet,
     ]);
 };
 
@@ -394,7 +393,7 @@ $app->get('/', function (Request $request, Response $response) use ($view, $shel
         'articles' => $articles,
         'site' => $siteVars(),
         'provisioned' => $config->isProvisioned(),
-    ]), $wallet($request)));
+    ])));
 });
 
 $article = $app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $siteVars, $wallet, $meterVars, $payerState): Response {
@@ -433,7 +432,7 @@ $article = $app->get('/a/{slug}', function (Request $request, Response $response
         'body' => $body,
         'site' => $siteVars(),
         'meter' => $meterVars($request, $result) + ['advanced' => $advanced],
-    ]), $wallet($request), $payerState($request)));
+    ]), $payerState($request)));
 });
 
 /**
@@ -599,9 +598,15 @@ $app->post('/signin/verify', function (Request $request, Response $response) use
 });
 
 /**
- * §10.4 signs a reader out when they close their contract, and a reader who
- * simply wants to leave is owed the same thing without one. This drops the
- * session row and the cookie; it touches nothing on chain.
+ * Forget the paying wallet: the session row and the cookie go, and nothing on
+ * chain is touched. §10.4 does this as part of closing a contract, and a
+ * reader who wants only the browser end of the §5 mapping dropped — a shared
+ * machine, a second wallet, a change of mind before authorizing — is owed it
+ * without a transaction.
+ *
+ * The one caller is the meter (`templates/forget-wallet.php`), which is also
+ * where the difference between this and closing is spelled out. It was in the
+ * masthead once; see the note in `templates/layout.php` for why it left.
  */
 $app->post('/signout', function (Request $request, Response $response) use ($store): Response {
     $id = Session::idFrom($request);
@@ -760,7 +765,7 @@ $app->get('/meter', function (Request $request, Response $response) use ($view, 
         return $page($response, $shell('The meter', $view->render('manage-meter', [
             'stage' => 'anonymous',
             'site' => $siteVars(),
-        ]), null));
+        ])));
     }
 
     $payer = $payerState($request);
@@ -772,7 +777,7 @@ $app->get('/meter', function (Request $request, Response $response) use ($view, 
         return $page($response, $shell('The meter', $view->render('manage-meter', [
             'stage' => 'unreadable',
             'site' => $siteVars(),
-        ]), $address));
+        ])));
     }
 
     if (!$payer->hasContract()) {
@@ -780,7 +785,7 @@ $app->get('/meter', function (Request $request, Response $response) use ($view, 
             'stage' => 'no-contract',
             'site' => $siteVars(),
             'wallet' => $address,
-        ]), $address, $payer));
+        ]), $payer));
     }
 
     $contract = $payer->contract;
@@ -814,7 +819,7 @@ $app->get('/meter', function (Request $request, Response $response) use ($view, 
         // *before* they click, and told the true number rather than "an
         // article".
         'live_grants' => $store()->liveGrantCount($address),
-    ]), $address, $payer));
+    ]), $payer));
 });
 
 /**
@@ -1027,7 +1032,7 @@ $app->post('/setup', function (Request $request, Response $response) use ($view,
  * in `var/`, which Claude can read and which git ignores.
  */
 $app->get('/diagnostics/wallets', function (Request $request, Response $response) use ($view, $shell, $page, $wallet): Response {
-    return $page($response, $shell('Wallet diagnostics', $view->render('diagnostics'), $wallet($request)));
+    return $page($response, $shell('Wallet diagnostics', $view->render('diagnostics')));
 });
 
 $app->post('/diagnostics/report', function (Request $request, Response $response) use ($json, $config): Response {

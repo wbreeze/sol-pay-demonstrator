@@ -104,7 +104,7 @@ $contract = $meter['contract'];
     </p>
 
     <p class="fine">
-        Wallet <code><?= View::e(substr((string) $meter['wallet'], 0, 4).'…'.substr((string) $meter['wallet'], -4)) ?></code>
+        Paying wallet <code><?= View::e(substr((string) $meter['wallet'], 0, 4).'…'.substr((string) $meter['wallet'], -4)) ?></code>
         · balance <?= View::e((string) $meter['balance']) ?> <?= $symbol ?>
     </p>
 
@@ -142,6 +142,28 @@ $contract = $meter['contract'];
     </p>
 <?php if ($meter['faucet']['available']): ?>
     <p><button type="button" class="wallet" data-faucet>Send me <?= View::e((string) $meter['faucet']['demo']) ?> <?= $symbol ?></button></p>
+<?php else: ?>
+    <?php /* **The one branch that could dead-end.** The faucet is spent, the
+             balance cannot cover the charge, and renewing raises a ceiling
+             that was never the problem — so without this there is nothing on
+             the screen to do next, which is half of §8's rule rather than all
+             of it. §8 says every branch leaving the happy path early is a
+             screen; a screen with no way onward is a nicer error page.
+
+             A link and not a button, deliberately. Closing is a wallet
+             transaction that forgives a residue, purges live grants and signs
+             the reader out, and §10.4 qualification 2 says that cost is
+             "stated on the close confirmation rather than discovered". The
+             four disclosures it requires live on the meter, above the button,
+             where a reader can still change their mind. Putting a one-click
+             close inside an error box would either drop them or reproduce
+             them, and neither is a small control. */ ?>
+    <p>
+        This wallet has had its one grant, so there is no top-up here. What is
+        left is <a href="/meter">the meter</a>: close the contract, and this
+        site forgets you. Closing forgives what you are carrying rather than
+        collecting it.
+    </p>
 <?php endif ?>
 <?php endif ?>
 <?php if ($shortfall !== null && $shortfall->allowanceShort > 0): ?>
