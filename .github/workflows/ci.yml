@@ -41,7 +41,7 @@ jobs:
       matrix:
         php: ['8.2', '8.3', '8.4', '8.5']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: set up php
         uses: shivammathur/setup-php@v2
@@ -78,7 +78,7 @@ jobs:
     name: phpstan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -123,7 +123,7 @@ jobs:
     name: php 8.2 floor
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: set up php
         uses: shivammathur/setup-php@v2
@@ -194,7 +194,7 @@ jobs:
     name: vendored assets
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: the committed browser dependencies are present
         run: |
           set -euo pipefail
