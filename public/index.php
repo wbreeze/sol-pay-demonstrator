@@ -20,6 +20,7 @@ use Newsprint\Auth\Verifier;
 use Newsprint\Chain\Faucet;
 use Newsprint\Chain\PayerReader;
 use Newsprint\Chain\PayerState;
+use Newsprint\Chain\ProgramEvent;
 use Newsprint\Chain\Rpc;
 use Newsprint\Chain\SiteReader;
 use Newsprint\Chain\SiteState;
@@ -94,10 +95,10 @@ $read = static function () use ($config, &$state, &$stateError): ?SiteState {
 };
 
 $panel = new Inspector($config);
-$inspector = static function (?PayerState $payer = null) use ($panel, $read, &$stateError): array {
+$inspector = static function (?PayerState $payer = null, ?MeterResult $result = null) use ($panel, $read, &$stateError): array {
     $state = $read();
 
-    return $panel->sections($state, $stateError, $payer);
+    return $panel->sections($state, $stateError, $payer, $result);
 };
 
 /**
@@ -358,14 +359,18 @@ $page = static function (Response $response, string $html, int $status = 200): R
     return $response->withStatus($status)->withHeader('Content-Type', 'text/html; charset=utf-8');
 };
 
-$shell = static function (string $title, string $content, ?PayerState $payer = null) use ($view, $inspector): string {
+$shell = static function (string $title, string $content, ?PayerState $payer = null, ?MeterResult $result = null) use ($view, $inspector): string {
     return $view->render('layout', [
         'title' => $title,
         'content' => $content,
         // The reader's own accounts appear in the inspector only where a page
         // has already read them. A page with nothing to say about them does
         // not spend an RPC call to say nothing.
-        'inspector' => $inspector($payer),
+        //
+        // §9's last section is narrower still: it needs a transaction *this
+        // request* produced, which is the article route and nowhere else. §10.4
+        // leaves no stored history for any other page to show.
+        'inspector' => $inspector($payer, $result),
     ]);
 };
 
@@ -432,7 +437,7 @@ $article = $app->get('/a/{slug}', function (Request $request, Response $response
         'body' => $body,
         'site' => $siteVars(),
         'meter' => $meterVars($request, $result) + ['advanced' => $advanced],
-    ]), $payerState($request)));
+    ]), $payerState($request), $result));
 });
 
 /**
@@ -1031,6 +1036,70 @@ $app->post('/setup', function (Request $request, Response $response) use ($view,
  * the browser answers back. `GET` renders the page, `POST` lands what it found
  * in `var/`, which Claude can read and which git ignores.
  */
+/**
+ * SPEC §9's last section, read on demand.
+ *
+ * The panel renders the signature and the instruction bytes with the page,
+ * because the server already had both. The decoded event needs
+ * `getTransaction`, which would be a fourth RPC call on a request §12.4
+ * budgets about three for — and spent on every metered view whether or not
+ * anybody expands a panel §9 says is collapsed by default. So it is here, and
+ * `assets/inspector.js` asks for it the first time the panel is opened.
+ *
+ * Nothing about this endpoint is privileged and it deliberately holds no
+ * session: a transaction signature is public, and every byte this returns is
+ * readable by anyone with the same signature and an explorer. What it is not
+ * is a lookup of *your* history — it answers about the one signature it is
+ * given, and §10.4 leaves this site with no list to hand out.
+ */
+$app->get('/inspector/event/{signature}', function (Request $request, Response $response, array $args) use ($json, $rpcFactory, $config): Response {
+    $signature = (string) $args['signature'];
+
+    // Base58 has no 0, O, I or l; a signature is 64 raw bytes, which encodes
+    // to 86 to 88 characters. Checked here so an obviously malformed value
+    // costs a regex rather than a round trip to the endpoint.
+    if (preg_match('/^[1-9A-HJ-NP-Za-km-z]{64,90}$/', $signature) !== 1) {
+        return $json($response, ['text' => 'that is not a transaction signature'], 400);
+    }
+
+    if (!$config->isProvisioned()) {
+        return $json($response, ['text' => 'this copy is not provisioned']);
+    }
+
+    try {
+        $logs = $rpcFactory()->transactionLogs($signature);
+    } catch (RpcException $e) {
+        // §8.1 again: the endpoint's own message, not the transaction's logs.
+        return $json($response, ['text' => 'the endpoint did not answer: '.$e->getMessage()]);
+    }
+
+    if ($logs === null) {
+        return $json($response, ['text' => 'the cluster does not have this transaction yet — try again in a moment']);
+    }
+
+    $event = ProgramEvent::fromLogs($logs);
+    if ($event === null) {
+        return $json($response, ['text' => 'no '.implode(', ', ProgramEvent::known()).' event in this transaction']);
+    }
+
+    $decimals = (int) $config->siteParams()['decimals'];
+    $symbol = (string) $config->siteParams()['symbol'];
+
+    $parts = [];
+    foreach ($event->fields as $field => $value) {
+        $parts[] = $field.' '.match (true) {
+            // The two counts are counts. Everything else is a token amount and
+            // gets both unit forms, for the reason §9 gives about the panel
+            // generally: a six-decimal scaling error is invisible in one form.
+            $field === 'contract' => (string) $value,
+            $field === 'page_views' => (string) $value,
+            default => sprintf('%s %s (%d)', Units::fromBaseUnits((int) $value, $decimals), $symbol, (int) $value),
+        };
+    }
+
+    return $json($response, ['text' => $event->name.' — '.implode(' · ', $parts)]);
+});
+
 $app->get('/diagnostics/wallets', function (Request $request, Response $response) use ($view, $shell, $page): Response {
     return $page($response, $shell('Wallet diagnostics', $view->render('diagnostics')));
 });

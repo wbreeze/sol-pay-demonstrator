@@ -6,6 +6,7 @@ namespace Newsprint\Metering;
 
 use SolPay\Core\Blocked;
 use SolPay\Core\Cause;
+use SolPay\Core\Instruction;
 use SolPay\Core\Shortfall;
 
 /**
@@ -31,6 +32,24 @@ final class MeterResult
         public readonly int $charge = 0,
         public readonly bool $settles = false,
         public readonly int $pageViews = 1,
+        /**
+         * The instructions this call built, exactly as `SolPay\Core\Ix`
+         * returned them, for SPEC §9's last section.
+         *
+         * They are carried rather than rebuilt for display, and that is the
+         * whole point: §9 wants the instruction bytes shown *beside* the
+         * transaction as "a live check on the library's claim that its output
+         * drops straight into a transaction message". A panel that rebuilt
+         * them from the same inputs would agree with itself no matter what was
+         * sent, which is not a check of anything.
+         *
+         * Empty on every outcome that sent nothing — a live grant, a blocked
+         * preflight, an unreadable endpoint. There is no transaction to be the
+         * last one.
+         *
+         * @var list<Instruction>
+         */
+        public readonly array $instructions = [],
     ) {
     }
 
@@ -40,18 +59,20 @@ final class MeterResult
         return new self(MeterOutcome::Granted, detail: 'a live grant already covered this article');
     }
 
-    public static function metered(string $signature, int $charge, bool $settles, int $pageViews = 1): self
+    /** @param list<Instruction> $instructions */
+    public static function metered(string $signature, int $charge, bool $settles, int $pageViews = 1, array $instructions = []): self
     {
-        return new self(MeterOutcome::Metered, signature: $signature, detail: 'confirmed', charge: $charge, settles: $settles, pageViews: $pageViews);
+        return new self(MeterOutcome::Metered, signature: $signature, detail: 'confirmed', charge: $charge, settles: $settles, pageViews: $pageViews, instructions: $instructions);
     }
 
     /**
      * §7.3: sent, not confirmed inside the window, served anyway and flagged.
      * The site absorbs the cheaper of two asymmetric errors.
      */
-    public static function unconfirmed(string $signature, int $charge, bool $settles, int $pageViews = 1): self
+    /** @param list<Instruction> $instructions */
+    public static function unconfirmed(string $signature, int $charge, bool $settles, int $pageViews = 1, array $instructions = []): self
     {
-        return new self(MeterOutcome::Unconfirmed, signature: $signature, detail: 'sent; not confirmed inside the window', charge: $charge, settles: $settles, pageViews: $pageViews);
+        return new self(MeterOutcome::Unconfirmed, signature: $signature, detail: 'sent; not confirmed inside the window', charge: $charge, settles: $settles, pageViews: $pageViews, instructions: $instructions);
     }
 
     /** The preflight refused before anything was signed — `can_meter` said no. */
@@ -61,9 +82,10 @@ final class MeterResult
     }
 
     /** The chain refused. */
-    public static function failed(string $detail, ?Cause $cause, ?Shortfall $shortfall, ?string $signature = null): self
+    /** @param list<Instruction> $instructions */
+    public static function failed(string $detail, ?Cause $cause, ?Shortfall $shortfall, ?string $signature = null, array $instructions = []): self
     {
-        return new self(MeterOutcome::Failed, signature: $signature, cause: $cause, shortfall: $shortfall, detail: $detail);
+        return new self(MeterOutcome::Failed, signature: $signature, cause: $cause, shortfall: $shortfall, detail: $detail, instructions: $instructions);
     }
 
     /** The endpoint did not answer. Nothing was sent and nothing is owed. */

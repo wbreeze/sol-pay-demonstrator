@@ -48,6 +48,49 @@ function base64(bytes) {
     return btoa(binary);
 }
 
+/**
+ * The one refusal a reader can undo themselves.
+ *
+ * Measured 2026-09-08: Brave with `brave://settings/wallet` on **Brave
+ * Wallet** registers only Brave Wallet, which has no `solana:signIn`, so §5
+ * refuses — correctly — and the reader is told their wallet is not supported
+ * while a perfectly good Phantom sits one setting away, never having reached
+ * the page. Changing the setting to *Extensions (Brave Wallet fallback)* was
+ * the entire fix; nothing in this repository was wrong.
+ *
+ * That makes this the cheapest sentence on the site. The alternative is a
+ * reader concluding the demo is broken, which is the one conclusion a
+ * demonstration cannot afford, and it costs a paragraph shown to nobody else.
+ *
+ * `navigator.brave` is the same predicate `/diagnostics/wallets` records as
+ * `browser.brave`, and it was `true` in the report that produced this.
+ *
+ * **The address is text, not a link, and that is not a style choice.** A page
+ * cannot navigate to `brave://` — the browser refuses it — so a link here
+ * would look like the fix and do nothing, which is worse than the dead end it
+ * was meant to clear.
+ */
+function browserWalletHint() {
+    if (!navigator.brave) return null;
+
+    const hint = document.createElement('p');
+    hint.className = 'pending';
+    hint.append(document.createTextNode(
+        'Brave ships its own wallet, and it can stand in front of an extension: '
+        + 'the page then sees only Brave Wallet, which does not offer sign-in. '
+        + 'If you have an extension wallet installed, open ',
+    ));
+    const path = document.createElement('code');
+    path.textContent = 'brave://settings/wallet';
+    hint.append(path);
+    hint.append(document.createTextNode(
+        ' — it has to be pasted into the address bar, as a page is not allowed to link there — '
+        + 'and set the default Solana wallet to “Extensions (Brave Wallet fallback)”. Then reload this page.',
+    ));
+
+    return hint;
+}
+
 function drawChoices() {
     if (!choices) return;
     const ready = usable(ctx.chain);
@@ -62,7 +105,9 @@ function drawChoices() {
         const where = document.createElement('a');
         where.href = '/diagnostics/wallets';
         where.textContent = 'What this page can see';
-        choices.append(none, where);
+
+        const hint = browserWalletHint();
+        choices.append(none, ...(hint ? [hint] : []), where);
         choices.hidden = false;
         return;
     }

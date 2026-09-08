@@ -4,11 +4,13 @@
  * page. Claim 7 in §2 is its job: every number on the screen came from an
  * account, not from the server's memory.
  *
- * At this stage it can only show what the site was configured with. The
- * decoded accounts, the preflight answers and the last transaction arrive as
- * the screens that read them do.
+ * A row is a label and a value, and optionally a third cell naming the
+ * on-chain check the value mirrors — §9 asks for that beside every preflight
+ * answer, and a number with no claim next to it cannot be wrong about
+ * anything. Sections are homogeneous: every row in one either has the third
+ * cell or none of them do.
  *
- * @var array<int, array{heading: string, rows: array<int, array{0: string, 1: string}>, note?: string}> $sections
+ * @var array<int, array{heading: string, rows: array<int, array{0: string, 1: string, 2?: string}>, note?: string}> $sections
  */
 use Newsprint\Support\View;
 ?>
@@ -23,18 +25,56 @@ use Newsprint\Support\View;
 <?php foreach ($sections as $section): ?>
         <section>
             <h3><?= View::e($section['heading']) ?></h3>
-            <table>
-<?php foreach ($section['rows'] as [$label, $value]): ?>
+<?php
+            /* A section either has a third column or it does not, and the
+               table has to agree with itself either way: in a section that
+               has one, a row without a third cell spans both — which is what
+               lets a signature use the full width while the rows around it
+               keep their mirrored check in a column of its own. */
+            $mirrored = array_filter($section['rows'], static fn (array $r): bool => isset($r[2])) !== [];
+?>
+            <table<?= $mirrored ? ' class="mirrored"' : '' ?>>
+<?php foreach ($section['rows'] as $row): ?>
                 <tr>
-                    <th scope="row"><?= View::e($label) ?></th>
-                    <td><?= View::e($value) ?></td>
+                    <th scope="row"><?= View::e($row[0]) ?></th>
+<?php if (isset($row[2])): ?>
+                    <td><?= View::e($row[1]) ?></td>
+                    <td class="mirrors"><?= View::e($row[2]) ?></td>
+<?php elseif ($mirrored): ?>
+                    <td colspan="2"><?= View::e($row[1]) ?></td>
+<?php else: ?>
+                    <td><?= View::e($row[1]) ?></td>
+<?php endif ?>
                 </tr>
 <?php endforeach ?>
+<?php if (isset($section['event'])):
+    /* Filled by assets/inspector.js when the panel is first opened. Deferred
+       rather than read on the request that made the transaction, because §12.4
+       budgets about three RPC calls per metered view and §9 says this panel is
+       collapsed by default — so the fourth call is only spent by a reader who
+       actually looks. Without JavaScript the row keeps the sentence below,
+       which stays true rather than becoming a spinner that never resolves. */ ?>
+                <tr data-event-for="<?= View::e($section['event']) ?>">
+                    <th scope="row">event</th>
+                    <td data-event-slot>not read yet — the panel reads it from the chain when you open this</td>
+                </tr>
+<?php endif ?>
             </table>
+<?php if (isset($section['link'])): ?>
+            <p class="section-link">
+                <a href="<?= View::e($section['link']['href']) ?>"
+                   rel="noreferrer noopener" target="_blank"><?= View::e($section['link']['text']) ?></a>
+            </p>
+<?php endif ?>
 <?php if (isset($section['note'])): ?>
             <p class="note"><?= View::e($section['note']) ?></p>
 <?php endif ?>
         </section>
 <?php endforeach ?>
     </div>
+<?php if (array_filter($sections, static fn (array $s): bool => isset($s['event'])) !== []): ?>
+    <?php /* Loaded only on a page that has a transaction to read an event for,
+             which is a small minority of them. Local file, per §10.3. */ ?>
+    <script type="module" src="/assets/inspector.js"></script>
+<?php endif ?>
 </details>

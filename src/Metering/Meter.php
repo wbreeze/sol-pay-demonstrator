@@ -146,7 +146,10 @@ final class Meter
         $addresses = $this->config->provisioned();
         $authority = Keypair::load($this->config->keypairPath('authority'));
 
-        $outcome = $this->submitter->send([
+        // Built once and kept, rather than built inside the send call. §9's
+        // last section shows these bytes as evidence, and evidence that was
+        // reconstructed for the display would only ever agree with itself.
+        $instructions = [
             Ix::meterAndSettle(
                 $this->config->program(),
                 $state->address,
@@ -157,14 +160,16 @@ final class Meter
                 $addresses['mint'],
                 $pageViews,
             ),
-        ], $authority);
+        ];
+
+        $outcome = $this->submitter->send($instructions, $authority);
 
         if ($outcome->status === SubmitStatus::Confirmed) {
-            return MeterResult::metered((string) $outcome->signature, $charge, $settles, $pageViews);
+            return MeterResult::metered((string) $outcome->signature, $charge, $settles, $pageViews, $instructions);
         }
 
         if ($outcome->status === SubmitStatus::Unconfirmed) {
-            return MeterResult::unconfirmed((string) $outcome->signature, $charge, $settles, $pageViews);
+            return MeterResult::unconfirmed((string) $outcome->signature, $charge, $settles, $pageViews, $instructions);
         }
 
         // Failed. §8.2: `InsufficientFunds` is ambiguous by construction — SPL
@@ -177,6 +182,7 @@ final class Meter
             $outcome->cause,
             $this->shortfall($payer, $payer->contract->unpaid() + $charge),
             $outcome->signature,
+            $instructions,
         );
     }
 

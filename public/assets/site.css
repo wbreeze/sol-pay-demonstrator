@@ -96,6 +96,20 @@ pre code { background: none; padding: 0; font-size: inherit; }
 .inspector table { width: 100%; border-collapse: collapse; }
 .inspector th { text-align: left; font-weight: 400; color: var(--ink-soft); padding: 0.25rem 1rem 0.25rem 0; white-space: nowrap; vertical-align: top; }
 .inspector td { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; word-break: break-all; padding: 0.25rem 0; }
+/* The check a preflight answer mirrors, beside the answer (§9). Not monospace
+   and not black: it is a claim about the program, not a value read from it,
+   and the two should not look like the same kind of thing.
+
+   It wraps. `require!(new_used <= limit, LimitReached)` is longer than the
+   column it sits in on a narrow window, and a table that will not wrap either
+   scrolls sideways or squeezes the value column — which is the one carrying
+   the number the section exists to show. Wrapping the claim and leaving the
+   value alone is the right trade. Left-aligned rather than right, because a
+   right-aligned ragged edge is harder to read down once lines break; `width`
+   is a hint, and the browser gives the column back when the text is short. */
+.inspector table.mirrored { table-layout: auto; }
+.inspector td.mirrors { font-family: inherit; font-size: 0.78rem; color: var(--ink-soft); text-align: left; white-space: normal; word-break: normal; overflow-wrap: anywhere; padding-left: 1.25rem; width: 38%; }
+.inspector .section-link { margin: 0.5rem 0 0; font-size: 0.8rem; }
 .inspector .note { color: var(--ink-soft); font-size: 0.8rem; margin: 0.5rem 0 0; }
 
 /* footer */

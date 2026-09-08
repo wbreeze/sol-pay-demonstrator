@@ -6,6 +6,8 @@ namespace Newsprint\Support;
 
 use Newsprint\Chain\PayerState;
 use Newsprint\Chain\SiteState;
+use Newsprint\Metering\MeterResult;
+use SolPay\Core\Preflight;
 use SolPay\Core\Units;
 
 /**
@@ -28,9 +30,19 @@ final class Inspector
     }
 
     /**
-     * @return list<array{heading: string, rows: list<array{0: string, 1: string}>, note?: string}>
+     * A row is a label and a value, and — where §9 asks for it — a third cell
+     * naming the on-chain check the value mirrors. The third cell is what
+     * makes the preflight section evidence rather than a readout: a number
+     * with no claim beside it cannot be wrong about anything.
+     *
+     * A section may also carry a `link` (§9 asks for the explorer beside a
+     * signature) and an `event` — a signature whose decoded event the panel
+     * fetches when it is opened rather than on the request that made it. See
+     * {@see lastTransaction()} for why that read is deferred.
+     *
+     * @return list<array{heading: string, rows: list<array{0: string, 1: string, 2?: string}>, note?: string, link?: array{href: string, text: string}, event?: string}>
      */
-    public function sections(?SiteState $state = null, ?string $error = null, ?PayerState $payer = null): array
+    public function sections(?SiteState $state = null, ?string $error = null, ?PayerState $payer = null, ?MeterResult $result = null): array
     {
         $program = $this->config->program();
         $params = $this->config->siteParams();
@@ -136,9 +148,254 @@ final class Inspector
 
         if ($payer !== null) {
             $sections[] = $this->reader($payer, $amount);
+            $sections[] = $this->preflight($state, $payer, $amount);
+        }
+
+        if ($result !== null && $result->signature !== null) {
+            $sections[] = $this->lastTransaction($result, $state, $payer);
         }
 
         return $sections;
+    }
+
+    /**
+     * The last transaction (SPEC §9).
+     *
+     * **"Last" is bounded by this request, and that is §10.4 rather than
+     * laziness.** This site keeps no record of a reader's metering calls —
+     * §10.4 enumerates its stores and a per-wallet list of signatures is
+     * exactly the reading history the design exists not to hold. So the only
+     * transaction the panel can show is the one this request produced, and on
+     * a page that metered nothing the section is simply absent. A demo that
+     * showed "your last five" would be a nicer panel and a broken promise.
+     *
+     * **The instructions are the builders' output, not a reading of the
+     * transaction.** §9 wants them shown "as the builders produced them",
+     * because the claim under test is that `SolPay\Core\Ix`'s output drops
+     * straight into a message without adjustment. {@see MeterResult} carries
+     * them out of {@see \Newsprint\Metering\Meter} for that reason. Reading
+     * them back off the chain would answer a different and easier question.
+     *
+     * **Which is why the browser's transactions show less here, and say so.**
+     * `approve_and_open`, `renew_contract` and `close_and_revoke` are compiled
+     * in the reader's browser by the wasm client and this server never holds
+     * those instruction objects. Their signature and their decoded event are
+     * shown; their bytes are not, with a line saying who built them. The
+     * alternative — decoding the landed transaction so all four look alike —
+     * was declined 2026-09-08: it would put "as they landed" under a heading
+     * that promises "as the builders produced them", and quietly answer a
+     * question §9 did not ask.
+     *
+     * **The event is fetched when the panel opens, not now.** §12.4 budgets
+     * about three RPC calls per metered view and `getTransaction` would be a
+     * fourth, spent on every metered request whether or not anybody expands
+     * the panel — which §9 says is collapsed by default. So the section
+     * carries the signature and `assets/inspector.js` reads the event on
+     * first open. The row below is what a reader sees until then.
+     *
+     * @return array{heading: string, rows: list<array{0: string, 1: string, 2?: string}>, note?: string, link?: array{href: string, text: string}, event?: string}
+     */
+    private function lastTransaction(MeterResult $result, ?SiteState $state, ?PayerState $payer): array
+    {
+        $signature = (string) $result->signature;
+
+        $rows = [
+            ['signature', $signature],
+            ['outcome', $result->outcome->value.' — '.$result->detail],
+            ['page views', (string) $result->pageViews, $result->settles ? 'this call settles' : 'accrues only'],
+        ];
+
+        if ($result->instructions === []) {
+            $rows[] = [
+                'instructions',
+                'built in your browser by the wasm client, so this server never held them',
+                'signature and event only',
+            ];
+        }
+
+        $aliases = $this->aliasesFor($state, $payer);
+
+        foreach ($result->instructions as $i => $instruction) {
+            $n = $i + 1;
+            $rows[] = [
+                sprintf('ix %d · program', $n),
+                $this->named($instruction->programId, $aliases),
+            ];
+
+            foreach ($instruction->accounts as $j => $account) {
+                $flags = [];
+                if ($account->isSigner) {
+                    $flags[] = 'signer';
+                }
+                if ($account->isWritable) {
+                    $flags[] = 'writable';
+                }
+                $rows[] = [
+                    sprintf('ix %d · account %d', $n, $j + 1),
+                    $this->named($account->pubkey, $aliases),
+                    $flags === [] ? 'readonly' : implode(', ', $flags),
+                ];
+            }
+
+            $data = bin2hex($instruction->data);
+            $rows[] = [
+                sprintf('ix %d · data', $n),
+                strlen($data) > 16 ? substr($data, 0, 16).' '.substr($data, 16) : $data,
+                sprintf('%d bytes: 8-byte discriminator, then borsh', strlen($instruction->data)),
+            ];
+        }
+
+        return [
+            'heading' => 'The last transaction',
+            'rows' => $rows,
+            'link' => [
+                'href' => 'https://explorer.solana.com/tx/'.rawurlencode($signature).'?cluster=devnet',
+                'text' => 'This transaction on the Solana explorer',
+            ],
+            'event' => $signature,
+            'note' => 'This request\'s transaction, and only this one — §10.4 keeps no list of what you have '
+                .'metered, so there is nothing here to look back through. The first eight data bytes are the '
+                .'Anchor discriminator, sha256("global:meter_and_settle") truncated; the rest is borsh. The '
+                .'account order and the signer and writable flags are the builder\'s, unedited, which is what '
+                .'makes this a check on the library rather than a description of it.',
+        ];
+    }
+
+    /**
+     * Every address this request already knows, by alias.
+     *
+     * Matching by address rather than by position, because the instruction's
+     * account order belongs to the library and a panel that assumed it would
+     * mislabel every row the day it changed — silently, and in the one section
+     * whose whole purpose is to be checkable.
+     *
+     * @return array<string, string> address => alias
+     */
+    private function aliasesFor(?SiteState $state, ?PayerState $payer): array
+    {
+        $program = $this->config->program();
+        $aliases = [
+            $program->id => Alias::for(Alias::PROGRAM, $program->id),
+            $program->tokenProgram => Alias::for(Alias::TOKEN_PROGRAM, $program->tokenProgram),
+        ];
+
+        if ($state !== null) {
+            $aliases[$state->address] = Alias::for(Alias::SITE, $state->address);
+            $aliases[$state->site->mint] = Alias::for(Alias::MINT, $state->site->mint);
+            $aliases[$state->site->treasury] = Alias::for(Alias::TREASURY, $state->site->treasury);
+        }
+
+        if ($payer !== null) {
+            $aliases[$payer->wallet] = Alias::for(Alias::PAYER, $payer->wallet);
+            $aliases[$payer->tokenAccount] = Alias::for(Alias::PAYER_TOKEN_ACCOUNT, $payer->tokenAccount);
+            $aliases[$payer->contractAddress] = Alias::for(Alias::CONTRACT, $payer->contractAddress);
+        }
+
+        return $aliases;
+    }
+
+    /** @param array<string, string> $aliases */
+    private function named(string $address, array $aliases): string
+    {
+        // An address with no alias is shown bare rather than given one on the
+        // spot: §9's aliases are stable per address across sessions, and one
+        // invented here for a role this panel could not identify would look
+        // exactly like the stable kind.
+        return isset($aliases[$address]) ? $aliases[$address].'  '.$address : $address;
+    }
+
+    /**
+     * Preflight, for this request (SPEC §9).
+     *
+     * Six answers from `SolPay\Core\Preflight`, each beside the check in the
+     * program it mirrors. The mirroring is the point and it is also the risk:
+     * the library's arithmetic is a **copy** of the program's, made because
+     * this package cannot call into it, and a copy can drift. `Preflight`'s
+     * own docblock says so, and names the conformance run that pins it. What
+     * this panel adds is the other direction — a reader who does not trust
+     * either can compare each answer against the account fields two sections
+     * above and do the arithmetic themselves.
+     *
+     * These are predictions, not decisions. Every one of them is what the site
+     * asked *before* spending a fee to find out; the program checks the same
+     * things again and its answer is the one that charges. Where the two
+     * disagree, the program is right and this is a bug.
+     *
+     * `charge(1)` rather than `charge(n)` because §9 says so and because one
+     * view is the unit the price is quoted in. §7.4's seven-view advance
+     * multiplies this row; it does not change it.
+     *
+     * @param callable(int): string $amount both unit forms, at the mint's own decimals
+     *
+     * @return array{heading: string, rows: list<array{0: string, 1: string, 2?: string}>, note?: string}
+     */
+    private function preflight(SiteState $state, PayerState $payer, callable $amount): array
+    {
+        $site = $state->site;
+        $contract = $payer->contract;
+
+        $charge = Preflight::charge($site, 1);
+
+        $rows = [[
+            'charge(1)',
+            $charge === null ? 'overflows' : $amount($charge),
+            'page_price × page_views',
+        ]];
+
+        if ($contract === null) {
+            // Three of the six take a `Contract` and there is not one. Saying
+            // so beats printing a zero that reads like an answer.
+            $rows[] = ['can_meter', 'no contract — nothing to meter against', 'require!(new_used <= limit)'];
+            $rows[] = ['will_settle', 'no contract', 'unpaid >= collection_threshold'];
+            $rows[] = ['views_remaining', 'no contract', '(limit - used) / page_price'];
+        } else {
+            $blocked = Preflight::canMeter($contract, $site, 1);
+            $rows[] = [
+                'can_meter',
+                $blocked === null
+                    ? 'yes — this charge fits under the limit'
+                    : 'no — '.$blocked->kind->name.': '.$blocked,
+                'require!(new_used <= limit, LimitReached)',
+            ];
+
+            $settles = Preflight::willSettle($contract, $site, 1);
+            $rows[] = [
+                'will_settle',
+                $settles
+                    ? 'yes — this call moves money'
+                    : 'no — it accrues usage and transfers nothing',
+                'unpaid >= collection_threshold',
+            ];
+
+            $rows[] = [
+                'views_remaining',
+                sprintf('%d', Preflight::viewsRemaining($contract, $site)),
+                '(limit - used) / page_price',
+            ];
+        }
+
+        $floor = Preflight::limitFloor($site, $contract);
+        $rows[] = [
+            'limit_floor',
+            $amount($floor),
+            'max(min_limit, unpaid carried forward)',
+        ];
+
+        $rows[] = [
+            'required_allowance',
+            $amount(Preflight::requiredAllowance($floor)),
+            'the SPL delegated amount checked at open and at renew',
+        ];
+
+        return [
+            'heading' => 'Preflight, for this request',
+            'rows' => $rows,
+            'note' => 'Asked before a fee was spent finding out, from the same account fields shown above. The '
+                .'program checks all of it again and its answer is the one that charges — these are predictions, '
+                .'and where they disagree with the program the program is right. required_allowance is quoted '
+                .'against limit_floor, which is the smallest limit you could authorize right now; authorize more '
+                .'and the approval has to cover that instead.',
+        ];
     }
 
     /**

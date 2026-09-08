@@ -400,6 +400,36 @@ Stated plainly, because the decision to drop the fallback is what buys them.
   means the format risk §6.6 warns about is taken on deliberately, in exchange
   for one user gesture instead of two and for demonstrating the feature the
   ecosystem actually recommends.
+- **A browser can stand in front of the wallet, and the refusal then lands on
+  the wrong party. Added 2026-09-08, from a measurement.** Brave ships its own
+  Solana wallet, and with `brave://settings/wallet` set to *Brave Wallet* it
+  registers only itself and prevents an extension from taking the provider.
+  Brave Wallet has no `solana:signIn`, so this site refused it by name — which
+  is exactly what this section's first bullet promises — while a Phantom with
+  the feature sat one setting away, having never reached the page. Everything
+  worked on the default setting. Two consequences, and the second is the
+  general one.
+
+  What the reader sees is *their* wallet being called unsupported, and they
+  have no way to know that the browser, not the wallet and not the site, is
+  what refused. So the panel names the setting when it detects Brave: a
+  dead end a reader can clear in ten seconds is worth a paragraph, and a
+  demonstration cannot afford readers who leave believing it is broken.
+
+  And a wallet that is *present but shadowed* is a case with no fallback to
+  degrade into. §6.3's mobile doubt above is about a wallet that lacks the
+  feature; this is a capable wallet the page never sees. **It is not an
+  argument for restoring the fallback** — a fallback would have papered over a
+  browser preference and left a second sign-in path in the code forever — but
+  it is a cost, and it belongs to the no-fallback decision rather than to
+  Brave.
+
+  One measurement worth carrying past this section: while Brave stood in
+  front, `window.solana.isPhantom` was **`true`**. A site that identified
+  wallets by the injected object rather than by the Wallet Standard registry
+  would have believed Phantom was present and called into Brave Wallet. This
+  site asks the registry, which is why the failure was legible rather than
+  strange. That shim is present on the default setting too.
 
 **The session is the viewer-to-wallet map.** That is the integrator's one
 obligation (§4.1), and in this demo it is a cookie and a session store. A
@@ -830,7 +860,13 @@ A panel, present on every screen, collapsed by default and one click from any
 page. It is the artifact that turns a demo into a reference, and claim 7 in §2
 is its job.
 
-Four sections:
+Four things to show. **Amended 2026-09-08:** the panel renders them as up to
+seven headings, because the first two split by provenance rather than by topic
+and the split is the point — *Deployment*, *Site account, decoded*,
+*Treasury*, *Configuration drift* (only when config and chain disagree),
+*You, on chain*, *Preflight, for this request*, *The last transaction* (only on
+a request that made one). The four below are what the panel owes a reader; the
+headings are how it pays.
 
 **Addresses, under short aliases.** Base58 is unreadable and, worse,
 *comparable-looking*: two addresses sharing four leading characters read as the
@@ -888,6 +924,28 @@ flags, data as hex — and the decoded `Metered`, `Renewed` or `Closed` event.
 Showing the instruction bytes beside the transaction is what makes the demo
 useful to someone who is about to write their own. It is also a live check on
 the library's claim that its output drops straight into a transaction message.
+
+Three things this section is not, decided 2026-09-08 when it was built.
+
+**"Last" means this request's, and §10.4 is why.** This site keeps no record of
+a reader's metering calls, so there is no earlier transaction for the panel to
+reach back to. On a page that made none, the section is absent rather than
+empty.
+
+**The browser's transactions show less, and say so.** `approve_and_open`,
+`renew_contract` and `close_and_revoke` are compiled in the reader's browser,
+so the server never holds those instruction objects: their signature and their
+decoded event appear, their bytes do not, and a line names who built them.
+Decoding the landed transaction so all four looked alike was declined — it
+would put *as they landed* under a heading that promises *as the builders
+produced them*, and the sentence above is the whole reason the bytes are worth
+showing.
+
+**The event is read when the panel is opened, not when the transaction is
+made.** Decoding it needs `getTransaction`, a fourth call against §12.4's
+budget of about three per metered view, and this panel is collapsed by default
+— so it is a small endpoint the panel asks once on first open. Without
+JavaScript the row says the event has not been read, which is true.
 
 ## 10. Content
 

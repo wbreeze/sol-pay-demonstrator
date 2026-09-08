@@ -120,6 +120,48 @@ final class Rpc
     }
 
     /**
+     * The program log lines of a landed transaction, for SPEC §9's last
+     * section and nothing else.
+     *
+     * Narrow on purpose. `getTransaction` answers with the whole transaction —
+     * message, account keys, balances before and after, inner instructions,
+     * logs — and §8.1's rule is that logs carry the payer's address and do not
+     * belong anywhere this site renders. So this returns the one field its one
+     * caller needs, {@see ProgramEvent} reduces that to a single typed event
+     * in the same breath, and no log line survives the trip.
+     *
+     * Null means the cluster does not have it: an unconfirmed signature, or a
+     * commitment that has not caught up. That is a "not yet", not a failure,
+     * and reads differently on the screen.
+     *
+     * `maxSupportedTransactionVersion` is required, not optional — without it
+     * the endpoint refuses any versioned transaction rather than downgrading,
+     * and refuses it with an error about the client rather than the
+     * transaction.
+     *
+     * @return list<string>|null
+     */
+    public function transactionLogs(string $signature): ?array
+    {
+        $result = $this->call('getTransaction', [
+            $signature,
+            [
+                'encoding' => 'json',
+                'commitment' => $this->commitment === 'processed' ? 'confirmed' : $this->commitment,
+                'maxSupportedTransactionVersion' => 0,
+            ],
+        ]);
+
+        if (!is_array($result)) {
+            return null;
+        }
+
+        $logs = $result['meta']['logMessages'] ?? null;
+
+        return is_array($logs) ? array_values(array_map('strval', $logs)) : null;
+    }
+
+    /**
      * @param list<string> $signatures
      *
      * @return list<array{confirmationStatus: ?string, err: mixed}|null>
