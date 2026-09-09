@@ -171,11 +171,13 @@ if ($config->isProvisioned()) {
     // --- the faucet, which does not die of a reset but of a Tuesday ---------
     //
     // Added 2026-09-09, the day it happened. Everything above fails because
-    // devnet was reset or a program moved; this one fails because five people
+    // devnet was reset or a program moved; this one fails because four people
     // used the demo. §4.3 gives each new wallet 0.05 SOL and setup funds the
     // faucet with `faucet_reserve_lamports` — 250,000,000, whose own comment
-    // reads "five visitors". Visitor six meets `custom program error: 0x1`
-    // from instruction 0, which is a System transfer with nothing behind it.
+    // said "five visitors" until this script worked out that it funds four:
+    // the grant also creates a 165-byte token account, and its rent is the
+    // fifth visitor. Visitor five meets `custom program error: 0x1` from
+    // instruction 0, which is a System transfer with nothing behind it.
     //
     // **The faucet is not shown anywhere on the site**, deliberately, so a
     // drained one is invisible until a reader hits it. That is precisely the

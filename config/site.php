@@ -69,7 +69,9 @@ return [
     'setup' => [
         'airdrop_lamports' => 1_000_000_000,        // 1 SOL; devnet's faucet refuses more often than it works
         'authority_minimum_lamports' => 300_000_000, // enough for setup's transactions and a long session of metering
-        'faucet_reserve_lamports' => 250_000_000,    // five visitors at §4.3's 0.05 SOL each
+        'faucet_reserve_lamports' => 250_000_000,    // four visitors: §4.3's 0.05 SOL each, plus the rent on a
+                                                     // 165-byte token account and a fee. bin/devnet-canary
+                                                     // computes it; this comment used to say five.
     ],
 
     // SPEC §5. Sign In With Solana, required with no fallback: a wallet

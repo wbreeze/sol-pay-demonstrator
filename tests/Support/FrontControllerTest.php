@@ -21,7 +21,18 @@ use PHPUnit\Framework\TestCase;
  *    article route, one commit after the first check was written, which is why
  *    there are now two).
  *
- * Both are positional or textual rather than semantic, so the tests are too.
+ * 3. **Captured by value where the request mutates by reference.** An arrow
+ *    function captures at the moment it is defined and never looks again, so
+ *    `static fn (): bool => $stateDone` closes over `false` for the life of the
+ *    request while `$read`, which took the same variable as `&$stateDone`,
+ *    sets it to true underneath (2026-09-09, the inspector's deferral). This
+ *    one errors nowhere: PHPStan level 5 was clean, the suite was green, and
+ *    the panel simply deferred on every page including the ones that had
+ *    already paid for the read. It surfaced by booting the app and counting
+ *    RPC calls.
+ *
+ * Both — all three — are positional or textual rather than semantic, so the
+ * tests are too.
  */
 final class FrontControllerTest extends TestCase
 {
@@ -91,6 +102,245 @@ final class FrontControllerTest extends TestCase
         self::assertSame([], array_values(array_unique($problems)), implode("\n", $problems));
     }
 
+    /**
+     * No arrow function may close over a variable that something in this file
+     * binds by reference.
+     *
+     * `&$name` in a `use` list is the file saying, in as many words, *this
+     * variable is written in one closure and read in another*. `fn` copies its
+     * value once, at definition, and the copy never changes — so an arrow
+     * function reading such a name is asking a question it can only ever get
+     * one answer to. That is precisely how the inspector's deferral came to be
+     * permanently on.
+     *
+     * The rule is deliberately not "was it mutated after this point": that is
+     * a question about execution order, and the whole family of faults here is
+     * one that execution never complains about. The reference binding is the
+     * declared intent, and a by-value read of it is wrong wherever it sits.
+     */
+    public function testNoArrowFunctionClosesOverAReferenceBoundVariable(): void
+    {
+        $problems = self::byValueReadsOfReferenceBoundNames($this->source());
+
+        self::assertSame([], $problems, implode("\n", $problems));
+    }
+
+    /**
+     * And the check fails on the broken form, not merely passes on the fixed
+     * one — the standard the other structural tests here are held to, made
+     * permanent rather than performed once by hand.
+     *
+     * The first version of `closures()` below skipped every closure in the
+     * file and passed by finding nothing. Nothing about a green assertion
+     * distinguishes "no faults" from "no scanning", which is why both
+     * directions are asserted.
+     */
+    public function testThatCheckFailsOnTheBrokenFormAndNotOnTheFixedOne(): void
+    {
+        $broken = <<<'PHP'
+            <?php
+            $done = false;
+            $read = static function () use (&$done): void { $done = true; };
+            $alreadyRead = static fn (): bool => $done;
+            PHP;
+
+        $fixed = <<<'PHP'
+            <?php
+            $done = false;
+            $read = static function () use (&$done): void { $done = true; };
+            $alreadyRead = static function () use (&$done): bool { return $done; };
+            PHP;
+
+        // A by-value *parameter* of the same name is not a capture at all, and
+        // a name bound by value elsewhere is not this fault.
+        $innocent = <<<'PHP'
+            <?php
+            $done = false;
+            $read = static function () use ($done): bool { return $done; };
+            $each = static fn (bool $done): bool => $done;
+            PHP;
+
+        self::assertNotSame([], self::byValueReadsOfReferenceBoundNames($broken), 'the broken form went unreported');
+        self::assertSame([], self::byValueReadsOfReferenceBoundNames($fixed));
+        self::assertSame([], self::byValueReadsOfReferenceBoundNames($innocent));
+    }
+
+    /**
+     * Every arrow function in the source that reads a name some `use` list
+     * binds by reference.
+     *
+     * @return list<string>
+     */
+    private static function byValueReadsOfReferenceBoundNames(string $source): array
+    {
+        $tokens = self::significantTokens($source);
+        $byReference = self::referenceBoundNames($tokens);
+
+        $problems = [];
+        foreach (self::arrowFunctions($tokens) as $arrow) {
+            foreach ($arrow['reads'] as $name) {
+                if (!in_array($name, $byReference, true)) {
+                    continue;
+                }
+                if (in_array($name, $arrow['params'], true)) {
+                    continue;
+                }
+                $problems[] = "\$$name is bound by reference elsewhere but read by the arrow function"
+                    ." at line {$arrow['line']} — `fn` captures by value, so it will never see a change";
+            }
+        }
+
+        return array_values(array_unique($problems));
+    }
+
+    /**
+     * Names any `use` list takes by reference.
+     *
+     * @param list<array{0: int, 1: string, 2: int}|string> $tokens
+     *
+     * @return list<string>
+     */
+    private static function referenceBoundNames(array $tokens): array
+    {
+        $names = [];
+        $count = count($tokens);
+
+        for ($i = 0; $i < $count; $i += 1) {
+            $token = $tokens[$i];
+            // `use` is also an import and a trait; only a closure's is a call-shaped list.
+            if (!is_array($token) || $token[0] !== T_USE || ($tokens[$i + 1] ?? null) !== '(') {
+                continue;
+            }
+
+            $depth = 0;
+            for ($j = $i + 1; $j < $count; $j += 1) {
+                $inner = $tokens[$j];
+                if ($inner === '(') {
+                    $depth += 1;
+                } elseif ($inner === ')') {
+                    $depth -= 1;
+                    if ($depth === 0) {
+                        $i = $j;
+
+                        break;
+                    }
+                } elseif (self::isAmpersand($inner)) {
+                    $next = $tokens[$j + 1] ?? null;
+                    if (is_array($next) && $next[0] === T_VARIABLE) {
+                        $names[] = substr($next[1], 1);
+                    }
+                }
+            }
+        }
+
+        return array_values(array_unique($names));
+    }
+
+    /**
+     * Every arrow function, with its parameters and every variable its body
+     * reads.
+     *
+     * An arrow body is one expression with no braces to count, so it ends at
+     * the first `;` or `,` outside any bracket, or at the bracket that closes
+     * around it — `array_map(static fn ($x) => $x + $offset, $rows)` ends at
+     * the comma, and a nested one ends at its parent's.
+     *
+     * @param list<array{0: int, 1: string, 2: int}|string> $tokens
+     *
+     * @return list<array{line: int, params: list<string>, reads: list<string>}>
+     */
+    private static function arrowFunctions(array $tokens): array
+    {
+        $out = [];
+        $count = count($tokens);
+
+        foreach ($tokens as $i => $token) {
+            if (!is_array($token) || $token[0] !== T_FN) {
+                continue;
+            }
+
+            $j = $i + 1;
+            while ($j < $count && $tokens[$j] !== '(') {
+                $j += 1;
+            }
+            [$params, $j] = self::variablesUntilClose($tokens, $j);
+
+            // Past the return type, if any, to the arrow itself.
+            while ($j < $count && !(is_array($tokens[$j]) && $tokens[$j][0] === T_DOUBLE_ARROW)) {
+                $j += 1;
+            }
+
+            $depth = 0;
+            $reads = [];
+            for ($b = $j + 1; $b < $count; $b += 1) {
+                $inner = $tokens[$b];
+                if ($inner === '(' || $inner === '[' || $inner === '{') {
+                    $depth += 1;
+                } elseif ($inner === ')' || $inner === ']' || $inner === '}') {
+                    if ($depth === 0) {
+                        break;
+                    }
+                    $depth -= 1;
+                } elseif ($depth === 0 && ($inner === ';' || $inner === ',')) {
+                    break;
+                } elseif (is_array($inner) && $inner[0] === T_VARIABLE) {
+                    $reads[] = substr($inner[1], 1);
+                }
+            }
+
+            $out[] = [
+                'line' => $token[2],
+                'params' => $params,
+                'reads' => array_values(array_unique($reads)),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * `&` is three tokens since 8.1 depending on what follows it, and a use
+     * list can produce either of the two that carry an id.
+     *
+     * @param array{0: int, 1: string, 2: int}|string $token
+     */
+    private static function isAmpersand(array|string $token): bool
+    {
+        if ($token === '&') {
+            return true;
+        }
+
+        return is_array($token) && in_array($token[0], [
+            T_AMPERSAND_FOLLOWED_BY_VAR_OR_VARARG,
+            T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG,
+        ], true);
+    }
+
+    /**
+     * The file without the noise every scan here has to skip.
+     *
+     * **Whitespace is a token**, and an array one at that. Scanning for the
+     * `use` keyword by stepping over non-array tokens therefore stops at the
+     * first space and concludes there is no use list — which made the first
+     * version of `closures()` skip every closure in the file and pass by
+     * finding nothing. Filtering first is what makes any of these scans mean
+     * anything. (Found by checking that the test failed on a copy with the bug
+     * put back; it did not.)
+     *
+     * Comments go with it, and that is load-bearing rather than tidy: the
+     * docblock above `$stateAlreadyRead` in `public/index.php` quotes the
+     * broken arrow form as an illustration of what not to write, and a scan
+     * over raw source would report the warning itself as the fault.
+     *
+     * @return list<array{0: int, 1: string, 2: int}|string>
+     */
+    private static function significantTokens(string $source): array
+    {
+        return array_values(array_filter(
+            token_get_all($source),
+            static fn ($t) => !is_array($t) || !in_array($t[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true),
+        ));
+    }
     /** @return array<string, int> name => byte offset of its first top-level assignment */
     private static function topLevelAssignments(string $source): array
     {
@@ -114,17 +364,7 @@ final class FrontControllerTest extends TestCase
      */
     private static function closures(string $source): array
     {
-        // **Whitespace is a token**, and an array one at that. Scanning for the
-        // `use` keyword by stepping over non-array tokens therefore stops at the
-        // first space and concludes there is no use list — which made the first
-        // version of this test skip every closure in the file and pass by
-        // finding nothing. Filtering first is what makes the scan mean
-        // anything. (Found by checking that the test failed on a copy with the
-        // bug put back; it did not.)
-        $tokens = array_values(array_filter(
-            token_get_all($source),
-            static fn ($t) => !is_array($t) || !in_array($t[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true),
-        ));
+        $tokens = self::significantTokens($source);
         $out = [];
 
         foreach ($tokens as $i => $token) {
