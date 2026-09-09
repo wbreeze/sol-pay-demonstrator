@@ -191,6 +191,11 @@ final class Rpc
     {
         $body = json_encode(['jsonrpc' => '2.0', 'id' => 1, 'method' => $method, 'params' => $params]);
 
+        // Measured around the transport and nothing else: the question this
+        // answers is how long the *endpoint* took, so JSON encoding and
+        // decoding sit outside it deliberately.
+        $started = hrtime(true);
+
         $curl = curl_init($this->url);
         curl_setopt_array($curl, [
             CURLOPT_POST => true,
@@ -202,6 +207,11 @@ final class Rpc
         $raw = curl_exec($curl);
         $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
         $transport = curl_error($curl);
+
+        // Recorded before the failure branches below, because a call that
+        // timed out is a round trip that cost twenty seconds and is exactly
+        // the one worth seeing in the count.
+        RpcTiming::record($method, (hrtime(true) - $started) / 1e6);
         // No curl_close: the handle has been an object since PHP 8.0, freed
         // when it goes out of scope, and calling it is deprecated as of 8.5 —
         // which `php-conformance.yml`'s upper version would have caught in

@@ -30,6 +30,7 @@ use Newsprint\Content\Library;
 use Newsprint\Content\Piece;
 use Newsprint\Support\Alias;
 use Newsprint\Support\Config;
+use Newsprint\Support\RpcTimingMiddleware;
 use Newsprint\Metering\Meter;
 use Newsprint\Metering\MeterMiddleware;
 use Newsprint\Metering\MeterOutcome;
@@ -1254,5 +1255,16 @@ $app->get('/health', function (Request $request, Response $response) use ($confi
 
     return $response->withHeader('Content-Type', 'application/json');
 });
+
+/**
+ * Outermost, deliberately: added last, so in Slim it wraps every other
+ * middleware and every route, and the `X-Rpc-*` headers land on redirects too
+ * — including the 303 out of `/meter/advance`, which is the response that
+ * carries the metering transaction's round trips.
+ *
+ * Silent unless `NEWSPRINT_RPC_TIMING=1` is in the environment. See
+ * {@see RpcTimingMiddleware} for why environment and not config.
+ */
+$app->add(new RpcTimingMiddleware());
 
 $app->run();

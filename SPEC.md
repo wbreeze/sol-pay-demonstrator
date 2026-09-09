@@ -909,8 +909,31 @@ an alias. And the aliases are this site's invention, not a standard, which the
 panel says once, so nobody leaves thinking `CPDAcat` means anything to a wallet
 or an explorer.
 
-Each address also carries the derivation that produced it —
-`[b"contract", site, payer]` — and a link to the devnet explorer.
+Each address also carries a link to the devnet explorer and, beside it, the
+derivation that produced it.
+
+**Amended 2026-09-09: that is not one uniform thing, and the wording here used
+to say it was.** Tracing the nine addresses the panel can show gives three
+kinds, and the difference is worth more than the uniformity was:
+
+| kind | addresses | what the panel says |
+| --- | --- | --- |
+| derived by *this* program | `SPDA`, `CPDA` | the seeds and the bump — `["contract", SPDA, PAYR] + bump, by PID…` |
+| derived by the **associated-token program** | `TRSY`, `PATA` | the same shape, naming a deriving program this site does not own |
+| never derived | `MINT`, `AUTH`, `PAYR`, `PID`, `TKPG` | where it came from instead — a keypair first-run setup generated, the reader's own wallet, a deployed program, a fixed Solana constant |
+
+The treasury belongs in the second row rather than the third, and that is the
+easy one to get wrong: it looks like something first-run setup simply created.
+It is the site authority's associated token account for the mint, so it *is*
+derived from seeds — `Provisioner` computes the address before anything is
+created at it.
+
+Rendering all four derived addresses alike would have been the tidier panel and
+a false one — it would let a reader believe this program computed `PATA` and
+`TRSY`. Silence on the other five would have read as *we did not bother* rather
+than *there is nothing to derive*, which is the more useful fact and the true
+one. The seeds are written with the aliases above rather than with base58, so a
+reader can match every seed to the row that names it.
 
 **Decoded accounts.** `Site` and `Contract` field by field, in the order and
 sizes of `wasm-client/SPEC.md` §6.2, with amounts shown both as base units and
@@ -953,6 +976,30 @@ made.** Decoding it needs `getTransaction`, a fourth call against §12.4's
 budget of about three per metered view, and this panel is collapsed by default
 — so it is a small endpoint the panel asks once on first open. Without
 JavaScript the row says the event has not been read, which is true.
+
+**The panel itself is read when it is opened, on any page that read nothing
+else.** Added 2026-09-09, and added because it was measured rather than
+reasoned. `$shell` renders this panel on every page, so every page —
+`/privacy` included — blocked on one `getMultipleAccounts` to fill a panel this
+section says is collapsed by default. That call *was* the page load: `/privacy`
+went from **0.899 s to 0.002 s**, the cost of a static file, when it stopped
+making it. Our own render measured under 6 ms and was never the problem.
+
+The rule is not *defer the panel*; it is **defer the read nobody else needed**.
+Where a request has already read the chain for its own reasons — the article
+route, where §7's middleware must read it to decide metering — the panel
+renders inline and costs nothing extra, because the read was required work
+either way.
+
+That distinction is what keeps *The last transaction* possible at all. It needs
+a `MeterResult` which exists only on the request that produced it (§10.4 leaves
+no history for a second request to find), so it could never survive a deferred
+fetch — and under this rule it never has to, because the pages that have one
+are exactly the pages that render inline.
+
+Without JavaScript the deferred panel is an ordinary link to a page that
+renders the same sections server-side. Nothing in this section depends on a
+script to remain reachable.
 
 ## 10. Content
 
@@ -1558,6 +1605,18 @@ applications". A shared public demo would have run into that on the day it was
 linked anywhere. One person reading their own copy, at roughly three RPC calls
 per metered page view, is not close.
 
+**Amended 2026-09-09, from measurement.** That figure was always stated for the
+*metered* page view, and until this date it understated the total everywhere
+else: §9's inspector renders on every page and read the site account to do so,
+so a page that meters nothing — `/privacy`, the home page — spent one call as
+well. It no longer does. §9 now defers that read to a reader who opens the
+panel, and `/privacy` fell from 0.899 s to 0.002 s as a result.
+
+The reason this mattered more than the count suggests is the endpoint's own
+behaviour, described below: latency here varies by an order of magnitude hour to
+hour. A call a page does not need is not felt as one call of overhead — it is
+felt as the site being broken on a bad morning.
+
 A deployment that outgrows this has a provider tier as an unremarkable
 configuration change: the endpoint is a config value, not an architectural one.
 
@@ -1722,7 +1781,9 @@ The design questions raised in the first draft are closed. The site is
 argument kept as a working note); the faucet is one step inside the meter
 panel (§4.3, amended 2026-09-07);
 `manage_meter` is reachable at any time (§6); mobile is in scope (§6.3); the
-inspector is per-request and addresses carry aliases (§9); the front end is
+inspector reads on the request that needs it — inline where something already
+read the chain, on first open where nothing did (§9, amended 2026-09-09) — and
+addresses carry aliases and their provenance (§9); the front end is
 conventional JavaScript, server-rendered (§12.2); identifying happens in the
 meter panel rather than on a screen of its own (§5 and §6, amended 2026-09-07);
 and closing a contract erases the site's record of the reader (§10.4), which
