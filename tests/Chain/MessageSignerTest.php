@@ -46,20 +46,40 @@ final class MessageSignerTest extends TestCase
     /**
      * The rule php-client's README warns is invisible until a vector
      * disagrees with you: the fee payer is prepended, not sorted into place.
-     * The other signer here is chosen to sort *before* it by raw bytes, which
-     * is the only arrangement that can tell the two apart.
+     * The other signer here sorts *before* it by raw bytes, which is the only
+     * arrangement that can tell the two apart.
+     *
+     * **The arrangement is assigned, not drawn for.** This test used to
+     * generate a payer and then up to 200 candidates, hoping one of them
+     * landed below it -- which fails outright whenever the payer itself is
+     * drawn near the bottom of the key space, because there is almost nothing
+     * below it to find. Measured over 200,000 trials that is one run in 199
+     * (0.50%), and every failure had a payer whose first byte was 0x00-0x05.
+     * Four matrix legs per push made it roughly a 2% chance per push, which
+     * is why CI went red on 2026-09-08 on the 8.4 leg alone while 8.2, 8.3
+     * and 8.5 passed the same commit. A test that fails on the weather is
+     * worse than no test: it spends a morning and teaches nothing.
+     *
+     * Two keys, roles assigned by their byte order, no loop and no draw that
+     * can come up empty. Equal keys would be a 2^-256 event and are not
+     * guarded against; the birthday bound on that is longer than the chain.
      */
     public function testFeePayerLeadsEvenWhenAnotherSignerSortsBefore(): void
     {
-        $payer = Keypair::generate();
-        $lower = null;
-        for ($i = 0; $i < 200 && $lower === null; $i++) {
-            $candidate = Keypair::generate();
-            if (strcmp($candidate->publicKeyBytes(), $payer->publicKeyBytes()) < 0) {
-                $lower = $candidate;
-            }
-        }
-        self::assertNotNull($lower, 'could not draw a key below the fee payer');
+        $one = Keypair::generate();
+        $two = Keypair::generate();
+
+        // The greater of the two pays the fee, so the other necessarily sorts
+        // before it -- which is the property under test, now by construction.
+        [$lower, $payer] = strcmp($one->publicKeyBytes(), $two->publicKeyBytes()) < 0
+            ? [$one, $two]
+            : [$two, $one];
+
+        self::assertLessThan(
+            0,
+            strcmp($lower->publicKeyBytes(), $payer->publicKeyBytes()),
+            'the other signer must sort before the fee payer or this proves nothing',
+        );
 
         $message = Tx::compile([
             SystemProgram::createAccount($payer->address, $lower->address, 1_000_000, 82, Ids::TOKEN_PROGRAM_ID),

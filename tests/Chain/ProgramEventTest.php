@@ -33,9 +33,24 @@ final class ProgramEventTest extends TestCase
         return str_pad(self::CONTRACT, 32, "\x11");
     }
 
+    /**
+     * `hex2bin` returns `string|false`, and a `false` here would concatenate as
+     * an empty string — a fixture silently one discriminator short, which the
+     * decoder would refuse for the right reason and the wrong cause. The
+     * assertion is the point: a test whose fixture is malformed is a test that
+     * proves nothing.
+     */
+    private function bytes(string $hex): string
+    {
+        $raw = hex2bin($hex);
+        self::assertIsString($raw, "the fixture hex {$hex} is not valid hex");
+
+        return $raw;
+    }
+
     private function metered(int $pageViews = 7, int $used = 70_000, int $paid = 100_000, int $transferred = 100_000): string
     {
-        return hex2bin('1e8e96a17c2e1d7e')
+        return $this->bytes('1e8e96a17c2e1d7e')
             .$this->contractBytes()
             .pack('V', $pageViews)
             .pack('P', $used)
@@ -80,7 +95,7 @@ final class ProgramEventTest extends TestCase
 
     public function testDecodesRenewed(): void
     {
-        $bytes = hex2bin('8bfcd923492a0757').$this->contractBytes().pack('P', 500_000).pack('P', 40_000);
+        $bytes = $this->bytes('8bfcd923492a0757').$this->contractBytes().pack('P', 500_000).pack('P', 40_000);
         $event = ProgramEvent::decode($bytes);
 
         self::assertNotNull($event);
@@ -92,7 +107,7 @@ final class ProgramEventTest extends TestCase
 
     public function testDecodesClosed(): void
     {
-        $bytes = hex2bin('321f579b87dcc3ef').$this->contractBytes().pack('P', 30_000);
+        $bytes = $this->bytes('321f579b87dcc3ef').$this->contractBytes().pack('P', 30_000);
         $event = ProgramEvent::decode($bytes);
 
         self::assertNotNull($event);
@@ -109,7 +124,7 @@ final class ProgramEventTest extends TestCase
      */
     public function testRefusesAnotherProgramsData(): void
     {
-        $foreign = hex2bin('deadbeefdeadbeef').$this->contractBytes().pack('V', 7).str_repeat("\x00", 24);
+        $foreign = $this->bytes('deadbeefdeadbeef').$this->contractBytes().pack('V', 7).str_repeat("\x00", 24);
 
         self::assertNull(ProgramEvent::decode($foreign));
     }
@@ -127,7 +142,7 @@ final class ProgramEventTest extends TestCase
 
     public function testRefusesADiscriminatorWithNoBody(): void
     {
-        self::assertNull(ProgramEvent::decode(hex2bin('1e8e96a17c2e1d7e')));
+        self::assertNull(ProgramEvent::decode($this->bytes('1e8e96a17c2e1d7e')));
         self::assertNull(ProgramEvent::decode(''));
     }
 
@@ -140,7 +155,7 @@ final class ProgramEventTest extends TestCase
      */
     public function testRefusesAValuePastWhatPhpCanHold(): void
     {
-        $tooBig = hex2bin('321f579b87dcc3ef').$this->contractBytes()."\xff\xff\xff\xff\xff\xff\xff\xff";
+        $tooBig = $this->bytes('321f579b87dcc3ef').$this->contractBytes()."\xff\xff\xff\xff\xff\xff\xff\xff";
 
         self::assertNull(ProgramEvent::decode($tooBig));
     }
@@ -151,7 +166,7 @@ final class ProgramEventTest extends TestCase
             'Program F8UDAGgxVTm8Vmh4RmskpMBCFqhRvuTqbDxDCj8UMedL invoke [1]',
             'Program log: Instruction: MeterAndSettle',
             'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]',
-            'Program data: '.base64_encode(hex2bin('deadbeefdeadbeef').'not ours'),
+            'Program data: '.base64_encode($this->bytes('deadbeefdeadbeef').'not ours'),
             'Program data: '.base64_encode($this->metered()),
             'Program F8UDAGgxVTm8Vmh4RmskpMBCFqhRvuTqbDxDCj8UMedL success',
         ];
