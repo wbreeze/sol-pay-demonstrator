@@ -26,7 +26,8 @@ declare(strict_types=1);
  *
  *   0   everything this repository assumes about devnet is still true
  *   1   a claim is false — the program is not deployed at the configured id,
- *       or is deployed and not executable. Someone has to look.
+ *       or is deployed and not executable, or the faucet can no longer fund a
+ *       visitor. Someone has to look.
  *   75  EX_TEMPFAIL. The endpoint did not answer, or answered 429. Nothing was
  *       learned, and nothing is known to be wrong. SPEC §12.4 already says a
  *       rate-limited endpoint looks like the site being broken; a monitor that
@@ -164,6 +165,67 @@ if ($config->isProvisioned()) {
             // Devnet is reset. This is the expected way for a demo to die, and
             // the fix is to run setup again rather than to debug anything.
             $findings[] = "this site's {$which} account is gone from devnet — the cluster was probably reset; re-run first-run setup";
+        }
+    }
+
+    // --- the faucet, which does not die of a reset but of a Tuesday ---------
+    //
+    // Added 2026-09-09, the day it happened. Everything above fails because
+    // devnet was reset or a program moved; this one fails because five people
+    // used the demo. §4.3 gives each new wallet 0.05 SOL and setup funds the
+    // faucet with `faucet_reserve_lamports` — 250,000,000, whose own comment
+    // reads "five visitors". Visitor six meets `custom program error: 0x1`
+    // from instruction 0, which is a System transfer with nothing behind it.
+    //
+    // **The faucet is not shown anywhere on the site**, deliberately, so a
+    // drained one is invisible until a reader hits it. That is precisely the
+    // case for putting it here: this script is the only thing that looks.
+    //
+    // The threshold is *one* grant, not a comfortable margin, because exit 1
+    // means "a claim is false" and until the last grant is gone none of them
+    // are. A thinning reserve is printed instead — a human reading the daily
+    // output sees the number fall long before the script starts shouting,
+    // which is the difference between a monitor and an alarm.
+    if (isset($addresses['faucet'])) {
+        echo "\n";
+        $amounts = $config->faucet();
+
+        try {
+            $lamports = attempt(static fn () => $rpc->balance($addresses['faucet']));
+            // 165 bytes is an SPL token account, which every grant creates
+            // idempotently; without its rent the arithmetic is optimistic by
+            // about 0.002 SOL a visitor and says "one left" when there is none.
+            $rent = attempt(static fn () => $rpc->minimumBalanceForRentExemption(165));
+        } catch (RuntimeException $e) {
+            fwrite(STDERR, "could not read the faucet balance: {$e->getMessage()}\n");
+            exit(CANARY_TEMPFAIL);
+        }
+
+        // Transfer + the new token account's rent + a fee allowance. The fee
+        // is nominal on devnet and included so the count cannot round up.
+        $perGrant = (int) $amounts['sol_lamports'] + $rent + 10_000;
+        $grants = intdiv($lamports, max(1, $perGrant));
+
+        line('faucet', $addresses['faucet']);
+        line('balance', sprintf(
+            '%s SOL — about %d more %s',
+            rtrim(rtrim(number_format($lamports / 1_000_000_000, 4, '.', ''), '0'), '.'),
+            $grants,
+            $grants === 1 ? 'visitor' : 'visitors',
+        ));
+
+        if ($grants < 1) {
+            $findings[] = sprintf(
+                'the faucet cannot fund another visitor: %s holds %d lamports and a grant costs about %d. '
+                    .'§4.3 is not being kept. Send devnet SOL to that address.',
+                $addresses['faucet'],
+                $lamports,
+                $perGrant,
+            );
+        } elseif ($grants < 3) {
+            // Not a finding: nothing is false yet. Said out loud anyway,
+            // because the whole value of a daily read is seeing this coming.
+            echo "note: the faucet is thinning — fund it before it stops.\n";
         }
     }
 } else {
