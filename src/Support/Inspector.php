@@ -46,7 +46,7 @@ final class Inspector
      * fetches when it is opened rather than on the request that made it. See
      * {@see lastTransaction()} for why that read is deferred.
      *
-     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool}, 2?: string}>, note?: string, link?: array{href: string, text: string}, event?: string}>
+     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool, derivation: ?string}, 2?: string}>, note?: string, link?: array{href: string, text: string}, event?: string}>
      */
     public function sections(?SiteState $state = null, ?string $error = null, ?PayerState $payer = null, ?MeterResult $result = null): array
     {
@@ -54,14 +54,15 @@ final class Inspector
         $params = $this->config->siteParams();
 
         // One map for the whole panel, built before any row is. Every address
-        // row resolves its short name from this and from nothing else.
-        $aliases = $this->aliasesFor($state, $payer);
+        // row resolves its short name *and* its derivation from this and from
+        // nothing else.
+        $known = $this->knownAddresses($state, $payer);
 
         $sections = [[
             'heading' => 'Deployment',
             'rows' => [
-                ['metering program', $this->address($program->id, $aliases)],
-                ['token program', $this->address($program->tokenProgram, $aliases)],
+                ['metering program', $this->address($program->id, $known)],
+                ['token program', $this->address($program->tokenProgram, $known)],
                 ['cluster', 'devnet'],
                 ['endpoint', $this->config->rpcUrl()],
             ],
@@ -106,10 +107,10 @@ final class Inspector
         $sections[] = [
             'heading' => 'Site account, decoded',
             'rows' => [
-                ['site account', $this->address($state->address, $aliases)],
-                ['authority', $this->address($site->authority, $aliases)],
-                ['mint', $this->address($site->mint, $aliases)],
-                ['treasury', $this->address($site->treasury, $aliases)],
+                ['site account', $this->address($state->address, $known)],
+                ['authority', $this->address($site->authority, $known)],
+                ['mint', $this->address($site->mint, $known)],
+                ['treasury', $this->address($site->treasury, $known)],
                 ['page price', $amount($site->pagePrice)],
                 ['collection threshold', $amount($site->collectionThreshold).sprintf('  — %d views', intdiv($site->collectionThreshold, max(1, $site->pagePrice)))],
                 ['minimum limit', $amount($site->minLimit).sprintf('  — %d views', intdiv($site->minLimit, max(1, $site->pagePrice)))],
@@ -124,12 +125,12 @@ final class Inspector
             $sections[] = [
                 'heading' => 'Treasury',
                 'rows' => [
-                    ['treasury token account', $this->address($site->treasury, $aliases)],
+                    ['treasury token account', $this->address($site->treasury, $known)],
                     ['balance', $amount($state->treasury->amount)],
-                    ['owner', $this->address($state->treasury->owner, $aliases)],
+                    ['owner', $this->address($state->treasury->owner, $known)],
                     ['delegate', $state->treasury->delegate === null
                         ? 'none'
-                        : $this->address($state->treasury->delegate, $aliases)],
+                        : $this->address($state->treasury->delegate, $known)],
                 ],
                 'note' => 'What readers have paid, so far, on this deployment.',
             ];
@@ -159,12 +160,12 @@ final class Inspector
         }
 
         if ($payer !== null) {
-            $sections[] = $this->reader($payer, $amount, $aliases);
+            $sections[] = $this->reader($payer, $amount, $known);
             $sections[] = $this->preflight($state, $payer, $amount);
         }
 
         if ($result !== null && $result->signature !== null) {
-            $sections[] = $this->lastTransaction($result, $aliases);
+            $sections[] = $this->lastTransaction($result, $known);
         }
 
         return $sections;
@@ -205,9 +206,11 @@ final class Inspector
      * carries the signature and `assets/inspector.js` reads the event on
      * first open. The row below is what a reader sees until then.
      *
-     * @return array{heading: string, rows: list<array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool}, 2?: string}>, note?: string, link?: array{href: string, text: string}, event?: string}
+     * @param array<string, array{alias: string, derivation: ?string}> $known every address this request can name
+     *
+     * @return array{heading: string, rows: list<array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool, derivation: ?string}, 2?: string}>, note?: string, link?: array{href: string, text: string}, event?: string}
      */
-    private function lastTransaction(MeterResult $result, array $aliases): array
+    private function lastTransaction(MeterResult $result, array $known): array
     {
         $signature = (string) $result->signature;
 
@@ -229,7 +232,7 @@ final class Inspector
             $n = $i + 1;
             $rows[] = [
                 sprintf('ix %d · program', $n),
-                $this->address($instruction->programId, $aliases),
+                $this->address($instruction->programId, $known),
             ];
 
             foreach ($instruction->accounts as $j => $account) {
@@ -242,7 +245,7 @@ final class Inspector
                 }
                 $rows[] = [
                     sprintf('ix %d · account %d', $n, $j + 1),
-                    $this->address($account->pubkey, $aliases),
+                    $this->address($account->pubkey, $known),
                     $flags === [] ? 'readonly' : implode(', ', $flags),
                 ];
             }
@@ -303,11 +306,11 @@ final class Inspector
      * in. Which is §9's whole claim for aliases — *the same address always
      * draws the same alias* — enforced instead of hoped for.
      *
-     * @param array<string, string> $aliases address => alias
+     * @param array<string, array{alias: string, derivation: ?string}> $known
      *
-     * @return array{address: string, alias: ?string, explorer: bool}
+     * @return array{address: string, alias: ?string, explorer: bool, derivation: ?string}
      */
-    private function address(string $address, array $aliases, bool $onChain = true): array
+    private function address(string $address, array $known, bool $onChain = true): array
     {
         return [
             'address' => $address,
@@ -315,13 +318,18 @@ final class Inspector
             // per address across sessions, and one made up here for a role
             // this panel could not identify would look exactly like the stable
             // kind.
-            'alias' => $aliases[$address] ?? null,
+            'alias' => $known[$address]['alias'] ?? null,
             'explorer' => $onChain,
+            // The third cell, when there is one to give. An address this panel
+            // cannot place gets null and the row spans, rather than a blank
+            // column that would read as "derived from nothing".
+            'derivation' => $known[$address]['derivation'] ?? null,
         ];
     }
 
     /**
-     * Every address this request already knows, by alias.
+     * Every address this request already knows: its short name, and the
+     * derivation that produced it where one did.
      *
      * Matching by address rather than by position, because the instruction's
      * account order belongs to the library and a panel that assumed it would
@@ -333,11 +341,28 @@ final class Inspector
      * and one invented for a role this panel could not identify would look
      * exactly like the stable kind.
      *
-     * @return array<string, string> address => alias
+     * **Only some of these addresses are derived, and not all by the same
+     * program.** §9 asked for "the derivation that produced it" as though that
+     * were one uniform thing. It is not, and the uniform rendering it imagined
+     * would have said something false. The site and contract PDAs are derived
+     * by *this* program from seeds it chose. The treasury and the reader's
+     * token account are derived by Solana's associated-token program, which
+     * this site does not own and did not write — showing all four alike would
+     * quietly claim otherwise. The remaining five were never derived, for
+     * three different reasons: two are keypairs first-run setup generated, one
+     * is the reader's own wallet, one is a deployment address and one is a
+     * constant every Solana cluster shares.
+     *
+     * So the third cell says which of those it is. Silence would have been
+     * cheaper and would have read as "we did not bother" rather than "there is
+     * nothing to derive", which is the more useful fact and the true one.
+     *
+     * @return array<string, array{alias: string, derivation: ?string}>
      */
-    private function aliasesFor(?SiteState $state, ?PayerState $payer): array
+    private function knownAddresses(?SiteState $state, ?PayerState $payer): array
     {
         $program = $this->config->program();
+
         $aliases = [
             $program->id => Alias::for(Alias::PROGRAM, $program->id),
             $program->tokenProgram => Alias::for(Alias::TOKEN_PROGRAM, $program->tokenProgram),
@@ -362,7 +387,71 @@ final class Inspector
             $aliases[$payer->contractAddress] = Alias::for(Alias::CONTRACT, $payer->contractAddress);
         }
 
-        return $aliases;
+        // Seeds are written with the short names above rather than with
+        // 44-character base58, so a reader can match every seed to the row it
+        // names without comparing strings by eye — which is the whole argument
+        // for having aliases at all (§9). The aliases therefore have to exist
+        // before the sentences that quote them, which is why this is two
+        // passes over the same addresses rather than one.
+        $of = static fn (string $address): string => $aliases[$address] ?? $address;
+
+        $ata = static fn (string $owner, string $tokenProgram, string $mint): string => sprintf(
+            '[%s, %s, %s] + bump, by the associated-token program',
+            $owner,
+            $tokenProgram,
+            $mint,
+        );
+
+        $derivations = [
+            // Not derived: a program is deployed *to* an address, and this one
+            // is in config/site.php because someone put it there.
+            $program->id => 'deployed to this cluster; nothing derived it',
+            $program->tokenProgram => 'a fixed address, the same on every Solana cluster',
+        ];
+
+        if ($state !== null) {
+            $derivations[$state->address] = sprintf(
+                '["site", %s] + bump, by %s',
+                $of($state->site->authority),
+                $of($program->id),
+            );
+            $derivations[$state->site->authority] = 'a keypair first-run setup generated; this site holds it';
+            $derivations[$state->site->mint] = 'a keypair first-run setup generated; it has no seeds';
+            $derivations[$state->site->treasury] = $ata(
+                $of($state->site->authority),
+                $of($program->tokenProgram),
+                $of($state->site->mint),
+            );
+        }
+
+        if ($payer !== null) {
+            $derivations[$payer->wallet] = "your wallet's own public key; nothing derived it";
+
+            // Both of these are seeded by the mint, so neither can be written
+            // without a site account to read it from. An unprovisioned copy
+            // has no mint and these rows go bare, which is correct: the
+            // addresses would not exist either.
+            if ($state !== null) {
+                $derivations[$payer->tokenAccount] = $ata(
+                    $of($payer->wallet),
+                    $of($program->tokenProgram),
+                    $of($state->site->mint),
+                );
+                $derivations[$payer->contractAddress] = sprintf(
+                    '["contract", %s, %s] + bump, by %s',
+                    $of($state->address),
+                    $of($payer->wallet),
+                    $of($program->id),
+                );
+            }
+        }
+
+        $known = [];
+        foreach ($aliases as $address => $alias) {
+            $known[$address] = ['alias' => $alias, 'derivation' => $derivations[$address] ?? null];
+        }
+
+        return $known;
     }
 
     /**
@@ -473,20 +562,20 @@ final class Inspector
      * forms, beside the address a reader can paste into any explorer. Claim 6
      * in §2 is only checkable if the thing it is about is visible somewhere.
      *
-     * @param callable(int): string $amount  both unit forms, at the mint's own decimals
-     * @param array<string, string>  $aliases address => alias, for {@see address()}
+     * @param callable(int): string $amount both unit forms, at the mint's own decimals
+     * @param array<string, array{alias: string, derivation: ?string}> $known every address this request can name, for {@see address()}
      *
-     * @return array{heading: string, rows: list<array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool}, 2?: string}>, note?: string}
+     * @return array{heading: string, rows: list<array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool, derivation: ?string}, 2?: string}>, note?: string}
      */
-    private function reader(PayerState $payer, callable $amount, array $aliases): array
+    private function reader(PayerState $payer, callable $amount, array $known): array
     {
         $rows = [
-            ['your wallet', $this->address($payer->wallet, $aliases)],
+            ['your wallet', $this->address($payer->wallet, $known)],
             [
                 'your token account',
                 $this->address(
                     $payer->tokenAccount,
-                    $aliases,
+                    $known,
                     // Derived either way; only sometimes there. The explorer
                     // link is dropped rather than pointed at "account not
                     // found", and the row below says why in words.
@@ -503,7 +592,7 @@ final class Inspector
                 'delegate',
                 $payer->funds->delegate === null
                     ? 'none — nothing may draw from this account'
-                    : $this->address($payer->funds->delegate, $aliases),
+                    : $this->address($payer->funds->delegate, $known),
             ];
             $rows[] = ['approved', $amount($payer->funds->delegatedAmount)];
         }
@@ -511,13 +600,13 @@ final class Inspector
         if ($payer->contract === null) {
             $rows[] = [
                 'your contract',
-                $this->address($payer->contractAddress, $aliases, false),
+                $this->address($payer->contractAddress, $known, false),
             ];
             $rows[] = ['on chain', 'not yet — the address is derived, the account is not there'];
         } else {
             $rows[] = [
                 'your contract',
-                $this->address($payer->contractAddress, $aliases),
+                $this->address($payer->contractAddress, $known),
             ];
             $rows[] = ['limit', $amount($payer->contract->limit)];
             $rows[] = ['used', $amount($payer->contract->used)];

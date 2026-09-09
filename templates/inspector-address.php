@@ -26,7 +26,13 @@
  * site is wrong. The address renders as plain text and the row's own words say
  * why.
  *
- * @var array{address: string, alias: ?string, explorer: bool} $value
+ * The derivation in `$value['derivation']` is deliberately NOT rendered here.
+ * It belongs in the row's third cell, beside the value rather than inside it —
+ * see `inspector.php`, which reads it off this same shape. Rendering it here
+ * would put a sentence inside a cell whose whole job is to be a copyable
+ * address.
+ *
+ * @var array{address: string, alias: ?string, explorer: bool, derivation: ?string} $value
  */
 use Newsprint\Support\View;
 

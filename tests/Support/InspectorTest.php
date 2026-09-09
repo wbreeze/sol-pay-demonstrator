@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Newsprint\Tests\Support;
 
 use Newsprint\Chain\SiteState;
+use Newsprint\Support\Alias;
 use Newsprint\Support\Config;
 use Newsprint\Support\Inspector;
 use PHPUnit\Framework\TestCase;
@@ -96,6 +97,81 @@ final class InspectorTest extends TestCase
         $headings = array_column($this->inspector()->sections($this->state()), 'heading');
 
         self::assertNotContains('Configuration drift', $headings);
+    }
+
+    /**
+     * The third cell on an address row: the derivation that produced the
+     * address, or — where nothing derived it — where it came from instead.
+     *
+     * @param list<array{heading: string, rows: list<array<int, mixed>>}> $sections
+     */
+    private function derivation(array $sections, string $heading, string $label): ?string
+    {
+        foreach ($sections as $section) {
+            if ($section['heading'] !== $heading) {
+                continue;
+            }
+            foreach ($section['rows'] as $row) {
+                if ($row[0] === $label && is_array($row[1])) {
+                    return $row[1]['derivation'];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function programAlias(): string
+    {
+        $id = Config::load(dirname(__DIR__, 2))->program()->id;
+
+        return Alias::for(Alias::PROGRAM, $id);
+    }
+
+    /**
+     * §9 asked for "the derivation that produced it" as though that were one
+     * uniform thing, and the difference is the part worth a test.
+     *
+     * The site PDA is derived by *this* program from seeds it chose. The
+     * treasury is an associated token account, derived by a Solana program
+     * this site does not own and did not write. A panel that rendered both
+     * simply as "derived" would be quietly claiming authorship of an address
+     * it never computed — which is the failure this asserts against, in the
+     * only way that can tell the two apart: the deriving program is named, and
+     * on the treasury row it is *not* ours.
+     */
+    public function testADerivedAddressNamesTheProgramThatDerivedIt(): void
+    {
+        $sections = $this->inspector()->sections($this->state());
+
+        $site = $this->derivation($sections, 'Site account, decoded', 'site account');
+        self::assertNotNull($site, 'a PDA has seeds and they belong on the row');
+        self::assertStringStartsWith('["site", ', $site, 'the literal seed first, as the program writes it');
+        self::assertStringContainsString('by '.$this->programAlias(), $site);
+
+        $treasury = $this->derivation($sections, 'Site account, decoded', 'treasury');
+        self::assertNotNull($treasury);
+        self::assertStringContainsString('by the associated-token program', $treasury);
+        self::assertStringNotContainsString(
+            $this->programAlias(),
+            $treasury,
+            'the treasury is not derived by this site\'s program and must not say it is',
+        );
+    }
+
+    /**
+     * The other half, and the reason silence was rejected: an address with no
+     * derivation has a provenance instead, and a blank cell would read as "we
+     * did not bother" rather than "there was nothing to derive".
+     */
+    public function testAnAddressThatWasNeverDerivedSaysSoRatherThanGoingBlank(): void
+    {
+        $sections = $this->inspector()->sections($this->state());
+
+        $mint = $this->derivation($sections, 'Site account, decoded', 'mint');
+        self::assertNotNull($mint, 'silence here reads as an omission, not as a fact');
+        self::assertStringNotContainsString('[', $mint, 'a keypair has no seeds to show');
+        self::assertStringNotContainsString(' by ', $mint, 'and no program derived it');
     }
 
     public function testAFailedReadStillProducesAPanel(): void
