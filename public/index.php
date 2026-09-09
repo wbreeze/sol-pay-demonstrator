@@ -68,12 +68,12 @@ $decimals = (int) $params['decimals'];
  */
 $state = null;
 $stateError = null;
-$read = static function () use ($config, &$state, &$stateError): ?SiteState {
-    static $done = false;
-    if ($done) {
+$stateDone = false;
+$read = static function () use ($config, &$state, &$stateError, &$stateDone): ?SiteState {
+    if ($stateDone) {
         return $state;
     }
-    $done = true;
+    $stateDone = true;
 
     if (!$config->isProvisioned()) {
         return null;
@@ -94,8 +94,54 @@ $read = static function () use ($config, &$state, &$stateError): ?SiteState {
     return $state;
 };
 
+/**
+ * Has anything in this request already paid for the site read?
+ *
+ * Deliberately *not* `$read() !== null` — asking that question performs the
+ * read, which is the cost this exists to avoid.
+ *
+ * **`function` and not `fn`.** An arrow function captures by value, at the
+ * moment it is defined, so `fn (): bool => $stateDone` closes over `false`
+ * for the life of the request and never notices the read it exists to detect.
+ * It is the same family as the two capture faults `FrontControllerTest`
+ * already guards, with a quieter failure: nothing errors, the panel simply
+ * defers on every page including the ones that already paid.
+ */
+$stateAlreadyRead = static function () use (&$stateDone): bool {
+    return $stateDone;
+};
+
 $panel = new Inspector($config);
-$inspector = static function (?PayerState $payer = null, ?MeterResult $result = null) use ($panel, $read, &$stateError): array {
+
+/**
+ * The panel's sections, or **null to say "not on this request"** (2026-09-09).
+ *
+ * §9 says the inspector is collapsed by default, and it is rendered on every
+ * page by `$shell`. Until now that meant every page — `/privacy` included —
+ * blocked on one `getMultipleAccounts` to fill a panel most readers never
+ * open. Measured 2026-09-09: that call *was* `/privacy`, 0.9 s of it, on a
+ * page which displays nothing from the chain.
+ *
+ * So the rule is: render the panel when this request has already read the
+ * chain for its own reasons, and defer it when it has not.
+ *
+ * **That rule is what protects §9's last section**, and it is why the test is
+ * "did something already read" rather than "is this page cheap". The last
+ * transaction needs a `MeterResult` that exists only on the request that
+ * produced it — §10.4 leaves no history for a second request to find — so it
+ * could never survive a deferred fetch. It does not have to: on the article
+ * route `MeterMiddleware` has already called `$read()` to make the metering
+ * decision, so the state is in hand, the panel renders inline, and the read
+ * costs nothing extra because it was required work either way.
+ *
+ * `$payer` and `$result` are checked too, belt and braces: either one means a
+ * caller has request-scoped data the deferred route could not reconstruct.
+ */
+$inspector = static function (?PayerState $payer = null, ?MeterResult $result = null) use ($panel, $read, $stateAlreadyRead, &$stateError): ?array {
+    if (!$stateAlreadyRead() && $payer === null && $result === null) {
+        return null;
+    }
+
     $state = $read();
 
     return $panel->sections($state, $stateError, $payer, $result);
@@ -1036,6 +1082,53 @@ $app->post('/setup', function (Request $request, Response $response) use ($view,
  * the browser answers back. `GET` renders the page, `POST` lands what it found
  * in `var/`, which Claude can read and which git ignores.
  */
+/**
+ * The panel's sections, for a page that did not read the chain (2026-09-09).
+ *
+ * Two shapes from one URL, and the reason is that the panel must not need
+ * JavaScript to exist:
+ *
+ *   · asked with `X-Fragment: 1` — what `assets/inspector.js` sends on first
+ *     open — it answers with the sections markup alone, which the script puts
+ *     where the deferred paragraph was;
+ *   · asked by a browser following the link in that paragraph, it answers with
+ *     an ordinary page. `$read()` is called first, so `$shell` finds the state
+ *     already in hand and renders the panel inline, exactly as the article
+ *     route does. A reader with no JavaScript clicks a link and gets the panel;
+ *     nothing about §9 depends on a script.
+ *
+ * It is one route rather than two because the sections come from one partial
+ * either way. Two routes would be two chances for the fragment and the page to
+ * drift apart.
+ */
+$app->get('/inspector/panel', function (Request $request, Response $response) use ($view, $shell, $page, $panel, $read, &$stateError): Response {
+    if ($request->getHeaderLine('X-Fragment') === '1') {
+        $sections = $panel->sections($read(), $stateError);
+
+        $response->getBody()->write($view->render('inspector-sections', [
+            'sections' => $sections,
+            'view' => $view,
+        ]));
+
+        // `no-store`: these are account values read on this request, and a
+        // cached fragment would be the server's memory answering for the
+        // chain — which is the one thing §2's claim 7 says this panel never
+        // does.
+        return $response
+            ->withHeader('Content-Type', 'text/html; charset=utf-8')
+            ->withHeader('Cache-Control', 'no-store');
+    }
+
+    // Not a fragment: read first, so `$shell` renders the panel inline below.
+    $read();
+
+    return $page($response, $shell(
+        'Inspector',
+        '<p class="lede">The inspector is below, with the accounts read on this'
+            .' request. Every other page defers this read until you open it.</p>',
+    ));
+});
+
 /**
  * SPEC §9's last section, read on demand.
  *

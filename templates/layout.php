@@ -2,7 +2,10 @@
 /**
  * @var string $title
  * @var string $content
- * @var array<int, array{heading: string, rows: array<int, array{0: string, 1: string}>}> $inspector
+ * `$inspector` is null when this request read nothing from the chain and the
+ * panel is deferred to first open — see `inspector.php`.
+ *
+ * @var array<int, array{heading: string, rows: array<int, array{0: string, 1: string}>}>|null $inspector
  * @var \Newsprint\Support\View $view
  */
 use Newsprint\Support\View;

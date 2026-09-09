@@ -1,5 +1,6 @@
 /**
- * Two small jobs in the inspector: copying an address, and reading the event.
+ * Three small jobs in the inspector: copying an address, reading the panel on
+ * a page that deferred it, and reading the event.
  *
  * ---- copying ----
  *
@@ -14,8 +15,8 @@
  *
  * ---- reading the event ----
  *
- * The panel is rendered whole by the server; the only thing missing is the
- * decoded `Metered` / `Renewed` / `Closed` event, which needs `getTransaction`
+ * Where the server rendered the panel, the only thing missing is the decoded
+ * `Metered` / `Renewed` / `Closed` event, which needs `getTransaction`
  * and therefore a fourth RPC call on a request §12.4 budgets about three for.
  * §9 says the panel is collapsed by default, so that call is spent by readers
  * who actually open it and by nobody else.
@@ -51,6 +52,58 @@ document.addEventListener('click', async (event) => {
         said('cannot copy');
     }
 });
+
+/* ---- reading the panel itself ----
+ *
+ * A page that needed nothing from the chain rendered no panel body, only the
+ * paragraph carrying `data-panel-src`. Measured 2026-09-09: filling that body
+ * on every page view cost one `getMultipleAccounts`, and on `/privacy` that
+ * call was the entire page load — 0.9 s to display nothing from the chain.
+ *
+ * Same shape as the event read below, and the same argument: §9 says this
+ * panel is collapsed by default, so the read belongs to the reader who opens
+ * it. The paragraph is a real link, so this is an upgrade rather than a
+ * requirement — with no JavaScript the link still goes to the panel. */
+const panelBody = document.querySelector('details.inspector');
+const deferred = document.querySelector('[data-panel-src]');
+
+if (panelBody && deferred) {
+    let asked = false;
+
+    const load = async () => {
+        if (asked) return;
+        asked = true;
+        const saying = deferred.textContent;
+        deferred.textContent = 'reading the accounts…';
+
+        try {
+            const response = await fetch(deferred.dataset.panelSrc, {
+                headers: { 'X-Fragment': '1' },
+            });
+            if (!response.ok) throw new Error(`the site answered ${response.status}`);
+            const markup = await response.text();
+
+            // `insertAdjacentHTML` and then remove the paragraph, rather than
+            // replacing `innerHTML` on a parent: the parent holds the script
+            // tag and the summary too, and rewriting it would tear down the
+            // element whose toggle event is running.
+            deferred.insertAdjacentHTML('afterend', markup);
+            deferred.remove();
+        } catch (error) {
+            // Put the reader back where they started -- a link they can click
+            // -- rather than leaving a spinner that never resolves. Lowering
+            // the flag means the next open tries again, which is what a reader
+            // reopening it is asking for.
+            asked = false;
+            deferred.textContent = `${saying.trim()} (that read failed: ${error.message})`;
+        }
+    };
+
+    if (panelBody.open) load();
+    panelBody.addEventListener('toggle', () => {
+        if (panelBody.open) load();
+    });
+}
 
 const panel = document.querySelector('details.inspector');
 const row = document.querySelector('[data-event-for]');
