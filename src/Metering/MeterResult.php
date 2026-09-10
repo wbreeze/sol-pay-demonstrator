@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Newsprint\Metering;
 
+use Newsprint\Chain\PayerState;
 use SolPay\Core\Blocked;
 use SolPay\Core\Cause;
 use SolPay\Core\Instruction;
@@ -50,6 +51,28 @@ final class MeterResult
          * @var list<Instruction>
          */
         public readonly array $instructions = [],
+        /**
+         * The accounts the decision was made from, on the outcomes that sent
+         * nothing — and null on every outcome that sent something.
+         *
+         * `meter()` reads the contract and the reader's token account to
+         * decide, and the request then renders from those same two accounts.
+         * Where no transaction went out, the read that decided is still the
+         * truth when the page is drawn, and reading it again is a second
+         * ~500 ms round trip for the same bytes. Measured 2026-09-09: the
+         * `set-meter` screen cost three `getMultipleAccounts` and 1.88 s, of
+         * which one whole call produced a value that was discarded.
+         *
+         * **Null wherever a transaction was sent, and that is the safety
+         * property rather than an omission.** `metered`, `unconfirmed` and
+         * `failed` all follow a `sendTransaction`; `used`, `paid` and the
+         * carried residue may have moved, and §2's claim 7 is that every
+         * number on the screen came from an account rather than from the
+         * server's memory. Carrying a pre-send read onto one of those screens
+         * would show a reader stale arithmetic that looks exactly like fresh
+         * arithmetic.
+         */
+        public readonly ?PayerState $payer = null,
     ) {
     }
 
@@ -76,9 +99,9 @@ final class MeterResult
     }
 
     /** The preflight refused before anything was signed — `can_meter` said no. */
-    public static function blocked(Blocked $blocked, int $charge): self
+    public static function blocked(Blocked $blocked, int $charge, ?PayerState $payer = null): self
     {
-        return new self(MeterOutcome::Blocked, blocked: $blocked, detail: (string) $blocked, charge: $charge);
+        return new self(MeterOutcome::Blocked, blocked: $blocked, detail: (string) $blocked, charge: $charge, payer: $payer);
     }
 
     /** The chain refused. */
@@ -88,10 +111,16 @@ final class MeterResult
         return new self(MeterOutcome::Failed, signature: $signature, cause: $cause, shortfall: $shortfall, detail: $detail, instructions: $instructions);
     }
 
-    /** The endpoint did not answer. Nothing was sent and nothing is owed. */
-    public static function unreadable(string $detail): self
+    /**
+     * The endpoint did not answer, or there was nothing to meter against.
+     * Nothing was sent and nothing is owed.
+     *
+     * The payer is carried when there is one — "this reader has no contract"
+     * is a conclusion drawn *from* a successful read, not a failure to read.
+     */
+    public static function unreadable(string $detail, ?PayerState $payer = null): self
     {
-        return new self(MeterOutcome::Unreadable, detail: $detail);
+        return new self(MeterOutcome::Unreadable, detail: $detail, payer: $payer);
     }
 
     /** Is the reader entitled to the body? */

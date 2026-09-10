@@ -220,14 +220,40 @@ $rpcFactory = static function () use ($config): Rpc {
  * the site remembers nothing else.
  */
 $payerState = static function (Request $request) use ($wallet, $read, $config, $rpcFactory): ?PayerState {
-    // One read per request. The meter panel asks, and so does the inspector,
-    // and §12.4 budgets about three RPC calls per metered view rather than six.
+    // **One read per request, and on some requests none.**
+    //
+    // The meter panel asks, the inspector asks, and the article route asks
+    // again on its way to `$page`; the memo below is what makes those one
+    // call. What the memo could not see is that the *metering middleware* has
+    // often already read the same two accounts, a few milliseconds earlier, in
+    // front of this same handler.
+    //
+    // Measured 2026-09-09 from a HAR: the `set-meter` screen — an identified
+    // reader with no contract, deciding whether to spend — cost three
+    // `getMultipleAccounts` and 1.88 s, because `Meter` read the payer, found
+    // no contract, returned a result the panel never consults, and this
+    // closure then read the very same two accounts again. One full round trip
+    // to devnet, about 500 ms of a 1.88 s page, whose only product was
+    // discarded.
+    //
+    // So a `MeterResult` that sent nothing now carries the accounts it decided
+    // from, and this asks for that before it asks the network. On every
+    // outcome that *did* send, `payer` is null and the read below happens as
+    // before — see {@see MeterResult::$payer} for why that asymmetry is the
+    // point rather than a gap.
     static $done = false;
     static $payer = null;
     if ($done) {
         return $payer;
     }
     $done = true;
+
+    $metering = $request->getAttribute(MeterMiddleware::ATTRIBUTE);
+    if ($metering instanceof MeterResult && $metering->payer !== null) {
+        $payer = $metering->payer;
+
+        return $payer;
+    }
 
     $address = $wallet($request);
     $state = $read();

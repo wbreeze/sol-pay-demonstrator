@@ -129,7 +129,10 @@ final class Meter
         }
 
         if ($payer->contract === null) {
-            return MeterResult::unreadable('there is no contract for this reader');
+            // Carried, not discarded. Nothing is sent from here, so the two
+            // accounts just read are what the `set-meter` screen is about to
+            // draw, and the request has no reason to ask for them twice.
+            return MeterResult::unreadable('there is no contract for this reader', $payer);
         }
 
         $charge = Preflight::charge($state->site, $pageViews) ?? 0;
@@ -139,7 +142,13 @@ final class Meter
             // Nothing is sent. §8.2's `LimitReached` reaches the reader as
             // `manage_meter` rather than as a failed transaction they paid a
             // fee for.
-            return MeterResult::blocked($blocked, $charge);
+            //
+            // The payer is carried for the same reason as above, with one
+            // gain beyond the round trip: the limit screen now states the
+            // arithmetic the refusal was actually made from. Re-reading left
+            // open the possibility of a screen that disagreed with the
+            // decision it was explaining.
+            return MeterResult::blocked($blocked, $charge, $payer);
         }
 
         $settles = Preflight::willSettle($payer->contract, $state->site, $pageViews);
@@ -172,6 +181,13 @@ final class Meter
             return MeterResult::unconfirmed((string) $outcome->signature, $charge, $settles, $pageViews, $instructions);
         }
 
+        // **No payer is carried past this point.** Everything below follows a
+        // `sendTransaction`, so the accounts read at the top of this method
+        // may no longer describe the chain, and §2's claim 7 says the screen's
+        // numbers come from an account rather than from what the server
+        // remembers. The request reads again, and that second read is bought
+        // on purpose.
+        //
         // Failed. §8.2: `InsufficientFunds` is ambiguous by construction — SPL
         // reports a short balance and a short allowance identically, and the
         // two need opposite responses. So the account is read rather than the
