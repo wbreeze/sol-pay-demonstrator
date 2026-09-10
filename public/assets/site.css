@@ -266,6 +266,7 @@ button:hover { filter: brightness(1.1); }
     cursor: pointer;
 }
 .secondary:hover { border-color: var(--accent); color: var(--accent); }
+.secondary:disabled, .secondary:disabled:hover { opacity: 0.55; cursor: default; border-color: var(--rule); color: var(--ink-soft); }
 
 .report {
     max-height: 28rem;
@@ -301,3 +302,6 @@ button:hover { filter: brightness(1.1); }
 .meter-strip p { margin: 0 0 0.5rem; }
 .advance { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: baseline; margin-top: 0.75rem; }
 .advance .fine { flex: 1 1 16rem; }
+/* The same voice as the meter panel's progress lines (`.gate .pending`), on a
+   row of its own under the button. */
+.advance .pending { flex: 1 1 100%; color: var(--ink-soft); font-size: 0.9rem; font-style: italic; margin: 0; }

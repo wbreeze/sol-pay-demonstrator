@@ -147,7 +147,7 @@ $contract = $meter['contract'];
 
     <?php /* §7.4. Labelled as a demo control, and it charges honestly: seven
              views is seven views, and the transfer that results is real. */ ?>
-    <form method="post" action="/meter/advance" class="advance">
+    <form method="post" action="/meter/advance" class="advance" data-advance>
         <input type="hidden" name="slug" value="<?= View::e($piece->slug) ?>">
         <button type="submit" class="secondary">Advance the meter <?= View::e((string) $meter['step_views']) ?> views</button>
         <span class="fine">
@@ -156,5 +156,14 @@ $contract = $meter['contract'];
             ten-view threshold, so the settle fires on some clicks and not
             others.
         </span>
+        <?php /* Shown by assets/advance.js once the form is sent, because the
+                 advance waits on a validator and the old page stays on screen
+                 until it answers. It claims only what is true at that moment;
+                 the page the redirect lands on reports the outcome. Hidden
+                 without JavaScript, where the form works exactly the same. */ ?>
+        <p class="pending" data-advance-status role="status" hidden>
+            Advancing the meter <?= View::e((string) $meter['step_views']) ?> views…
+        </p>
     </form>
+    <script type="module" src="/assets/advance.js"></script>
 </section>

@@ -463,9 +463,10 @@ $article->add(new MeterMiddleware(
  * articles, which is exactly why it belongs in a demonstration of the API.
  */
 $app->post('/meter/advance', function (Request $request, Response $response) use ($wallet, $reads, $config, $meterFactory): Response {
-    // A form and a redirect, not JSON and a script. §12.2 puts JavaScript
-    // where the wallet is and nowhere else, and this one is signed by the site
-    // — the reader's wallet is not involved at all.
+    // A form and a redirect, not JSON and a script: this one is signed by the
+    // site and the reader's wallet is not involved at all. `assets/advance.js`
+    // only disables the button and says the advance is under way while the
+    // validator answers; without it the form works exactly the same.
     $body = (array) $request->getParsedBody();
     $slug = (string) ($body['slug'] ?? '');
     $back = $slug === '' ? '/' : '/a/'.rawurlencode($slug);

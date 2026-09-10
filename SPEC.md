@@ -1645,10 +1645,12 @@ specification has already agreed to pay:
    a transaction cannot be compiled without one. "Exactly three" was never
    three.
 4. `sendTransaction`.
-5. `getSignatureStatuses` — **once, not a poll.** Across three captures and 34
-   confirmations, no response has ever contained a second one: the first status
-   request has always answered, so `confirm_poll_ms` has not yet reached a
-   second iteration. It is a loop that has not had to loop.
+5. `getSignatureStatuses` — **usually once, and it has looped once.** Across
+   four captures and 41 confirmations, one needed a second request: a
+   seven-view advance on 2026-09-10 whose first status came back unconfirmed
+   after 536 ms, and whose second, one `confirm_poll_ms` later, confirmed. The
+   loop is real and has run; it is counted as one call here because forty of
+   forty-one needed only one.
 6. `getMultipleAccounts` a third time, *after* the send — because the charge
    moved `used`, `paid` and the carried residue, and §2's claim 7 is that the
    numbers on the screen came from an account rather than from the server's

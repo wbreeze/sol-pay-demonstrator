@@ -217,6 +217,62 @@ final class TemplateRenderTest extends TestCase
         self::assertStringContainsString('Heads up', $html);
     }
 
+    /**
+     * The advance's progress sentence, and the one assumption `advance.js`
+     * makes about the markup: that the server never renders the button
+     * disabled or the sentence shown. The script resets both on arrival, which
+     * is only safe if neither can be the server's own state.
+     */
+    public function testTheAdvanceFormCarriesItsProgressSentenceHidden(): void
+    {
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '');
+        $meter = $this->panel(['result' => MeterResult::granted()]);
+        $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
+
+        self::assertMatchesRegularExpression('/<form[^>]*\bdata-advance\b/', $html);
+        self::assertMatchesRegularExpression('/<p[^>]*\bdata-advance-status\b[^>]*\brole="status"[^>]*\bhidden\b[^>]*>\s*Advancing the meter 7 views…/u', $html);
+        self::assertStringContainsString('<script type="module" src="/assets/advance.js"></script>', $html);
+        self::assertFileExists(dirname(__DIR__, 2).'/public/assets/advance.js');
+        self::assertDoesNotMatchRegularExpression('/<button[^>]*\bdisabled\b/', $html);
+    }
+
+    /**
+     * `advance.js` removes the advance's report from the address once it has
+     * been shown, so a refresh or a back cannot replay an old advance as a new
+     * one. A key the route writes and the script does not remove would leave
+     * half a report in the URL — `?tx=` alone, say — so the three lists are
+     * held together: what `/meter/advance` writes, what the article route
+     * reads, and what the script removes.
+     */
+    public function testAdvanceJsRemovesExactlyTheKeysTheAdvanceRouteWrites(): void
+    {
+        $root = dirname(__DIR__, 2);
+        $index = (string) file_get_contents($root.'/public/index.php');
+        $script = (string) file_get_contents($root.'/public/assets/advance.js');
+
+        $start = strpos($index, "\$app->post('/meter/advance'");
+        self::assertNotFalse($start, 'the advance route');
+        $end = strpos($index, "\n});", $start);
+        self::assertNotFalse($end);
+        preg_match_all('/[\'"][?&]([a-z_]+)=/', substr($index, $start, $end - $start), $written);
+
+        preg_match_all('/\$query\[\'([a-z_]+)\'\]/', $index, $read);
+
+        self::assertSame(1, preg_match('/ADVANCE_KEYS = \[([^\]]*)\]/', $script, $list));
+        preg_match_all('/\'([a-z_]+)\'/', $list[1], $removed);
+
+        $sorted = static function (array $keys): array {
+            $keys = array_values(array_unique($keys));
+            sort($keys);
+
+            return $keys;
+        };
+
+        self::assertNotSame([], $written[1], 'a scanner that found nothing proves nothing');
+        self::assertSame($sorted($written[1]), $sorted($removed[1]), 'written by /meter/advance vs removed by advance.js');
+        self::assertSame($sorted($written[1]), $sorted($read[1]), 'written by /meter/advance vs read by the article route');
+    }
+
     public function testManageMeterRendersInEveryState(): void
     {
         $common = [
