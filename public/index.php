@@ -18,12 +18,9 @@ use Newsprint\Auth\SignInException;
 use Newsprint\Auth\SignInInput;
 use Newsprint\Auth\Verifier;
 use Newsprint\Chain\Faucet;
-use Newsprint\Chain\PayerReader;
-use Newsprint\Chain\PayerState;
 use Newsprint\Chain\ProgramEvent;
+use Newsprint\Chain\RequestRead;
 use Newsprint\Chain\Rpc;
-use Newsprint\Chain\SiteReader;
-use Newsprint\Chain\SiteState;
 use Newsprint\Chain\RpcException;
 use Newsprint\Chain\Submitter;
 use Newsprint\Content\Library;
@@ -44,7 +41,6 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Exception\HttpNotFoundException;
 use Slim\Factory\AppFactory;
-use SolPay\Core\DecodeException;
 use SolPay\Core\Shortfall;
 use SolPay\Core\Units;
 
@@ -57,117 +53,6 @@ $contentDir = $root.'/var/content';
 
 $params = $config->siteParams();
 $decimals = (int) $params['decimals'];
-
-/**
- * One chain read per request, shared by everything on the page (SPEC §9's
- * inspector is per-request, and §12.4 budgets about three RPC calls per
- * metered view). Memoised so the panel and the price in the copy are the same
- * read rather than two.
- *
- * A failure here is not fatal: an unmetered page owes the chain nothing, so
- * the site keeps serving and the panel says the read failed.
- */
-$state = null;
-$stateError = null;
-$stateDone = false;
-$read = static function () use ($config, &$state, &$stateError, &$stateDone): ?SiteState {
-    if ($stateDone) {
-        return $state;
-    }
-    $stateDone = true;
-
-    if (!$config->isProvisioned()) {
-        return null;
-    }
-
-    try {
-        $rpc = new Rpc(
-            $config->rpcUrl(),
-            $config->program(),
-            (string) $config->rpc()['commitment'],
-            (int) $config->rpc()['http_timeout_s'],
-        );
-        $state = (new SiteReader($config, $rpc))->read();
-    } catch (RpcException|DecodeException $e) {
-        $stateError = $e->getMessage();
-    }
-
-    return $state;
-};
-
-/**
- * Has anything in this request already paid for the site read?
- *
- * Deliberately *not* `$read() !== null` — asking that question performs the
- * read, which is the cost this exists to avoid.
- *
- * **`function` and not `fn`.** An arrow function captures by value, at the
- * moment it is defined, so `fn (): bool => $stateDone` closes over `false`
- * for the life of the request and never notices the read it exists to detect.
- * It is the same family as the two capture faults `FrontControllerTest`
- * already guards, with a quieter failure: nothing errors, the panel simply
- * defers on every page including the ones that already paid.
- */
-$stateAlreadyRead = static function () use (&$stateDone): bool {
-    return $stateDone;
-};
-
-$panel = new Inspector($config);
-
-/**
- * The panel's sections, or **null to say "not on this request"** (2026-09-09).
- *
- * §9 says the inspector is collapsed by default, and it is rendered on every
- * page by `$shell`. Until now that meant every page — `/privacy` included —
- * blocked on one `getMultipleAccounts` to fill a panel most readers never
- * open. Measured 2026-09-09: that call *was* `/privacy`, 0.9 s of it, on a
- * page which displays nothing from the chain.
- *
- * So the rule is: render the panel when this request has already read the
- * chain for its own reasons, and defer it when it has not.
- *
- * **That rule is what protects §9's last section**, and it is why the test is
- * "did something already read" rather than "is this page cheap". The last
- * transaction needs a `MeterResult` that exists only on the request that
- * produced it — §10.4 leaves no history for a second request to find — so it
- * could never survive a deferred fetch. It does not have to: on the article
- * route `MeterMiddleware` has already called `$read()` to make the metering
- * decision, so the state is in hand, the panel renders inline, and the read
- * costs nothing extra because it was required work either way.
- *
- * `$payer` and `$result` are checked too, belt and braces: either one means a
- * caller has request-scoped data the deferred route could not reconstruct.
- */
-$inspector = static function (?PayerState $payer = null, ?MeterResult $result = null) use ($panel, $read, $stateAlreadyRead, &$stateError): ?array {
-    if (!$stateAlreadyRead() && $payer === null && $result === null) {
-        return null;
-    }
-
-    $state = $read();
-
-    return $panel->sections($state, $stateError, $payer, $result);
-};
-
-/**
- * The prices in the reader-facing copy. Claim 7 in §2 is that every number on
- * the screen came from an account, so when the site is provisioned these come
- * from the `Site` account and not from `config/site.php`. The config is the
- * fallback for a copy that has not been set up, and for a chain that cannot be
- * reached.
- */
-$siteVars = static function () use ($read, $params, $decimals): array {
-    $state = $read();
-    $d = $state?->mintDecimals ?? $decimals;
-
-    return [
-        'symbol' => (string) $params['symbol'],
-        'decimals' => $d,
-        'page_price_demo' => Units::fromBaseUnits($state?->site->pagePrice ?? (int) $params['page_price'], $d),
-        'min_limit_demo' => Units::fromBaseUnits($state?->site->minLimit ?? (int) $params['min_limit'], $d),
-        'threshold_demo' => Units::fromBaseUnits($state?->site->collectionThreshold ?? (int) $params['collection_threshold'], $d),
-        'from_chain' => $state !== null,
-    ];
-};
 
 /**
  * The one SQLite file (§12.5), opened lazily: an unmetered page that never
@@ -210,64 +95,99 @@ $rpcFactory = static function () use ($config): Rpc {
 };
 
 /**
- * `find_contract` from sol-pay's state diagram, run on every article request
- * that has a wallet address to run it with.
+ * Everything this request knows about the chain, read once.
  *
- * Note what makes a returning reader work: the contract address is *derived*
- * from the site and the wallet, so a reader who authorized last week and
- * arrives today with an empty cookie jar identifies once and lands on the
- * contract they already have. The session was only ever the map to it, and
- * the site remembers nothing else.
+ * SPEC §12.4 asks for exactly this — "fetch the `Site`, `Contract` and payer
+ * token account **in one round trip**" — and until 2026-09-10 the code did it
+ * in two, because {@see RequestRead} did not exist and the site read and the
+ * payer read were separate closures that happened to run in that order. A HAR
+ * that morning put the median round trip at 1242 ms, so the second one was not
+ * a rounding error.
+ *
+ * `find_contract` from sol-pay's state diagram lives in there now, beside the
+ * site read it used to follow. Note what still makes a returning reader work:
+ * the contract address is *derived* from the site and the wallet, so a reader
+ * who authorized last week and arrives today with an empty cookie jar
+ * identifies once and lands on the contract they already have. The session was
+ * only ever the map to it, and the site remembers nothing else. That
+ * derivation is also why the two reads could be merged at all — neither of the
+ * payer's addresses was ever waiting on the site *account*.
+ *
+ * The wallet is settled before the object is built, from the cookie and the
+ * store, which costs no round trip. That is what lets one call cover five
+ * accounts instead of three: the request knows who is reading before it knows
+ * anything about the chain.
+ *
+ * Three by-reference variables and three closures used to live here. One of
+ * them, `$stateAlreadyRead`, was written `function` rather than `fn` because an
+ * arrow function would have captured `false` for the life of the request —
+ * `FrontControllerTest` guards that shape, and it is no accident that the
+ * front controller is where it kept happening.
  */
-$payerState = static function (Request $request) use ($wallet, $read, $config, $rpcFactory): ?PayerState {
-    // **One read per request, and on some requests none.**
-    //
-    // The meter panel asks, the inspector asks, and the article route asks
-    // again on its way to `$page`; the memo below is what makes those one
-    // call. What the memo could not see is that the *metering middleware* has
-    // often already read the same two accounts, a few milliseconds earlier, in
-    // front of this same handler.
-    //
-    // Measured 2026-09-09 from a HAR: the `set-meter` screen — an identified
-    // reader with no contract, deciding whether to spend — cost three
-    // `getMultipleAccounts` and 1.88 s, because `Meter` read the payer, found
-    // no contract, returned a result the panel never consults, and this
-    // closure then read the very same two accounts again. One full round trip
-    // to devnet, about 500 ms of a 1.88 s page, whose only product was
-    // discarded.
-    //
-    // So a `MeterResult` that sent nothing now carries the accounts it decided
-    // from, and this asks for that before it asks the network. On every
-    // outcome that *did* send, `payer` is null and the read below happens as
-    // before — see {@see MeterResult::$payer} for why that asymmetry is the
-    // point rather than a gap.
-    static $done = false;
-    static $payer = null;
-    if ($done) {
-        return $payer;
-    }
-    $done = true;
+$reads = static function (Request $request) use ($config, $rpcFactory, $wallet): RequestRead {
+    static $reads = null;
 
-    $metering = $request->getAttribute(MeterMiddleware::ATTRIBUTE);
-    if ($metering instanceof MeterResult && $metering->payer !== null) {
-        $payer = $metering->payer;
+    return $reads ??= new RequestRead($config, $rpcFactory(), $wallet($request));
+};
 
-        return $payer;
-    }
+$panel = new Inspector($config);
 
-    $address = $wallet($request);
-    $state = $read();
-    if ($address === null || $state === null) {
+/**
+ * The panel's sections, or **null to say "not on this request"** (2026-09-09).
+ *
+ * §9 says the inspector is collapsed by default, and it is rendered on every
+ * page by `$shell`. Until now that meant every page — `/privacy` included —
+ * blocked on one `getMultipleAccounts` to fill a panel most readers never
+ * open. Measured 2026-09-09: that call *was* `/privacy`, 0.9 s of it, on a
+ * page which displays nothing from the chain.
+ *
+ * So the rule is: render the panel when this request has already read the
+ * chain for its own reasons, and defer it when it has not.
+ *
+ * **That rule is what protects §9's last section**, and it is why the test is
+ * "did something already read" rather than "is this page cheap". The last
+ * transaction needs a `MeterResult` that exists only on the request that
+ * produced it — §10.4 leaves no history for a second request to find — so it
+ * could never survive a deferred fetch. It does not have to: on the article
+ * route `MeterMiddleware` has already read the chain to make the metering
+ * decision, so the state is in hand, the panel renders inline, and the read
+ * costs nothing extra because it was required work either way.
+ *
+ * `$payer` and `$result` are checked too, belt and braces: either one means a
+ * caller has request-scoped data the deferred route could not reconstruct.
+ */
+$inspector = static function (?RequestRead $reads, ?MeterResult $result = null) use ($panel): ?array {
+    // One condition where there were three. `$payer !== null` used to be
+    // checked beside this, belt and braces, and it was always implied: reading
+    // a payer goes through the same object as reading the site, so a request
+    // holding one has read. `$reads === null` is the shape of a page that
+    // never asked for the object at all.
+    if ($reads === null || (!$reads->hasRead() && $result === null)) {
         return null;
     }
 
-    try {
-        $payer = (new PayerReader($config, $rpcFactory()))->read($address, $state);
-    } catch (RpcException|DecodeException $e) {
-        $payer = null;
-    }
+    return $panel->sections($reads->site(), $reads->error(), $reads->payer(), $result);
+};
 
-    return $payer;
+/**
+ * The prices in the reader-facing copy. Claim 7 in §2 is that every number on
+ * the screen came from an account, so when the site is provisioned these come
+ * from the `Site` account and not from `config/site.php`. The config is the
+ * fallback for a copy that has not been set up, and for a chain that cannot be
+ * reached.
+ */
+$siteVars = static function (RequestRead $reads) use ($params, $decimals): array {
+    $state = $reads->site();
+    $d = $state?->mintDecimals ?? $decimals;
+
+    return [
+        'symbol' => (string) $params['symbol'],
+        'decimals' => $d,
+        'page_price_demo' => Units::fromBaseUnits($state?->site->pagePrice ?? (int) $params['page_price'], $d),
+        'min_limit_demo' => Units::fromBaseUnits($state?->site->minLimit ?? (int) $params['min_limit'], $d),
+        'threshold_demo' => Units::fromBaseUnits($state?->site->collectionThreshold ?? (int) $params['collection_threshold'], $d),
+        'from_chain' => $state !== null,
+    ];
 };
 
 /**
@@ -296,14 +216,15 @@ $meterFactory = static function () use ($config, $rpcFactory, $store): Meter {
     ), $store());
 };
 
-$meterVars = static function (Request $request, ?MeterResult $result = null) use ($wallet, $read, $payerState, $config, $store): array {
+$meterVars = static function (Request $request, ?MeterResult $result = null) use ($reads, $config, $store): array {
     $params = $config->siteParams();
-    $state = $read();
+    $read = $reads($request);
+    $state = $read->site();
     $decimals = $state?->mintDecimals ?? (int) $params['decimals'];
     $faucet = $config->faucet();
 
     $panel = [
-        'wallet' => $wallet($request),
+        'wallet' => $read->wallet(),
         'stage' => 'anonymous',
         'symbol' => (string) $params['symbol'],
         'decimals' => $decimals,
@@ -342,7 +263,7 @@ $meterVars = static function (Request $request, ?MeterResult $result = null) use
 
     $panel['faucet']['available'] = !$store()->faucetGranted($panel['wallet']);
 
-    $payer = $payerState($request);
+    $payer = $read->payer();
     if ($payer === null) {
         // The chain could not be read. An unmetered page owes it nothing, so
         // the article still serves and the panel says what happened (§9's
@@ -432,7 +353,7 @@ $page = static function (Response $response, string $html, int $status = 200): R
     return $response->withStatus($status)->withHeader('Content-Type', 'text/html; charset=utf-8');
 };
 
-$shell = static function (string $title, string $content, ?PayerState $payer = null, ?MeterResult $result = null) use ($view, $inspector): string {
+$shell = static function (string $title, string $content, ?RequestRead $reads = null, ?MeterResult $result = null) use ($view, $inspector): string {
     return $view->render('layout', [
         'title' => $title,
         'content' => $content,
@@ -443,7 +364,7 @@ $shell = static function (string $title, string $content, ?PayerState $payer = n
         // §9's last section is narrower still: it needs a transaction *this
         // request* produced, which is the article route and nowhere else. §10.4
         // leaves no stored history for any other page to show.
-        'inspector' => $inspector($payer, $result),
+        'inspector' => $inspector($reads, $result),
     ]);
 };
 
@@ -460,7 +381,7 @@ $errorMiddleware->setErrorHandler(
     },
 );
 
-$app->get('/', function (Request $request, Response $response) use ($view, $shell, $page, $contentDir, $siteVars, $config): Response {
+$app->get('/', function (Request $request, Response $response) use ($view, $shell, $page, $contentDir, $siteVars, $config, $reads): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -469,12 +390,12 @@ $app->get('/', function (Request $request, Response $response) use ($view, $shel
 
     return $page($response, $shell('Newsprint', $view->render('index', [
         'articles' => $articles,
-        'site' => $siteVars(),
+        'site' => $siteVars($reads($request)),
         'provisioned' => $config->isProvisioned(),
-    ])));
+    ]), $reads($request)));
 });
 
-$article = $app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $siteVars, $meterVars, $payerState): Response {
+$article = $app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $siteVars, $meterVars, $reads): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -508,9 +429,9 @@ $article = $app->get('/a/{slug}', function (Request $request, Response $response
     return $page($response, $shell($piece->title, $view->render('article', [
         'piece' => $piece,
         'body' => $body,
-        'site' => $siteVars(),
+        'site' => $siteVars($reads($request)),
         'meter' => $meterVars($request, $result) + ['advanced' => $advanced],
-    ]), $payerState($request), $result));
+    ]), $reads($request), $result));
 });
 
 /**
@@ -523,8 +444,7 @@ $article->add(new MeterMiddleware(
     static fn (string $slug): ?Piece => Library::isBuilt($contentDir)
         ? Library::load($contentDir)->find($slug)
         : null,
-    $wallet,
-    $read,
+    $reads,
     $meterFactory,
 ));
 
@@ -542,7 +462,7 @@ $article->add(new MeterMiddleware(
  * it is the same instruction the site would send if the reader had read seven
  * articles, which is exactly why it belongs in a demonstration of the API.
  */
-$app->post('/meter/advance', function (Request $request, Response $response) use ($wallet, $read, $config, $meterFactory): Response {
+$app->post('/meter/advance', function (Request $request, Response $response) use ($wallet, $reads, $config, $meterFactory): Response {
     // A form and a redirect, not JSON and a script. §12.2 puts JavaScript
     // where the wallet is and nowhere else, and this one is signed by the site
     // — the reader's wallet is not involved at all.
@@ -551,7 +471,7 @@ $app->post('/meter/advance', function (Request $request, Response $response) use
     $back = $slug === '' ? '/' : '/a/'.rawurlencode($slug);
 
     $address = $wallet($request);
-    $state = $read();
+    $state = $reads($request)->site();
 
     if ($address !== null && $state !== null) {
         $result = $meterFactory()->advance($address, $state, (int) $config->metering()['demo_step_views']);
@@ -705,18 +625,18 @@ $app->post('/signout', function (Request $request, Response $response) use ($sto
  * part of its life. The reader taking thirty seconds in their wallet is the
  * normal case, not the edge one.
  */
-$app->post('/meter/prepare', function (Request $request, Response $response) use ($json, $wallet, $read, $payerState, $config, $rpcFactory): Response {
+$app->post('/meter/prepare', function (Request $request, Response $response) use ($json, $wallet, $reads, $config, $rpcFactory): Response {
     $address = $wallet($request);
     if ($address === null) {
         return $json($response, ['message' => 'identify first'], 401);
     }
 
-    $state = $read();
+    $state = $reads($request)->site();
     if ($state === null) {
         return $json($response, ['message' => 'this site is not provisioned'], 409);
     }
 
-    $payer = $payerState($request);
+    $payer = $reads($request)->payer();
     if ($payer === null) {
         return $json($response, ['message' => 'the endpoint did not answer; nothing was signed'], 502);
     }
@@ -775,7 +695,7 @@ $app->post('/meter/prepare', function (Request $request, Response $response) use
  * says what it should. A signature the browser reports is a claim; an account
  * is a fact.
  */
-$app->post('/meter/opened', function (Request $request, Response $response) use ($json, $wallet, $payerState, $rpcFactory, $config): Response {
+$app->post('/meter/opened', function (Request $request, Response $response) use ($json, $wallet, $reads, $rpcFactory, $config): Response {
     $address = $wallet($request);
     if ($address === null) {
         return $json($response, ['message' => 'identify first'], 401);
@@ -814,7 +734,13 @@ $app->post('/meter/opened', function (Request $request, Response $response) use 
         return $json($response, ['message' => $failed], 409);
     }
 
-    $payer = $payerState($request);
+    // The wallet's `approve_and_open` has landed by now, so anything this
+    // request read before the poll is out of date. It read nothing — the
+    // read below is this route's first — and saying so anyway is what keeps
+    // that true if someone later adds an earlier one.
+    $reads($request)->invalidatePayer();
+
+    $payer = $reads($request)->payer();
     if ($payer !== null && $payer->hasContract()) {
         return $json($response, ['ok' => true, 'confirmed' => $confirmed]);
     }
@@ -837,33 +763,33 @@ $app->post('/meter/opened', function (Request $request, Response $response) use 
  * they have spent and offers a way out. Making them hit a limit to reach the
  * exit is not a defensible product, whatever the state diagram omits.
  */
-$app->get('/meter', function (Request $request, Response $response) use ($view, $shell, $page, $wallet, $payerState, $read, $store, $config, $siteVars): Response {
+$app->get('/meter', function (Request $request, Response $response) use ($view, $shell, $page, $wallet, $reads, $store, $config, $siteVars): Response {
     $address = $wallet($request);
     if ($address === null) {
         return $page($response, $shell('The meter', $view->render('manage-meter', [
             'stage' => 'anonymous',
-            'site' => $siteVars(),
-        ])));
+            'site' => $siteVars($reads($request)),
+        ]), $reads($request)));
     }
 
-    $payer = $payerState($request);
-    $state = $read();
+    $payer = $reads($request)->payer();
+    $state = $reads($request)->site();
     $params = $config->siteParams();
     $decimals = $payer?->decimals ?? ($state?->mintDecimals ?? (int) $params['decimals']);
 
     if ($payer === null) {
         return $page($response, $shell('The meter', $view->render('manage-meter', [
             'stage' => 'unreadable',
-            'site' => $siteVars(),
-        ])));
+            'site' => $siteVars($reads($request)),
+        ]), $reads($request)));
     }
 
     if (!$payer->hasContract()) {
         return $page($response, $shell('The meter', $view->render('manage-meter', [
             'stage' => 'no-contract',
-            'site' => $siteVars(),
+            'site' => $siteVars($reads($request)),
             'wallet' => $address,
-        ]), $payer));
+        ]), $reads($request)));
     }
 
     $contract = $payer->contract;
@@ -871,7 +797,7 @@ $app->get('/meter', function (Request $request, Response $response) use ($view, 
 
     return $page($response, $shell('The meter', $view->render('manage-meter', [
         'stage' => 'open',
-        'site' => $siteVars(),
+        'site' => $siteVars($reads($request)),
         'wallet' => $address,
         'chain' => (string) $config->auth()['chain_id'],
         'program' => $config->program()->id,
@@ -897,21 +823,21 @@ $app->get('/meter', function (Request $request, Response $response) use ($view, 
         // *before* they click, and told the true number rather than "an
         // article".
         'live_grants' => $store()->liveGrantCount($address),
-    ]), $payer));
+    ]), $reads($request)));
 });
 
 /**
  * `close_and_revoke`, prepared. Two instructions and no arguments — there is
  * nothing to choose, which is why this endpoint takes no body.
  */
-$app->post('/meter/close/prepare', function (Request $request, Response $response) use ($json, $wallet, $read, $payerState, $config, $rpcFactory): Response {
+$app->post('/meter/close/prepare', function (Request $request, Response $response) use ($json, $wallet, $reads, $config, $rpcFactory): Response {
     $address = $wallet($request);
     if ($address === null) {
         return $json($response, ['message' => 'identify first'], 401);
     }
 
-    $state = $read();
-    $payer = $payerState($request);
+    $state = $reads($request)->site();
+    $payer = $reads($request)->payer();
     if ($state === null || $payer === null) {
         return $json($response, ['message' => 'the endpoint did not answer; nothing was signed'], 502);
     }
@@ -945,7 +871,7 @@ $app->post('/meter/close/prepare', function (Request $request, Response $respons
  * contract is still open and still spending. The proof is the account: the
  * contract PDA is gone, which no report from a browser could establish.
  */
-$app->post('/meter/close/done', function (Request $request, Response $response) use ($json, $wallet, $payerState, $rpcFactory, $store, $config): Response {
+$app->post('/meter/close/done', function (Request $request, Response $response) use ($json, $wallet, $reads, $rpcFactory, $store, $config): Response {
     $address = $wallet($request);
     if ($address === null) {
         return $json($response, ['message' => 'identify first'], 401);
@@ -977,7 +903,11 @@ $app->post('/meter/close/done', function (Request $request, Response $response) 
         usleep($pollMs * 1000);
     }
 
-    $payer = $payerState($request);
+    // §10.4's ordering: the account is the evidence, not the signature, so
+    // this has to be a reading taken after the close confirmed.
+    $reads($request)->invalidatePayer();
+
+    $payer = $reads($request)->payer();
     if ($payer === null || $payer->hasContract()) {
         // Sent, and the account is still there. Nothing is deleted on a maybe.
         return $json($response, [
@@ -1069,7 +999,7 @@ $provisioner = static function () use ($config): Provisioner {
     ));
 };
 
-$app->get('/setup', function (Request $request, Response $response) use ($view, $shell, $page, $provisioner, $config, $siteVars): Response {
+$app->get('/setup', function (Request $request, Response $response) use ($view, $shell, $page, $provisioner, $config, $siteVars, $reads): Response {
     $error = null;
     $status = ['provisioned' => $config->isProvisioned(), 'authority' => '', 'faucet' => '', 'balance' => 0, 'needed' => 0, 'funded' => false];
 
@@ -1083,10 +1013,10 @@ $app->get('/setup', function (Request $request, Response $response) use ($view, 
 
     return $page($response, $shell('First run', $view->render('setup', [
         'status' => $status,
-        'site' => $siteVars(),
+        'site' => $siteVars($reads($request)),
         'setup' => $config->setup(),
         'error' => $error,
-    ])));
+    ]), $reads($request)));
 });
 
 $app->post('/setup', function (Request $request, Response $response) use ($view, $shell, $page, $provisioner, $root): Response {
@@ -1119,7 +1049,7 @@ $app->post('/setup', function (Request $request, Response $response) use ($view,
  *     open — it answers with the sections markup alone, which the script puts
  *     where the deferred paragraph was;
  *   · asked by a browser following the link in that paragraph, it answers with
- *     an ordinary page. `$read()` is called first, so `$shell` finds the state
+ *     an ordinary page. The read is performed first, so `$shell` finds the state
  *     already in hand and renders the panel inline, exactly as the article
  *     route does. A reader with no JavaScript clicks a link and gets the panel;
  *     nothing about §9 depends on a script.
@@ -1128,9 +1058,9 @@ $app->post('/setup', function (Request $request, Response $response) use ($view,
  * either way. Two routes would be two chances for the fragment and the page to
  * drift apart.
  */
-$app->get('/inspector/panel', function (Request $request, Response $response) use ($view, $shell, $page, $panel, $read, &$stateError): Response {
+$app->get('/inspector/panel', function (Request $request, Response $response) use ($view, $shell, $page, $panel, $reads): Response {
     if ($request->getHeaderLine('X-Fragment') === '1') {
-        $sections = $panel->sections($read(), $stateError);
+        $sections = $panel->sections($reads($request)->site(), $reads($request)->error());
 
         $response->getBody()->write($view->render('inspector-sections', [
             'sections' => $sections,
@@ -1147,12 +1077,13 @@ $app->get('/inspector/panel', function (Request $request, Response $response) us
     }
 
     // Not a fragment: read first, so `$shell` renders the panel inline below.
-    $read();
+    $reads($request)->site();
 
     return $page($response, $shell(
         'Inspector',
         '<p class="lede">The inspector is below, with the accounts read on this'
             .' request. Every other page defers this read until you open it.</p>',
+        $reads($request),
     ));
 });
 

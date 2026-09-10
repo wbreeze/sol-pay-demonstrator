@@ -123,6 +123,19 @@ final class MeterResult
         return new self(MeterOutcome::Unreadable, detail: $detail, payer: $payer);
     }
 
+    /**
+     * Did a transaction go out?
+     *
+     * Distinct from `serves()`, and the difference is `Failed`: a refused
+     * charge serves nothing and still moved the chain far enough that `used`,
+     * `paid` and the carried residue must be read again before they are shown.
+     * {@see \Newsprint\Chain\RequestRead::invalidatePayer()} is the caller.
+     */
+    public function sent(): bool
+    {
+        return in_array($this->outcome, [MeterOutcome::Metered, MeterOutcome::Unconfirmed, MeterOutcome::Failed], true);
+    }
+
     /** Is the reader entitled to the body? */
     public function serves(): bool
     {

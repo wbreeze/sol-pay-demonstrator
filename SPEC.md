@@ -1602,8 +1602,8 @@ server.
 requests per 10 seconds per IP, 40 for any single method, 40 concurrent
 connections — and states plainly that they are "not intended for production
 applications". A shared public demo would have run into that on the day it was
-linked anywhere. One person reading their own copy, at roughly three RPC calls
-per metered page view, is not close.
+linked anywhere. One person reading their own copy — six calls on the page view
+that charges, one or two on every other page — is not close.
 
 **Amended 2026-09-09, from measurement.** That figure was always stated for the
 *metered* page view, and until this date it understated the total everywhere
@@ -1612,10 +1612,61 @@ so a page that meters nothing — `/privacy`, the home page — spent one call a
 well. It no longer does. §9 now defers that read to a reader who opens the
 panel, and `/privacy` fell from 0.899 s to 0.002 s as a result.
 
-The reason this mattered more than the count suggests is the endpoint's own
-behaviour, described below: latency here varies by an order of magnitude hour to
-hour. A call a page does not need is not felt as one call of overhead — it is
-felt as the site being broken on a bad morning.
+**Amended again 2026-09-10, from three HARs taken with `NEWSPRINT_RPC_TIMING=1`
+and read off `X-Rpc-Calls`.** "Roughly three per metered page view" was wrong in
+both directions, and it had never been counted. The page view that *charges* is
+six. Every other metered page is one.
+
+| page | calls |
+| --- | --- |
+| `/privacy` | 0 |
+| the home page; an article before identifying; an article a live grant covers | 1 |
+| `manage_meter`; the `set_meter` and faucet screens | 1 |
+| `POST /meter/prepare`, `/meter/opened`, `/meter/close/prepare`, `/meter/close/done` | 2 |
+| `POST /faucet` | 3 |
+| the seven-view advance (§7.4) | 5, and 1 on the page it redirects to |
+| a charge the chain refuses (§8.2) | 5 |
+| **an article that charges** | **6** |
+
+The six are worth naming, because four are irreducible and two are prices this
+specification has already agreed to pay:
+
+1. `getMultipleAccounts` — the `Site`, the treasury, the mint, the `Contract`
+   and the payer's token account. **Five accounts, one round trip**, which is
+   what the list below has always asked for and what the code did not do until
+   2026-09-10. It took two calls, and not because anything was waiting: both of
+   the payer's addresses are derived from the wallet and from what setup
+   recorded, so neither ever depended on a value the site *account* returned.
+2. `getMultipleAccounts` again — the contract and the token account, read
+   **inside the payer lock**. §7.2 requires it: a request that queued behind
+   another must decide from what that one left rather than from what it saw
+   before waiting. This is the price of §7.2.
+3. `getLatestBlockhash` — absent from the list below until this amendment, and
+   a transaction cannot be compiled without one. "Exactly three" was never
+   three.
+4. `sendTransaction`.
+5. `getSignatureStatuses` — **once, not a poll.** Across three captures and 34
+   confirmations, no response has ever contained a second one: the first status
+   request has always answered, so `confirm_poll_ms` has not yet reached a
+   second iteration. It is a loop that has not had to loop.
+6. `getMultipleAccounts` a third time, *after* the send — because the charge
+   moved `used`, `paid` and the carried residue, and §2's claim 7 is that the
+   numbers on the screen came from an account rather than from the server's
+   memory. This is the price of claim 7, and it is bought deliberately.
+
+The reason all of this matters more than the count suggests is the endpoint's
+own behaviour, described below: latency here varies by an order of magnitude
+hour to hour. A call a page does not need is not felt as one call of overhead —
+it is felt as the site being broken on a bad morning.
+
+**And the count is the only lever there is.** A round trip to the public devnet
+endpoint measured a median of 1223 ms on the morning of 2026-09-10, about 500 ms
+the previous evening, and moved from 1288 ms to 614 ms inside two minutes of one
+capture. This site's own code is 5 to 140 ms per request, so 97% of a charging
+view is waiting. Merging the two reads of item 1 took the first visit of a
+seeded reader from twenty calls to sixteen, and from 30.1 s to 21.4 s, at
+unchanged endpoint latency. Nothing was rendered faster; four questions were
+asked in one breath instead of two.
 
 A deployment that outgrows this has a provider tier as an unremarkable
 configuration change: the endpoint is a config value, not an architectural one.
@@ -1629,12 +1680,22 @@ running the JSON-RPC service. That node is "an RPC endpoint". It is not part of
 consensus and it holds no authority; it is a read-and-relay service in front of
 the cluster.
 
-This design needs exactly three calls:
+This design needs four of the endpoint's methods on the serving path, and asks
+one of them three times on the page view that charges:
 
-- `getMultipleAccounts` — fetch the `Site`, `Contract` and payer token account
-  in one round trip, which is the read at the top of every metered request.
+- `getMultipleAccounts` — fetch the `Site`, the treasury, the mint, the
+  `Contract` and the payer's token account in one round trip, which is the read
+  at the top of every request that has a reader. On a charging view it is asked
+  twice more: once under §7.2's payer lock, and once after the charge, for §2's
+  claim 7.
+- `getLatestBlockhash` — a transaction is compiled against one, fetched
+  immediately before the handoff to the wallet (§6.3).
 - `sendTransaction` — hand the signed `meter_and_settle` to the cluster.
 - `getSignatureStatuses` — poll until it confirms, which is the wait in §7.3.
+
+There is a fifth, and it is deliberately not on that path: §9's inspector reads
+a landed transaction's event with `getTransaction`, once, and only when a reader
+opens the panel.
 
 **Public versus dedicated.** Solana operates public endpoints —
 `https://api.devnet.solana.com` for devnet — and documents both their limits

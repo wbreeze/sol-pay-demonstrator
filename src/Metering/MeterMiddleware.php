@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Newsprint\Metering;
 
+use Newsprint\Chain\RequestRead;
 use Newsprint\Content\Piece;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -32,17 +33,17 @@ final class MeterMiddleware implements MiddlewareInterface
     public const ATTRIBUTE = 'newsprint.metering';
 
     /**
-     * @param callable(string): ?Piece                            $piece     the article, by slug
-     * @param callable(ServerRequestInterface): ?string           $wallet    the session's wallet address
-     * @param callable(): ?\Newsprint\Chain\SiteState             $siteState this site, decoded
-     * @param callable(): Meter                                   $meter     built lazily; an unmetered
-     *                                                                       request should not construct
-     *                                                                       an RPC client to decide it
+     * @param callable(string): ?Piece                        $piece the article, by slug
+     * @param callable(ServerRequestInterface): RequestRead   $reads this request's one chain read,
+     *                                                               shared with the handler behind
+     *                                                               this middleware
+     * @param callable(): Meter                               $meter built lazily; an unmetered
+     *                                                               request should not construct an
+     *                                                               RPC client to decide it
      */
     public function __construct(
         private $piece,
-        private $wallet,
-        private $siteState,
+        private $reads,
         private $meter,
     ) {
     }
@@ -65,9 +66,12 @@ final class MeterMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
-        $wallet = ($this->wallet)($request);
+        $reads = ($this->reads)($request);
+        $wallet = $reads->wallet();
 
-        // §7.5, and the only caller of it.
+        // §7.5, and the only caller of it. Asked before anything is read,
+        // because a request that is not going to meter should not pay to find
+        // that out — `wallet()` comes from the cookie and the store.
         if (!Decision::shouldMeter($piece, $wallet)) {
             return $handler->handle($request);
         }
@@ -78,12 +82,42 @@ final class MeterMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
-        $state = ($this->siteState)();
+        // One round trip, five accounts: the site's three and this reader's
+        // two (§12.4). The handler behind this middleware renders from the
+        // same object, so nothing below is a call the page would not have made
+        // anyway.
+        $state = $reads->site();
         if ($state === null) {
             return $handler->handle($request);
         }
 
+        // **`find_contract`, and it is a fork in the diagram rather than a
+        // metering outcome.** A reader with no contract is on their way to
+        // `set_meter`; there is nothing to meter and nothing to refuse. This
+        // used to be discovered *inside* `Meter`, which read the two accounts
+        // again to find it out and returned a result the panel then ignored —
+        // measured 2026-09-09 at a whole round trip on the screen where a
+        // reader is deciding whether to spend money.
+        if ($reads->payer()?->hasContract() !== true) {
+            return $handler->handle($request);
+        }
+
         $result = ($this->meter)()->forArticle($wallet, $piece->slug, $state);
+
+        // §7.2 puts the metering read inside the payer lock, so `Meter` has
+        // looked at these two accounts more recently than this request did.
+        // Which of the two answers is true afterwards depends on one thing:
+        if ($result->payer !== null) {
+            // Nothing was sent, and the locked read is simply the better one.
+            // A limit screen should state the arithmetic its refusal was made
+            // from rather than a reading taken moments earlier.
+            $reads->adopt($result->payer);
+        } elseif ($result->sent()) {
+            // A transaction went out. §2's claim 7 says the numbers on the
+            // screen came from an account, so the accounts are read again —
+            // this is the one re-read that is bought on purpose.
+            $reads->invalidatePayer();
+        }
 
         return $handler->handle($request->withAttribute(self::ATTRIBUTE, $result));
     }
