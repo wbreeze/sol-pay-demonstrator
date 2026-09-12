@@ -319,6 +319,41 @@ button:hover { filter: brightness(1.1); }
 .receipt dt { font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
 .receipt dd { margin: 0.1rem 0 0.7rem; }
 
+/* Between the body and the meter strip: where to go from the end of a piece.
+   Sans, like the deck, because it is furniture rather than writing — and no
+   rule of its own above it, since the strip below already draws one and two
+   lines a centimetre apart would make the end of the article look like a
+   table. `Previous` is the older piece: the index runs newest first, these run
+   against it, and the words are the reader's way round rather than the list's.
+   One column when there is no room for two, and the labels stay put so the
+   pair reads the same way whichever of them is missing. */
+.piece-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem 1.5rem;
+    margin: 2rem 0 0;
+    font-family: var(--sans);
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+.piece-nav a { display: block; text-decoration: none; }
+.piece-nav a:hover .what { text-decoration: underline; text-decoration-thickness: 2px; }
+.piece-nav .next { grid-column: 2; text-align: right; }
+.piece-nav .where {
+    display: block;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 0.15rem;
+}
+.piece-nav .what { color: var(--accent); }
+
+@media (max-width: 30rem) {
+    .piece-nav { grid-template-columns: 1fr; }
+    .piece-nav .next { grid-column: 1; text-align: left; }
+}
+
 .meter-strip { margin: 1.5rem 0 0; padding: 0.9rem 0 0; border-top: 1px solid var(--rule); font-size: 0.9rem; }
 .meter-strip p { margin: 0 0 0.5rem; }
 .advance { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: baseline; margin-top: 0.75rem; }

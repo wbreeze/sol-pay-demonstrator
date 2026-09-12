@@ -595,6 +595,8 @@ final class TemplateRenderTest extends TestCase
             'body' => '<p>Body.</p>',
             'site' => ['symbol' => 'DEMO', 'page_price_demo' => '0.01'],
             'meter' => $this->panel(['result' => MeterResult::granted()]),
+            'previous' => null,
+            'next' => null,
         ]);
         self::assertSame(1, preg_match_all('/<h1[\s>]/i', $article), 'the article carries exactly one heading');
         self::assertStringContainsString('<h1>Two orderings</h1>', $article);
@@ -664,11 +666,66 @@ final class TemplateRenderTest extends TestCase
             'body' => '<p>Body.</p>',
             'site' => ['symbol' => 'DEMO', 'page_price_demo' => '0.01'],
             'meter' => $this->panel(['result' => MeterResult::granted()]),
+            'previous' => null,
+            'next' => null,
         ]);
 
         self::assertStringContainsString('<time datetime="2026-09-07">7 September 2026</time>', $article);
         self::assertStringNotContainsString('revised', $article);
         self::assertStringNotContainsString('draft', $article);
+    }
+
+    /**
+     * The two links at the end of a piece, and the two states with none.
+     *
+     * The nav comes after whatever the page is for — under the body when there
+     * is one, under the meter when there is not — and an article at either end
+     * of the sequence shows one link, not an empty slot. All of it is asserted
+     * here because each is a branch of the template rather than a consequence
+     * of the data, and the position is the whole of the decision.
+     */
+    public function testTheArticleLinksToItsNeighboursUnderTheBody(): void
+    {
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'Two orderings', 'L', 4, true, 'draft', '2026-09-07', null, '');
+        $older = new \Newsprint\Content\Piece('the-delegate', 'The permission nobody shows you', 'L', 4, true, 'draft', '2026-09-05', null, '');
+        $newer = new \Newsprint\Content\Piece('request-nobody-made', 'The request nobody made', 'L', 4, true, 'draft', '2026-09-11', null, '');
+
+        $vars = [
+            'piece' => $piece,
+            'site' => ['symbol' => 'DEMO', 'page_price_demo' => '0.01'],
+            'meter' => $this->panel(['result' => MeterResult::granted()]),
+        ];
+
+        $html = $this->renderStrictly('article', $vars + ['body' => '<p>Body.</p>', 'previous' => $older, 'next' => $newer]);
+
+        self::assertMatchesRegularExpression('#<a class="previous" rel="prev" href="/a/the-delegate">#', $html);
+        self::assertMatchesRegularExpression('#<a class="next" rel="next" href="/a/request-nobody-made">#', $html);
+        self::assertStringContainsString('The permission nobody shows you', $html);
+
+        // The nav is above the strip, which is the position the whole thing
+        // is about: the end of the reading, before the report of the charge.
+        self::assertLessThan(
+            (int) strpos($html, 'meter-strip'),
+            (int) strpos($html, 'piece-nav'),
+            'the links come before the meter strip',
+        );
+
+        // One end of the sequence: one link, and no empty half.
+        $oneWay = $this->renderStrictly('article', $vars + ['body' => '<p>Body.</p>', 'previous' => $older, 'next' => null]);
+        self::assertStringContainsString('rel="prev"', $oneWay);
+        self::assertStringNotContainsString('rel="next"', $oneWay);
+
+        // And the gate, where the links come after the offer rather than
+        // between the lede and it: a reader who does not want this piece
+        // still has somewhere to go, and the one decision the page asks for
+        // is not interrupted to say so.
+        $gated = $this->renderStrictly('article', $vars + ['body' => null, 'previous' => $older, 'next' => $newer]);
+        self::assertStringContainsString('piece-nav', $gated);
+        self::assertGreaterThan(
+            (int) strpos($gated, 'class="gate'),
+            (int) strpos($gated, 'piece-nav'),
+            'the links come after the meter, not before it',
+        );
     }
 
     public function testAContractDecodesIntoThePanelWithoutGuessingAtItsShape(): void
