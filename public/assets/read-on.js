@@ -45,6 +45,8 @@
  * Nothing is lost by that: a charge that landed left a grant behind it.
  */
 
+import { swap } from './swap.js';
+
 const form = document.querySelector('form[data-read-on]');
 const status = form && form.querySelector('[data-read-on-status]');
 const now = form && form.querySelector('[data-read-on-now]');
@@ -77,20 +79,6 @@ function ready() {
     }
 }
 
-/**
- * Scripts inserted as markup do not run, and the answer can carry two: the
- * advance control's and, on the `set_meter` screens, the wallet's. A fresh
- * element with the same attributes does run.
- */
-function activate(root) {
-    for (const inert of root.querySelectorAll('script')) {
-        const live = document.createElement('script');
-        for (const { name, value } of inert.attributes) live.setAttribute(name, value);
-        live.textContent = inert.textContent;
-        inert.replaceWith(live);
-    }
-}
-
 async function send() {
     if (form.dataset.sent === '1') return;
     ready();
@@ -103,30 +91,8 @@ async function send() {
     if (later) laterTimer = setTimeout(() => { later.hidden = false; }, afterMs);
 
     try {
-        const response = await fetch(form.action, {
-            method: 'POST',
-            headers: { 'X-Fragment': '1' },
-        });
-        if (!response.ok) throw new Error(`the site answered ${response.status}`);
-
-        const answer = document.createElement('template');
-        answer.innerHTML = await response.text();
-        const article = answer.content.querySelector('article.piece');
-        const inspector = answer.content.querySelector('.inspector-body');
-        if (!article) throw new Error('the answer had no article in it');
-
+        await swap(form.action);
         quiet();
-        form.closest('article.piece').replaceWith(article);
-        activate(article);
-
-        const here = document.querySelector('details.inspector .inspector-body');
-        if (inspector && here) {
-            here.replaceWith(inspector);
-            // `assets/inspector.js` finds its rows when the panel is opened;
-            // this tells it the panel's contents changed underneath it, in
-            // case the reader opened it while the POST was out.
-            document.dispatchEvent(new CustomEvent('newsprint:inspector'));
-        }
     } catch (error) {
         // The two lines go and the button comes back, with what went wrong
         // in place of them. Composed here rather than by the server because

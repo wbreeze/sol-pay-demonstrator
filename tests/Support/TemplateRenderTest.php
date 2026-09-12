@@ -382,41 +382,62 @@ final class TemplateRenderTest extends TestCase
     }
 
     /**
-     * What `read-on.js` looks for, against what the templates render.
+     * What the scripts look for, against what the templates render.
      *
-     * The script finds the shell by three data attributes and takes two parts
-     * out of the POST's answer — `article.piece` and `.inspector-body`. Rename
-     * any of them on one side only and the article sits on "Checking your
-     * meter…" for good, having charged, with no error anywhere: the fragment
-     * arrives, the selector finds nothing, and the body never lands. So the
-     * two sides are read and compared.
+     * `read-on.js` finds the shell by three data attributes; `swap.js` takes
+     * two parts out of the answer — `article.piece` and `.inspector-body` —
+     * and both the shell's POST and the advance's go through it. Rename any of
+     * them on one side only and the page sits on its waiting line for good,
+     * having charged, with no error anywhere: the fragment arrives, the
+     * selector finds nothing, and the body never lands. So the sides are read
+     * and compared.
      */
-    public function testReadOnJsLooksForWhatTheTemplatesRender(): void
+    public function testTheScriptsLookForWhatTheTemplatesRender(): void
     {
         $root = dirname(__DIR__, 2);
-        $script = (string) file_get_contents($root.'/public/assets/read-on.js');
         $shell = (string) file_get_contents($root.'/templates/article-pending.php');
+        $strip = (string) file_get_contents($root.'/templates/meter-strip.php');
+        $readOn = (string) file_get_contents($root.'/public/assets/read-on.js');
+        $advance = (string) file_get_contents($root.'/public/assets/advance.js');
+        $swap = (string) file_get_contents($root.'/public/assets/swap.js');
 
-        preg_match_all('/\[(data-read-on[a-z-]*)\]/', $script, $sought);
-        self::assertNotSame([], $sought[1], 'a scanner that found nothing proves nothing');
-        foreach (array_unique($sought[1]) as $attribute) {
-            self::assertMatchesRegularExpression('/\s'.preg_quote($attribute, '/').'[\s>]/', $shell, $attribute);
+        // Each script's own controls, in the template that renders them.
+        foreach ([[$readOn, $shell, 'data-read-on'], [$advance, $strip, 'data-advance']] as [$script, $template, $prefix]) {
+            preg_match_all('/\['.$prefix.'([a-z-]*)\]/', $script, $sought);
+            self::assertNotSame([], $sought[1], $prefix.': a scanner that found nothing proves nothing');
+            foreach (array_unique($sought[1]) as $suffix) {
+                self::assertMatchesRegularExpression('/\s'.preg_quote($prefix.$suffix, '/').'[\s>]/', $template, $prefix.$suffix);
+            }
         }
 
-        // The shell is replaced by the answer's article, so both are one.
-        self::assertStringContainsString("querySelector('article.piece')", $script);
+        // Both scripts hand their POST to the same swap, and what it puts back
+        // is what the answer is made of.
+        foreach ([$readOn, $advance] as $script) {
+            self::assertStringContainsString("import { swap } from './swap.js'", $script);
+        }
+        self::assertStringContainsString("'X-Fragment': '1'", $swap);
+        self::assertStringContainsString("querySelector('article.piece')", $swap);
+        self::assertStringContainsString("querySelector('.inspector-body')", $swap);
+
+        // The article is the shell's replacement and the advance's, so all
+        // three are the same element.
         self::assertStringContainsString('<article class="piece">', $shell);
         self::assertStringContainsString('<article class="piece">', (string) file_get_contents($root.'/templates/article.php'));
-
-        self::assertStringContainsString("querySelector('.inspector-body')", $script);
         self::assertStringContainsString('class="inspector-body"', (string) file_get_contents($root.'/templates/inspector.php'));
-
-        // And the header the POST route branches on is the one the script sends.
-        self::assertStringContainsString("'X-Fragment': '1'", $script);
 
         // The threshold travels as `data-after-ms`, read as `dataset.afterMs`.
         self::assertStringContainsString('data-after-ms=', $shell);
-        self::assertStringContainsString('dataset.afterMs', $script);
+        self::assertStringContainsString('dataset.afterMs', $readOn);
+
+        // **A module runs once per document, and the advance's answer carries
+        // the next advance's form.** Binding to the form at load worked on the
+        // first answer and was dead on the second, which fell back to a
+        // full-page form submit — seen in the capture of 2026-09-11 22:22.
+        // So the advance listens from the document, and the swap does not
+        // pretend that re-inserting a module re-runs it.
+        self::assertStringContainsString("document.addEventListener('submit'", $advance);
+        self::assertStringNotContainsString('form.addEventListener', $advance);
+        self::assertStringContainsString('script[type="module"][src]', $swap);
     }
 
     /**

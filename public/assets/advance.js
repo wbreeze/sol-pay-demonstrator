@@ -14,9 +14,29 @@
  * second one behind the first but does not merge them, so a double click is
  * two advances and fourteen views charged. Then the sentence the server put in
  * the form is shown. It says only what is true the moment the form is sent —
- * that an advance is under way — because the outcome is not known yet, and the
- * page the redirect lands on reports it: charged, settled, refused or blocked.
- * The server composes the sentence; this has no opinion about its contents.
+ * that an advance is under way — because the outcome is not known yet. The
+ * server composes the sentence; this has no opinion about its contents.
+ *
+ * ---- and the answer lands here (2026-09-11) ----
+ *
+ * The POST is sent with `X-Fragment: 1` and the answer — the article and the
+ * inspector, rendered by the request that built the transaction — replaces
+ * them both, the same way the article shell's does (`swap.js`).
+ *
+ * **This is what pays off §9's last debt.** A redirect can carry the advance's
+ * signature in its query and cannot carry its instructions: they are built in
+ * that request, and §10.4 leaves this site nowhere to keep them. So the page
+ * after an advance showed no last-transaction section at all — nine advances,
+ * nine redirects, no section, across three captures. Rebuilding them for
+ * display was refused (a panel that rebuilds its own evidence agrees with
+ * itself whatever was sent), reading them back with `getTransaction` was
+ * refused (that is "as they landed" under a heading promising "as the builders
+ * produced them"), and carrying them through the URL would make them
+ * reader-supplied. Not reloading is the fourth way, and it costs nothing.
+ *
+ * Without JavaScript the form still posts and the server still redirects, so
+ * that reader gets the outcome and the signature and no instruction list —
+ * which is what everyone got until now.
  *
  * ---- on returning to the page ----
  *
@@ -41,41 +61,75 @@
  * holds the two lists together.
  */
 
+import { swap } from './swap.js';
+
 const ADVANCE_KEYS = ['advance', 'views', 'tx', 'settled'];
 
-const form = document.querySelector('form[data-advance]');
-const button = form && form.querySelector('button[type="submit"]');
-const status = form && form.querySelector('[data-advance-status]');
+/**
+ * **Listened for from the document, not bound to the form.** The answer to an
+ * advance carries the next advance's form, and the module that would bind to
+ * it cannot run twice in one document (see `swap.js`). A delegated listener
+ * outlives every swap, and what it acts on is whatever form is on the page
+ * when a reader presses the button.
+ */
+const parts = (form) => ({
+    button: form.querySelector('button[type="submit"]'),
+    status: form.querySelector('[data-advance-status]'),
+    failed: form.querySelector('[data-advance-failed]'),
+});
 
-function ready() {
-    if (!form) return;
+function ready(form) {
+    const { button, status, failed } = parts(form);
     delete form.dataset.sent;
     if (button) button.disabled = false;
     if (status) status.hidden = true;
+    if (failed) {
+        failed.hidden = true;
+        failed.textContent = '';
+    }
 }
 
-if (form) {
-    ready();
+function reset() {
+    const form = document.querySelector('form[data-advance]');
+    if (form) ready(form);
+}
 
-    form.addEventListener('submit', (event) => {
-        // Belt to the disabled button's braces: a second submit by any other
-        // route is refused here rather than sent as a second advance.
-        if (form.dataset.sent === '1') {
-            event.preventDefault();
-            return;
+document.addEventListener('submit', async (event) => {
+    const form = event.target.closest?.('form[data-advance]');
+    if (!form) return;
+
+    event.preventDefault();
+    // Belt to the disabled button's braces: a second submit by any other
+    // route is refused here rather than sent as a second advance.
+    if (form.dataset.sent === '1') return;
+    form.dataset.sent = '1';
+
+    const { button, status, failed } = parts(form);
+    if (button) button.disabled = true;
+    if (status) status.hidden = false;
+
+    try {
+        await swap(form.action, new FormData(form));
+    } catch (error) {
+        // The button comes back with what went wrong. Pressing it again
+        // sends a **second advance**, and that is the honest offer: unlike
+        // the article's POST there is no grant to make a retry free, so
+        // the line says so rather than inviting a click that might charge
+        // seven views twice. Whether the first one landed is a question
+        // the meter answers — reload and read it.
+        ready(form);
+        if (failed) {
+            failed.textContent = `That did not finish: ${error.message}. `
+                + 'It may still have gone through — reload and read the meter before advancing again.';
+            failed.hidden = false;
         }
-        form.dataset.sent = '1';
-        // Disabled inside the submit event, not on click, so the submission
-        // that is already under way is not the one refused. The button has no
-        // name, so leaving the form data does not change what is posted.
-        if (button) button.disabled = true;
-        if (status) status.hidden = false;
-    });
+    }
+});
 
-    window.addEventListener('pageshow', (event) => {
-        if (event.persisted) ready();
-    });
-}
+reset();
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted) reset();
+});
 
 const url = new URL(window.location.href);
 if (ADVANCE_KEYS.some((key) => url.searchParams.has(key))) {

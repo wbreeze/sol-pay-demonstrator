@@ -1007,9 +1007,9 @@ went from **0.899 s to 0.002 s**, the cost of a static file, when it stopped
 making it. Our own render measured under 6 ms and was never the problem.
 
 The rule is not *defer the panel*; it is **defer the read nobody else needed**.
-Where a request has already read the chain for its own reasons — the article
-route, where §7's middleware must read it to decide metering — the panel
-renders inline and costs nothing extra, because the read was required work
+Where a request has already read the chain for its own reasons — the article's
+POST, where §7's middleware must read it to decide metering — the panel renders
+with the answer and costs nothing extra, because the read was required work
 either way.
 
 That distinction is what keeps *The last transaction* possible at all. It needs
@@ -1017,6 +1017,20 @@ a `MeterResult` which exists only on the request that produced it (§10.4 leaves
 no history for a second request to find), so it could never survive a deferred
 fetch — and under this rule it never has to, because the pages that have one
 are exactly the pages that render inline.
+
+**The seven-view advance kept that promise only in principle until 2026-09-11.**
+Its POST built a transaction and then redirected, and the page that followed was
+a second request: it found the reader's grant, carried no signature, and
+rendered no last-transaction section at all. Nine advances in one capture, nine
+pages with nothing to show for the transaction each had just sent. Three
+repairs were refused elsewhere in this section and in §10.4 — rebuild the
+instructions, read them back with `getTransaction`, carry them in the URL — and
+the fourth is simply not to leave the request: the POST answers with the
+article and this panel, rendered by the request that built the instructions,
+and the browser puts them where the old ones were (§7.1 does the same for the
+page view). Nothing is stored and nothing is rebuilt for display. Without
+JavaScript the redirect still happens and that reader still gets the outcome
+and the signature, which is what everybody got before.
 
 Without JavaScript the deferred panel is an ordinary link to a page that
 renders the same sections server-side. Nothing in this section depends on a

@@ -412,15 +412,17 @@ $app->get('/', function (Request $request, Response $response) use ($view, $shel
  * has nobody to charge, and the POST, which charges — so the one state cannot
  * be rendered two ways depending on which request happened to produce it.
  */
-$articleContent = static function (Request $request, Piece $piece, ?MeterResult $result) use ($view, $siteVars, $meterVars, $reads): string {
+$articleContent = static function (Request $request, Piece $piece, ?MeterResult $result, ?array $advanced = null) use ($view, $siteVars, $meterVars, $reads): string {
     $body = $result !== null && $result->serves() ? $piece->body() : null;
 
-    // What the seven-view control just did, carried back from its redirect and
-    // shown once. Signature-shaped or nothing: a query string is reader-supplied.
+    // What the seven-view control just did. The advance's own answer carries
+    // it when the advance rendered this (`POST /meter/advance` with
+    // `X-Fragment`); otherwise it comes back from that POST's redirect, in the
+    // query, and is shown once.
     $query = $request->getQueryParams();
     $tx = (string) ($query['tx'] ?? '');
     $outcome = MeterOutcome::tryFrom((string) ($query['advance'] ?? ''));
-    $advanced = $outcome === null ? null : [
+    $advanced ??= $outcome === null ? null : [
         'outcome' => $outcome,
         'views' => max(0, min(999, (int) ($query['views'] ?? 0))),
         // Signature-shaped or nothing: a query string is reader-supplied.
@@ -576,17 +578,18 @@ $articlePost->add(new MeterMiddleware(
  * it is the same instruction the site would send if the reader had read seven
  * articles, which is exactly why it belongs in a demonstration of the API.
  */
-$app->post('/meter/advance', function (Request $request, Response $response) use ($wallet, $reads, $config, $meterFactory): Response {
-    // A form and a redirect, not JSON and a script: this one is signed by the
-    // site and the reader's wallet is not involved at all. `assets/advance.js`
-    // only disables the button and says the advance is under way while the
-    // validator answers; without it the form works exactly the same.
+$app->post('/meter/advance', function (Request $request, Response $response) use ($view, $contentDir, $articleContent, $inspector, $wallet, $reads, $store, $config, $meterFactory): Response {
+    // A form and a redirect, and — since 2026-09-11 — a fragment when the
+    // page asks for one, which is the same bargain the article makes: the
+    // browser gets the answer without a second request, and a browser without
+    // JavaScript gets the redirect and loses nothing but the round trip.
     $body = (array) $request->getParsedBody();
     $slug = (string) ($body['slug'] ?? '');
     $back = $slug === '' ? '/' : '/a/'.rawurlencode($slug);
 
     $address = $wallet($request);
     $state = $reads($request)->site();
+    $result = null;
 
     if ($address !== null && $state !== null) {
         $result = $meterFactory()->advance($address, $state, (int) $config->metering()['demo_step_views']);
@@ -618,6 +621,50 @@ $app->post('/meter/advance', function (Request $request, Response $response) use
             $back .= '&tx='.rawurlencode($result->signature)
                 .($result->settles ? '&settled=1' : '');
         }
+
+        // §7.2's lock has read these accounts more recently than this request
+        // did, and a transaction has moved them. Same two answers as the
+        // article's middleware, for the same reason (§2's claim 7).
+        if ($result->payer !== null) {
+            $reads($request)->adopt($result->payer);
+        } elseif ($result->sent()) {
+            $reads($request)->invalidatePayer();
+        }
+    }
+
+    $piece = Library::isBuilt($contentDir) ? Library::load($contentDir)->find($slug) : null;
+
+    if ($request->getHeaderLine('X-Fragment') === '1' && $piece instanceof Piece) {
+        // **This is what pays off §9's last debt.** The redirect carries the
+        // signature and cannot carry the instructions — they are built in this
+        // request and §10.4 leaves nowhere to keep them — so the panel that
+        // followed an advance showed no last-transaction section at all. Here
+        // the panel is rendered by the request that built them, from the
+        // `MeterResult` itself, which is the only place §9's section can come
+        // from. Nothing is stored and nothing is rebuilt for display.
+        //
+        // The *page's* result is not this one. An advance is not a page view
+        // (§7.4): the reader is holding a grant, bought when the page that
+        // carries this button was served, and that is what the strip reports
+        // about the article itself. So the article renders from the grant and
+        // the advance renders as the advance — including when it was refused,
+        // where the reader keeps the body they already paid for.
+        $granted = $address !== null && $store()->liveGrant($address, $piece->slug) !== null;
+        $advanced = $result === null ? null : [
+            'outcome' => $result->outcome,
+            'views' => $result->pageViews,
+            'signature' => $result->signature,
+            'settled' => $result->settles,
+        ];
+
+        $response->getBody()->write(
+            $articleContent($request, $piece, $granted ? MeterResult::granted() : null, $advanced)
+            .$view->render('inspector', ['sections' => $inspector($reads($request), $result)])
+        );
+
+        return $response
+            ->withHeader('Content-Type', 'text/html; charset=utf-8')
+            ->withHeader('Cache-Control', 'no-store');
     }
 
     return $response->withStatus(303)->withHeader('Location', $back);

@@ -164,6 +164,11 @@ $contract = $meter['contract'];
         <p class="pending" data-advance-status role="status" hidden>
             Advancing the meter <?= View::e((string) $meter['step_views']) ?> views…
         </p>
+        <?php /* Filled by the script only if the POST does not arrive — a
+                 reason it composes, since only it knows one. Empty and hidden
+                 here for the same reason the sentence above is hidden: without
+                 JavaScript nothing has been sent. */ ?>
+        <p class="pending" data-advance-failed role="status" hidden></p>
     </form>
     <script type="module" src="/assets/advance.js"></script>
 </section>
