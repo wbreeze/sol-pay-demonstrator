@@ -75,8 +75,10 @@ final class FaucetMessageTest extends TestCase
     private function told(string $raisedBy, int $code): string
     {
         $program = Config::load(dirname(__DIR__, 2))->program();
+        // No `setAccessible(true)`: reflection has reached private methods
+        // without it since 8.1, and 8.5 deprecates the call for saying so. The
+        // floor is 8.2, so there is no version here where it did anything.
         $tell = new ReflectionMethod(Faucet::class, 'tell');
-        $tell->setAccessible(true);
 
         return (string) $tell->invoke(null, Cause::of($program, $raisedBy, $code));
     }
