@@ -11,8 +11,6 @@ lede: >
 reading_time: 4
 ---
 
-# The transaction that proved less than it looked like
-
 On 5 September a validator accepted a transaction assembled by this site's
 server. It cost about a hundredth of a cent in devnet fees and it took two
 seconds. The interesting part is what happened next, which is that the sentence

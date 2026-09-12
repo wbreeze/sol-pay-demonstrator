@@ -10,8 +10,6 @@ lede: >
 reading_time: 5
 ---
 
-# The screen the diagram never had
-
 The objection was one sentence: *a sign-in page feels like identifying for
 tracking.*
 

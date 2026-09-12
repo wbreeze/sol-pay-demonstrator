@@ -11,8 +11,6 @@ lede: >
 reading_time: 4
 ---
 
-# The request nobody made
-
 Until yesterday, this site charged you a cent on a `GET`.
 
 That is not unusual. It is how a metered page works nearly everywhere: the

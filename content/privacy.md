@@ -5,8 +5,6 @@ metered: false
 status: draft
 ---
 
-# Privacy
-
 This is the page where a privacy policy would go. It isn't one. A privacy
 policy describes what a site collects about you in language broad enough to
 cover what it might collect later. This page just lists what this site holds.

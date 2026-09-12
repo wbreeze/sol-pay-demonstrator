@@ -101,6 +101,17 @@ foreach (glob($source.'/*.md') ?: [] as $path) {
     }
 
     $body = $rendered->getContent();
+
+    // The title is written once, in the front matter, and rendered once, by
+    // `article.php` and `page.php`. A body that opens with its own `#` heading
+    // renders the title twice on every paid article, and — worse than the
+    // repetition — makes it possible for the two to disagree. Refused here so
+    // that they cannot: there is one place a piece is titled.
+    if (preg_match('/<h1[\s>]/i', $body) === 1) {
+        fwrite(STDERR, "{$name}: the body carries an <h1>; the title comes from front matter and is rendered by the template. Remove the '# ' heading.\n");
+        exit(1);
+    }
+
     file_put_contents($target.'/'.$slug.'.html', $body);
 
     // 238 words a minute, rounded up, and only when the piece does not say.

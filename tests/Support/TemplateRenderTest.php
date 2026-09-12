@@ -571,6 +571,65 @@ final class TemplateRenderTest extends TestCase
         self::assertStringContainsString('none', $html);
     }
 
+    /**
+     * A piece is titled once.
+     *
+     * The title was rendered twice on every paid article: once by
+     * `article.php` from the front matter, and again by the body, which
+     * repeated it as a `#` heading. Two renderings of one string can disagree,
+     * and this one was one edit away from doing so. The heading is now the
+     * template's on both the article and the page, and the markdown carries
+     * none — which is only safe if `page.php` actually renders it, since the
+     * privacy page has no other source of a heading.
+     */
+    public function testEachPieceIsTitledOnce(): void
+    {
+        $piece = new \Newsprint\Content\Piece('privacy', 'Privacy', '', 4, false, 'draft', '');
+
+        $page = $this->renderStrictly('page', ['piece' => $piece, 'body' => '<p>Body.</p>']);
+        self::assertSame(1, preg_match_all('/<h1[\s>]/i', $page), 'the page carries exactly one heading');
+        self::assertStringContainsString('<h1>Privacy</h1>', $page);
+
+        $article = $this->renderStrictly('article', [
+            'piece' => new \Newsprint\Content\Piece('two-orderings', 'Two orderings', 'L', 4, true, 'draft', ''),
+            'body' => '<p>Body.</p>',
+            'site' => ['symbol' => 'DEMO', 'page_price_demo' => '0.01'],
+            'meter' => $this->panel(['result' => MeterResult::granted()]),
+        ]);
+        self::assertSame(1, preg_match_all('/<h1[\s>]/i', $article), 'the article carries exactly one heading');
+        self::assertStringContainsString('<h1>Two orderings</h1>', $article);
+    }
+
+    /**
+     * And the other half of it: no published source supplies a second one.
+     *
+     * `bin/build-content` refuses a body with an `<h1>`, but the build is not
+     * what runs here, so the sources are scanned directly — and the scanner is
+     * run over a broken sample in the same test, because a scanner that
+     * matches nothing passes this kind of check silently.
+     */
+    public function testNoPublishedPieceCarriesItsOwnHeading(): void
+    {
+        $heading = '/^# /m';
+
+        $checked = 0;
+        foreach (glob(dirname(__DIR__, 2).'/content/*.md') ?: [] as $path) {
+            $source = (string) file_get_contents($path);
+
+            // Files without front matter are working notes, not pieces:
+            // `bin/build-content` skips them and they keep their headings.
+            if (!str_starts_with($source, "---\n")) {
+                continue;
+            }
+
+            ++$checked;
+            self::assertDoesNotMatchRegularExpression($heading, $source, basename($path).' carries its own heading');
+        }
+
+        self::assertGreaterThan(0, $checked, 'pieces were found to check');
+        self::assertMatchesRegularExpression($heading, "---\ntitle: T\n---\n\n# T\n\nBody.\n", 'the scanner finds a heading when there is one');
+    }
+
     public function testAContractDecodesIntoThePanelWithoutGuessingAtItsShape(): void
     {
         // Not a render: a reminder that `Contract` is a value object with

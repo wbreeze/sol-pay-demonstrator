@@ -10,8 +10,6 @@ lede: >
 reading_time: 4
 ---
 
-# Two orderings that disagree on purpose
-
 Two paths in this site do the same two things — talk to a chain, and change a
 local record — in opposite orders.
 

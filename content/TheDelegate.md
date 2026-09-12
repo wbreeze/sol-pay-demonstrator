@@ -11,8 +11,6 @@ lede: >
 reading_time: 4
 ---
 
-# The permission nobody shows you
-
 This project keeps a list of things the demo has to prove. Six of the seven are
 about money moving. The sixth is about it stopping:
 
