@@ -18,6 +18,8 @@ use Newsprint\Support\View;
 ?>
 <article class="piece">
     <h1><?= View::e($piece->title) ?></h1>
+    <p class="lede deck"><?= View::e($piece->lede) ?></p>
+
     <p class="meta">
         <?= View::e((string) $piece->readingTime) ?> min
         · <?= View::e((string) $site['page_price_demo']) ?> <?= View::e((string) $site['symbol']) ?>
@@ -25,8 +27,6 @@ use Newsprint\Support\View;
         · <span class="draft">draft</span>
 <?php endif ?>
     </p>
-
-    <p class="lede"><?= View::e($piece->lede) ?></p>
 
 <?php if ($body !== null): ?>
     <div class="body">

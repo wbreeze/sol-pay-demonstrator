@@ -40,14 +40,14 @@ use Newsprint\Support\View;
 ?>
 <article class="piece">
     <h1><?= View::e($piece->title) ?></h1>
+    <p class="lede deck"><?= View::e($piece->lede) ?></p>
+
     <p class="meta">
         <?= View::e((string) $piece->readingTime) ?> min
 <?php if ($piece->isDraft()): ?>
         · <span class="draft">draft</span>
 <?php endif ?>
     </p>
-
-    <p class="lede"><?= View::e($piece->lede) ?></p>
 
     <form method="post" action="/a/<?= View::e(rawurlencode($piece->slug)) ?>" class="gate read-on" data-read-on>
         <h2>The rest is metered</h2>

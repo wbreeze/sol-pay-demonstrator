@@ -14,6 +14,9 @@
     --paper-sunk: #f2eee3;
     --accent: #8a2b16;
     --measure: 34rem;
+    /* The body is serif; the deck is not. Both stacks are the reader's own
+       (§10.3) — the contrast costs nothing because no font is fetched. */
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -66,6 +69,24 @@ a:hover { text-decoration-thickness: 2px; }
 /* a piece */
 .piece h1 { font-size: 1.75rem; line-height: 1.2; margin: 2rem 0 0.5rem; }
 .lede { font-size: 1.1rem; color: var(--ink); }
+
+/* The deck: an article's lede, which a reader meets twice — once on the page
+   that offers the article, and again above the body they have paid for. The
+   second time it is something to get past, so it changes family rather than
+   merely gaining a size on the prose around it: one glance places it, and the
+   eye can start below it without reading a word. Smaller and softer than the
+   body for the same reason, and no smaller than that, because on the page
+   that offers the article it is the only writing there is. */
+.deck {
+    font-family: var(--sans);
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--ink-soft);
+    /* The meta line follows the deck rather than the title — the index has
+       always read that way, and now the article does too — so the space below
+       the deck closes up and the meta's own margin holds the rule off. */
+    margin: 0 0 0.75rem;
+}
 .pieces .lede { font-size: 1rem; color: var(--ink-soft); margin: 0; }
 .meta { font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 1rem; }
 .draft { color: var(--accent); }
