@@ -7,6 +7,7 @@
 #   bin/check tests --filter Shell
 #   bin/check analyse         PHPStan only, at both PHP versions
 #   bin/check boot            the floor job's boot check only
+#   bin/check dates           the content dates only
 #
 # `.github/workflows/ci.yml` is the authority on what a green run means, and
 # this script is a convenience, not a second opinion. So it takes what it can
@@ -85,6 +86,12 @@ run_install() {
 
     say 'content renders'
     bin/build-content --quiet
+
+    say 'the content dates are still true'
+    # Without --require-git: this machine has the history, and a contributor
+    # working from a ZIP should not be told their tree is broken because git
+    # cannot answer. CI asks the strict question.
+    bin/content-dates
 }
 
 run_tests() {
@@ -173,7 +180,11 @@ case "${1:-all}" in
     boot)
         run_boot
         ;;
+    dates)
+        bin/build-content --quiet
+        bin/content-dates
+        ;;
     *)
-        fail "unknown: $1 — try: all, tests, analyse, boot"
+        fail "unknown: $1 — try: all, tests, analyse, boot, dates"
         ;;
 esac

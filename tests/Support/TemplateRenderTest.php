@@ -186,7 +186,7 @@ final class TemplateRenderTest extends TestCase
 
     public function testTheStripRendersEveryAdvanceOutcomeAndEveryWarning(): void
     {
-        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '');
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
 
         $outcomes = [
             MeterOutcome::Metered,
@@ -225,7 +225,7 @@ final class TemplateRenderTest extends TestCase
      */
     public function testTheAdvanceFormCarriesItsProgressSentenceHidden(): void
     {
-        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '');
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
         $meter = $this->panel(['result' => MeterResult::granted()]);
         $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
 
@@ -294,7 +294,7 @@ final class TemplateRenderTest extends TestCase
      */
     public function testTheShellPostsToItsOwnUrlAndClaimsNothingTheChainWouldAnswer(): void
     {
-        $piece = new \Newsprint\Content\Piece('two orderings', 'T', 'The lede.', 4, true, 'draft', '');
+        $piece = new \Newsprint\Content\Piece('two orderings', 'T', 'The lede.', 4, true, 'draft', '2026-09-07', null, '');
         $html = $this->renderStrictly('article-pending', ['piece' => $piece, 'longWaitMs' => 7000]);
 
         self::assertMatchesRegularExpression('/<form method="post" action="\/a\/two%20orderings"[^>]*\bdata-read-on\b/', $html);
@@ -584,14 +584,14 @@ final class TemplateRenderTest extends TestCase
      */
     public function testEachPieceIsTitledOnce(): void
     {
-        $piece = new \Newsprint\Content\Piece('privacy', 'Privacy', '', 4, false, 'draft', '');
+        $piece = new \Newsprint\Content\Piece('privacy', 'Privacy', '', 4, false, 'draft', '2026-09-04', null, '');
 
         $page = $this->renderStrictly('page', ['piece' => $piece, 'body' => '<p>Body.</p>']);
         self::assertSame(1, preg_match_all('/<h1[\s>]/i', $page), 'the page carries exactly one heading');
         self::assertStringContainsString('<h1>Privacy</h1>', $page);
 
         $article = $this->renderStrictly('article', [
-            'piece' => new \Newsprint\Content\Piece('two-orderings', 'Two orderings', 'L', 4, true, 'draft', ''),
+            'piece' => new \Newsprint\Content\Piece('two-orderings', 'Two orderings', 'L', 4, true, 'draft', '2026-09-07', null, ''),
             'body' => '<p>Body.</p>',
             'site' => ['symbol' => 'DEMO', 'page_price_demo' => '0.01'],
             'meter' => $this->panel(['result' => MeterResult::granted()]),
@@ -628,6 +628,47 @@ final class TemplateRenderTest extends TestCase
 
         self::assertGreaterThan(0, $checked, 'pieces were found to check');
         self::assertMatchesRegularExpression($heading, "---\ntitle: T\n---\n\n# T\n\nBody.\n", 'the scanner finds a heading when there is one');
+    }
+
+    /**
+     * The dates, and the state that has none.
+     *
+     * A draft carries its dates in front matter and shows neither, because it
+     * has not been published and a creation date standing where a publication
+     * date belongs is an answer to a question nobody asked. The badge is what
+     * a draft has to say. Both halves are asserted here: the published piece
+     * must show the dates, and the draft must not, since a rule that only ever
+     * renders one of its two branches has been read, not tested.
+     */
+    public function testDatesShowOnAPublishedPieceAndOnNoDraft(): void
+    {
+        $published = new \Newsprint\Content\Piece('privacy', 'Privacy', '', 3, false, 'published', '2026-09-04', '2026-09-07', '');
+        $page = $this->renderStrictly('page', ['piece' => $published, 'body' => '<p>The list.</p>']);
+
+        self::assertStringContainsString('<time datetime="2026-09-04">4 September 2026</time>', $page);
+        self::assertStringContainsString('· revised <time datetime="2026-09-07">7 September 2026</time>', $page);
+
+        $draft = new \Newsprint\Content\Piece('privacy', 'Privacy', '', 3, false, 'draft', '2026-09-04', '2026-09-07', '');
+        $hidden = $this->renderStrictly('page', ['piece' => $draft, 'body' => '<p>The list.</p>']);
+
+        self::assertStringNotContainsString('<time', $hidden);
+        self::assertStringNotContainsString('2026', $hidden, 'no date reaches the page in any spelling');
+        self::assertStringNotContainsString('class="meta"', $hidden, 'and no empty line is left where one would have gone');
+
+        // On an article the dates share the line with the reading time and the
+        // price, and a revision on the day the piece was written says only
+        // that the file was saved twice.
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'Two orderings', 'L', 4, true, 'published', '2026-09-07', '2026-09-07', '');
+        $article = $this->renderStrictly('article', [
+            'piece' => $piece,
+            'body' => '<p>Body.</p>',
+            'site' => ['symbol' => 'DEMO', 'page_price_demo' => '0.01'],
+            'meter' => $this->panel(['result' => MeterResult::granted()]),
+        ]);
+
+        self::assertStringContainsString('<time datetime="2026-09-07">7 September 2026</time>', $article);
+        self::assertStringNotContainsString('revised', $article);
+        self::assertStringNotContainsString('draft', $article);
     }
 
     public function testAContractDecodesIntoThePanelWithoutGuessingAtItsShape(): void

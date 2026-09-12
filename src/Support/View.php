@@ -38,4 +38,24 @@ final class View
     {
         return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
+
+    /**
+     * `2026-09-07` as `7 September 2026`.
+     *
+     * `DateTimeImmutable::format` and not `IntlDateFormatter` or anything else
+     * that reads a locale: month names from `format()` are the same on every
+     * machine, and this project has been bitten twice by a shell whose locale
+     * changed what a number meant. A date the server renders differently from
+     * the date in the file is the same fault wearing a nicer hat.
+     */
+    public static function date(?string $iso): string
+    {
+        if ($iso === null || $iso === '') {
+            return '';
+        }
+
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $iso, new \DateTimeZone('UTC'));
+
+        return $date === false ? '' : $date->format('j F Y');
+    }
 }

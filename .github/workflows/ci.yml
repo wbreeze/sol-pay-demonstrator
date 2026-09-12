@@ -219,3 +219,36 @@ jobs:
             fi
           done
           exit $missing
+
+  content-dates:
+    # The dates on a published piece are written by hand, and this is the job
+    # that notices when one has stopped being true. It is the only job that
+    # needs the repository's history rather than its files: `fetch-depth: 0`,
+    # because the default checkout is one commit deep and the first commit of a
+    # file is exactly what a shallow clone cannot answer.
+    #
+    # `--require-git` is the other half. Without it the script exits 0 when
+    # there is no history to read — which is right for a reader with a ZIP and
+    # wrong here, where a green result that checked nothing is the failure
+    # worth preventing.
+    name: content dates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: curl, json, pdo_sqlite, sodium
+          coverage: none
+
+      - name: install
+        uses: ramsey/composer-install@v3
+
+      - name: build the manifest the check reads
+        run: bin/build-content --quiet
+
+      - name: every published date still matches the history
+        run: bin/content-dates --require-git

@@ -1,0 +1,165 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Does every published piece still carry a date that is true? (SPEC §10.1)
+ *
+ * The dates are written by hand, in front matter, and that is the decision
+ * this script exists to make safe. Deriving them from `git log` would make
+ * them unforgettable and untrue: on 2026-09-12 one commit took a repeated
+ * heading out of all nine content files, and a derived "revised" would have
+ * told every reader that every article changed that day. Only a person can
+ * tell a revision from a touch-up.
+ *
+ * So the promise stays the writer's and this is the witness. It reads two
+ * dates per file out of the repository — when it was added, and when it last
+ * changed — and complains when the file has moved since the date it claims.
+ *
+ * **A commit that changes nothing a reader sees says so**, in a trailer:
+ *
+ *     Reader-Visible: no
+ *
+ * Commits carrying it are skipped when looking for the last change. That is a
+ * sentence you have to write on purpose, which is the point: the alternative
+ * was a warning, and a warning that fires on typo fixes is one everybody
+ * learns to scroll past.
+ *
+ * Usage:
+ *   bin/content-dates                 check what can be checked here
+ *   bin/content-dates --require-git   and fail if the history is not there
+ *
+ * Without history — a downloaded ZIP, or a shallow clone — there is nothing to
+ * compare against and that is not a failure: §12.0 promises a reader can
+ * install and build, and this check is not part of that promise. In CI it is,
+ * so the workflow passes `--require-git` and checks out with `fetch-depth: 0`.
+ * A green result that checked nothing is the failure this pair exists to
+ * prevent.
+ */
+
+require __DIR__.'/../vendor/autoload.php';
+
+use Newsprint\Content\DateAudit;
+
+$root = dirname(__DIR__);
+$requireGit = in_array('--require-git', $argv, true);
+
+/** @return array{0: int, 1: string} */
+function git(string $root, string ...$args): array
+{
+    $command = 'git '.implode(' ', array_map('escapeshellarg', $args));
+    // Reads only, and never taking `.git/index.lock`: this runs on a working
+    // machine, and a lock left behind is someone else's afternoon.
+    $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+    $process = proc_open($command, $descriptors, $pipes, $root, ['GIT_OPTIONAL_LOCKS' => '0'] + getenv());
+    if (!is_resource($process)) {
+        return [1, ''];
+    }
+
+    $out = (string) stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+
+    return [proc_close($process), trim($out)];
+}
+
+[$code, $inside] = git($root, 'rev-parse', '--is-inside-work-tree');
+if ($code !== 0 || $inside !== 'true') {
+    $why = 'no git history here';
+    if ($requireGit) {
+        fwrite(STDERR, "content-dates: {$why}, and --require-git was asked for\n");
+        exit(1);
+    }
+    echo "content-dates: {$why} — nothing to check against, which is not a failure\n";
+    exit(0);
+}
+
+[, $shallow] = git($root, 'rev-parse', '--is-shallow-repository');
+if ($shallow === 'true') {
+    $why = 'the clone is shallow, so the first commit of a file is not knowable';
+    if ($requireGit) {
+        fwrite(STDERR, "content-dates: {$why} — check out with fetch-depth: 0\n");
+        exit(1);
+    }
+    echo "content-dates: {$why}\n";
+    exit(0);
+}
+
+$manifest = $root.'/var/content/index.json';
+$raw = @file_get_contents($manifest);
+if ($raw === false) {
+    fwrite(STDERR, "content-dates: no built manifest; run bin/build-content first\n");
+    exit(1);
+}
+
+/** The date of the commit that added the file, and of the last one to change it. */
+function history(string $root, string $path): array
+{
+    [, $added] = git($root, 'log', '--diff-filter=A', '--follow', '--format=%as', '--', $path);
+    $added = $added === '' ? null : (string) array_slice(explode("\n", $added), -1)[0];
+
+    // `%as` is the author date as YYYY-MM-DD, and the trailer is read off the
+    // whole message, so a commit that declares itself reader-invisible drops
+    // out here rather than being subtracted later.
+    [, $log] = git($root, 'log', '--format=%as%x09%(trailers:key=Reader-Visible,valueonly)%x09%H', '--', $path);
+    $touched = null;
+    foreach (explode("\n", $log) as $line) {
+        if ($line === '') {
+            continue;
+        }
+
+        [$date, $trailer] = array_pad(explode("\t", $line, 3), 3, '');
+        if (strtolower(trim($trailer)) === 'no') {
+            continue;
+        }
+
+        $touched = $date;
+        break;
+    }
+
+    return [$added, $touched];
+}
+
+$complaints = [];
+$checked = 0;
+$published = 0;
+
+foreach ((array) json_decode((string) $raw, true) as $row) {
+    $source = 'content/'.((string) ($row['source'] ?? ''));
+    if (!is_file($root.'/'.$source)) {
+        $complaints[] = "{$source}: in the manifest but not in content/ — rebuild";
+        continue;
+    }
+
+    [$added, $touched] = history($root, $source);
+    ++$checked;
+    $status = (string) ($row['status'] ?? 'published');
+    if ($status !== 'draft') {
+        ++$published;
+    }
+
+    $complaints = array_merge($complaints, DateAudit::complaints($source, [
+        'created' => isset($row['created']) ? (string) $row['created'] : null,
+        'revised' => isset($row['revised']) ? (string) $row['revised'] : null,
+        'status' => $status,
+    ], $added, $touched));
+}
+
+if ($checked === 0) {
+    fwrite(STDERR, "content-dates: nothing was checked, which is not the same as nothing being wrong\n");
+    exit(1);
+}
+
+if ($complaints !== []) {
+    foreach ($complaints as $line) {
+        fwrite(STDERR, "  {$line}\n");
+    }
+
+    fwrite(STDERR, "\ncontent-dates: a date no longer matches the history.\n");
+    fwrite(STDERR, "  Bump 'revised' in the piece, or — if the change was invisible to a\n");
+    fwrite(STDERR, "  reader — give the commit a 'Reader-Visible: no' trailer.\n");
+    exit(1);
+}
+
+printf("content-dates: %d piece%s, %d published, every date still true\n", $checked, $checked === 1 ? '' : 's', $published);

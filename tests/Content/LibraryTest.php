@@ -17,9 +17,9 @@ final class LibraryTest extends TestCase
         mkdir($this->dir);
         file_put_contents($this->dir.'/index.json', json_encode([
             ['slug' => 'first-transaction', 'title' => 'The transaction', 'lede' => 'A validator accepted it.',
-                'reading_time' => 4, 'metered' => true, 'status' => 'draft'],
+                'reading_time' => 4, 'metered' => true, 'status' => 'draft', 'created' => '2026-09-05'],
             ['slug' => 'privacy', 'title' => 'Privacy', 'lede' => 'What this site holds.',
-                'reading_time' => 3, 'metered' => false, 'status' => 'published'],
+                'reading_time' => 3, 'metered' => false, 'status' => 'published', 'created' => '2026-09-04', 'revised' => '2026-09-07'],
         ]));
         file_put_contents($this->dir.'/first-transaction.html', '<p>the body</p>');
         file_put_contents($this->dir.'/privacy.html', '<p>the list</p>');
