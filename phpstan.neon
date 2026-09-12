@@ -43,6 +43,7 @@ parameters:
         - bin/devnet-canary
         - bin/devnet-smoke
         - bin/last-settle
+        - bin/two-readers
         - bin/name-the-mint
         - bin/upstream-drift
 

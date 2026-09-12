@@ -1,0 +1,506 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * SPEC §7.2's chain half: two simultaneous readers, one `meter_and_settle`.
+ *
+ *   bin/two-readers            # pick an article from a list
+ *   bin/two-readers <slug>     # go straight at one
+ *
+ * The server half is `tests/Metering/OneMeterAtATimeTest.php`, which races
+ * four real processes against the real lock and has an unlocked control that
+ * must double-charge. It replaces the chain with a `usleep`. What is left for
+ * this script is narrow and cannot be automated: that the thing the lock
+ * protects — building and sending `meter_and_settle` — really does happen once
+ * when two requests arrive together through the whole stack.
+ *
+ * **It spends.** One page view at `page_price`, and a devnet fee. If the
+ * charge crosses the collection threshold it settles, which moves real DEMO to
+ * the treasury and is the better observation. Two, if the defect is present,
+ * which is the point.
+ *
+ * Run it against a dev server that is already up:
+ *
+ *   bin/run-dev          # in another terminal, and leave the workers alone
+ *   bin/two-readers
+ *
+ * Everything it needs beyond that it finds or asks for. There is no cookie to
+ * copy: the session id is in the store, and copying it out of a browser by
+ * hand is how the first attempt at this failed — a devtools panel shows
+ * `name: value` and a `Cookie:` header wants `name=value`, so the request went
+ * out unauthenticated, metered nothing, and looked like a pass.
+ */
+
+use Newsprint\Chain\PayerReader;
+use Newsprint\Chain\Rpc;
+use Newsprint\Chain\RpcException;
+use Newsprint\Chain\SiteReader;
+use Newsprint\Chain\SiteState;
+use Newsprint\Content\Library;
+use Newsprint\Store\Database;
+use Newsprint\Store\Store;
+use Newsprint\Support\Config;
+use SolPay\Core\Units;
+
+$root = dirname(__DIR__);
+require $root.'/vendor/autoload.php';
+
+// ---- small helpers -------------------------------------------------------
+
+function say(string $line = ''): void
+{
+    echo $line."\n";
+}
+
+function step(string $line): void
+{
+    echo "\n\033[1m".$line."\033[0m\n";
+}
+
+function bad(string $line): never
+{
+    fwrite(STDERR, "\n✗ ".$line."\n");
+    exit(1);
+}
+
+function ask(string $question, string $default = ''): string
+{
+    $suffix = $default === '' ? '' : " [{$default}]";
+    echo "\n{$question}{$suffix}: ";
+    $answer = trim((string) fgets(STDIN));
+
+    return $answer === '' ? $default : $answer;
+}
+
+function confirm(string $question): bool
+{
+    return in_array(strtolower(ask($question.' (y/N)', 'n')), ['y', 'yes'], true);
+}
+
+/** @param array<string, string> $headers */
+function post(string $url, array $headers, float $startAt): array
+{
+    $handle = curl_init($url);
+    curl_setopt_array($handle, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => '',
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HEADER => true,
+        CURLOPT_TIMEOUT => 60,
+        CURLOPT_HTTPHEADER => array_map(
+            static fn (string $k, string $v): string => "{$k}: {$v}",
+            array_keys($headers),
+            array_values($headers),
+        ),
+    ]);
+
+    return [$handle, $startAt];
+}
+
+// ---- 0. the copy ---------------------------------------------------------
+
+$config = Config::load($root);
+$config->isProvisioned() || bad('this copy is not provisioned — run first-run setup (SPEC §12.0).');
+
+$decimals = (int) $config->siteParams()['decimals'];
+$symbol = (string) $config->siteParams()['symbol'];
+$amount = static fn (int $units): string => Units::fromBaseUnits($units, $decimals).' '.$symbol;
+
+$rpc = new Rpc(
+    $config->rpcUrl(),
+    $config->program(),
+    (string) $config->rpc()['commitment'],
+    (int) $config->rpc()['http_timeout_s'],
+);
+
+$base = rtrim(getenv('SITE') ?: 'http://localhost:8000', '/');
+
+step('SPEC §7.2 — two simultaneous readers, one meter_and_settle');
+say("site      {$base}");
+say('rpc       '.$config->rpcUrl());
+
+// ---- 1. the dev server, and whether it can race at all -------------------
+
+$health = @file_get_contents($base.'/health');
+$health === false && bad("nothing is answering at {$base}. Start it with `bin/run-dev` in another terminal.");
+
+// `php -S` is single-process by default, and then it serializes every request
+// by itself — §7.2 passes without the lock being involved, which is the trap
+// `bin/run-dev`'s own comment warns about. Two concurrent GETs settle it: a
+// single worker answers them one after the other, so the second one's total
+// time is about twice the first's. GET is not metered, so this costs nothing.
+//
+// It can only settle it when the page is slow enough to measure. A copy that
+// answers in a millisecond — content not built, an error page — serializes too
+// fast to see, and reporting that as "overlapped" would be the false pass this
+// whole script exists to avoid. So the probe is allowed to say it does not
+// know.
+step('1. can the server actually serve two requests at once?');
+$probe = curl_multi_init();
+$handles = [];
+foreach ([1, 2] as $i) {
+    $h = curl_init($base.'/');
+    curl_setopt_array($h, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30]);
+    curl_multi_add_handle($probe, $h);
+    $handles[] = $h;
+}
+$running = null;
+do {
+    curl_multi_exec($probe, $running);
+    curl_multi_select($probe, 0.05);
+} while ($running > 0);
+
+$times = [];
+$statuses = [];
+foreach ($handles as $h) {
+    $times[] = (float) curl_getinfo($h, CURLINFO_TOTAL_TIME);
+    $statuses[] = (int) curl_getinfo($h, CURLINFO_HTTP_CODE);
+    curl_multi_remove_handle($probe, $h);
+    // No curl_close: the handle has been an object since PHP 8.0, freed
+    // when the last reference goes, and 8.5 deprecates the call for saying
+    // so. `src/Chain/Rpc.php` carries the same note; this script had to
+    // learn it a second time on 2026-09-12.
+}
+curl_multi_close($probe);
+sort($times);
+
+$notOk = array_values(array_filter($statuses, static fn (int $c): bool => $c !== 200));
+$notOk === [] || bad(
+    'the front page answered HTTP '.implode(' and ', array_map('strval', $statuses)).".
+"
+    ."  Everything below depends on the site serving normally. A 503 usually means
+"
+    .'  `bin/build-content` has not run; anything else, read the server log.'
+);
+
+say(sprintf('   two GETs took %.2fs and %.2fs', $times[0], $times[1]));
+
+if ($times[1] < 0.08) {
+    // Below this the measurement is noise, not evidence.
+    say('   too fast to tell whether they overlapped.');
+    confirm('   did you start the server with plain `bin/run-dev` (four workers)?')
+        || bad(
+            "stopped, because a single-worker server serializes every request by itself\n"
+            .'  and this test would then pass without the lock being involved at all.'
+        );
+} elseif ($times[1] >= $times[0] * 1.6) {
+    bad(
+        sprintf('the second request waited for the first (%.2fs vs %.2fs).', $times[1], $times[0])
+        ."\n  That is PHP_CLI_SERVER_WORKERS=1, and it serializes every request by itself,"
+        ."\n  so this test would pass without the lock being involved at all."
+        ."\n  Restart with plain `bin/run-dev`, which sets four workers."
+    );
+} else {
+    say('   they overlapped — the server has more than one worker');
+}
+
+// ---- 2. the reader -------------------------------------------------------
+
+step('2. whose meter?');
+// The PDO is held directly as well as handed to the store: this script reads
+// two tables the store has no accessor for (`sessions` as a list, and the
+// purchase counter), and a reporting script is not a reason to widen the
+// store's API.
+$pdo = Database::open($config->dbPath());
+$store = new Store($pdo, static fn (): int => time());
+
+/** @var list<array{id: string, wallet: string}> $sessions */
+$sessions = [];
+$stmt = $pdo->prepare(
+    'SELECT id, wallet FROM sessions WHERE expires_at > ? ORDER BY created_at DESC'
+);
+$stmt->execute([time()]);
+foreach ($stmt->fetchAll() as $row) {
+    $sessions[] = ['id' => (string) $row['id'], 'wallet' => (string) $row['wallet']];
+}
+
+$sessions === [] && bad(
+    "no live session in the store.\n"
+    ."  Sign in at {$base} with the payer's wallet, then run this again."
+);
+
+$byWallet = [];
+foreach ($sessions as $s) {
+    $byWallet[$s['wallet']] ??= $s['id'];
+}
+
+if (count($byWallet) === 1) {
+    $wallet = array_key_first($byWallet);
+} else {
+    say('   more than one wallet is signed in:');
+    $wallets = array_keys($byWallet);
+    foreach ($wallets as $i => $w) {
+        say(sprintf('     %d) %s', $i + 1, $w));
+    }
+    $pick = (int) ask('   which one', '1');
+    $wallet = $wallets[$pick - 1] ?? bad('that was not one of the choices.');
+}
+$session = $byWallet[$wallet];
+say("   wallet  {$wallet}");
+say('   session '.substr($session, 0, 12).'…  (taken from the store, not from a browser)');
+
+// ---- 3. the chain, before ------------------------------------------------
+
+step('3. what the chain says now');
+
+try {
+    $state = (new SiteReader($config, $rpc))->read();
+    $state instanceof SiteState || bad('the site account did not read back.');
+    $payer = (new PayerReader($config, $rpc))->read($wallet, $state);
+} catch (RpcException $e) {
+    bad('the endpoint did not answer: '.$e->getMessage());
+}
+
+$payer->hasContract() || bad(
+    "this wallet has no open contract, so there is nothing to meter.\n"
+    ."  Open one at {$base}/meter first."
+);
+
+$contract = $payer->contract;
+$contract !== null || bad('the contract account did not decode.');
+$pagePrice = $state->site->pagePrice;
+$remaining = $payer->viewsRemaining() ?? 0;
+
+say('   used      '.$amount($contract->used).sprintf('   (%d base units)', $contract->used));
+say('   limit     '.$amount($contract->limit));
+say('   unpaid    '.$amount($contract->unpaid()));
+say('   remaining '.$remaining.' views at '.$amount($pagePrice).' each');
+
+// Two views of headroom, not one. At exactly one, a second charge would be
+// refused *by the program* rather than by the lock, and the run would look
+// like a pass while proving nothing.
+$remaining >= 2 || bad(
+    "only {$remaining} view(s) of headroom left.\n"
+    ."  A double charge has to be *possible* for its absence to mean anything —\n"
+    ."  at one view the program would refuse the second charge for its own reasons.\n"
+    ."  Renew the contract at {$base}/meter and run this again."
+);
+
+if ($blocked = $payer->blocked(2)) {
+    bad(
+        "the preflight refuses two charges: {$blocked}\n"
+        .'  Same reason as above — top up, or raise the limit, then run this again.'
+    );
+}
+
+// ---- 4. the article ------------------------------------------------------
+
+step('4. which article?');
+$contentDir = $root.'/var/content';
+Library::isBuilt($contentDir) || bad('content is not built — run `bin/build-content`.');
+$library = Library::load($contentDir);
+
+$slug = (string) ($argv[1] ?? '');
+if ($slug === '') {
+    $metered = array_values(array_filter(
+        $library->articles(),
+        static fn ($piece): bool => $piece->metered,
+    ));
+    $metered === [] && bad('no metered articles are built.');
+
+    foreach ($metered as $i => $piece) {
+        $held = $store->liveGrant($wallet, $piece->slug) !== null;
+        say(sprintf('     %d) %-28s %s', $i + 1, $piece->slug, $held ? '(has a live grant)' : ''));
+    }
+    $pick = (int) ask('   which one', '1');
+    $piece = $metered[$pick - 1] ?? bad('that was not one of the choices.');
+    $slug = $piece->slug;
+} else {
+    $piece = $library->find($slug);
+    ($piece !== null && $piece->metered) || bad("no metered article with slug '{$slug}'.");
+}
+
+say("   article {$slug}");
+
+// A live grant short-circuits both requests: neither meters, and the run
+// proves nothing. This is the single most likely way to get a confident wrong
+// answer, so it is checked and cleared rather than mentioned.
+if ($store->liveGrant($wallet, $slug) !== null) {
+    say('   this wallet already holds a live grant for it, so neither request would meter.');
+    confirm('   delete that grant and continue?') || bad('stopped. Nothing was charged.');
+    $pdo->prepare('DELETE FROM grants WHERE wallet = ? AND article = ?')->execute([$wallet, $slug]);
+    say('   grant cleared.');
+}
+
+$purchases = static function () use ($pdo, $slug): int {
+    $stmt = $pdo->prepare('SELECT purchases FROM article_purchases WHERE article = ?');
+    $stmt->execute([$slug]);
+    $row = $stmt->fetch();
+
+    return $row === false ? 0 : (int) $row['purchases'];
+};
+$purchasesBefore = $purchases();
+say("   purchases so far: {$purchasesBefore}");
+
+// ---- 5. the race ---------------------------------------------------------
+
+step('5. the race');
+say('   Two POSTs to /a/'.$slug.', same session, sent together.');
+say('   This charges. One view if the lock holds, two if it does not.');
+confirm('   send them?') || bad('stopped. Nothing was charged.');
+
+$multi = curl_multi_init();
+$racers = [];
+foreach ([1, 2] as $i) {
+    $h = curl_init($base.'/a/'.rawurlencode($slug));
+    curl_setopt_array($h, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => '',
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HEADER => true,
+        CURLOPT_TIMEOUT => 90,
+        CURLOPT_HTTPHEADER => [
+            'Cookie: newsprint_session='.$session,
+            'X-Fragment: 1',
+        ],
+    ]);
+    curl_multi_add_handle($multi, $h);
+    $racers[$i] = $h;
+}
+
+$running = null;
+do {
+    curl_multi_exec($multi, $running);
+    curl_multi_select($multi, 0.05);
+} while ($running > 0);
+
+$sent = [];
+$timingOn = false;
+foreach ($racers as $i => $h) {
+    $body = (string) curl_multi_getcontent($h);
+    $headerSize = (int) curl_getinfo($h, CURLINFO_HEADER_SIZE);
+    $headers = substr($body, 0, $headerSize);
+    $status = (int) curl_getinfo($h, CURLINFO_HTTP_CODE);
+    $total = (float) curl_getinfo($h, CURLINFO_TOTAL_TIME);
+
+    $timingOn = $timingOn || preg_match('/^X-Rpc-Calls:/mi', $headers) === 1;
+    preg_match('/^X-Rpc-Detail:\s*(.*)$/mi', $headers, $detail);
+    $rpcDetail = trim($detail[1] ?? '');
+    $didSend = str_contains($rpcDetail, 'sendTransaction');
+    $sent[$i] = $didSend;
+
+    say(sprintf('   request %d: HTTP %d in %.2fs   %s', $i, $status, $total,
+        $didSend ? 'SENT A TRANSACTION' : 'no sendTransaction'));
+    if ($rpcDetail !== '') {
+        say('              '.$rpcDetail);
+    }
+    if ($status !== 200) {
+        say('              a non-200 means the charge never happened; read /tmp is not needed, the body is:');
+        say('              '.trim(strip_tags(substr($body, $headerSize, 300))));
+    }
+
+    curl_multi_remove_handle($multi, $h);
+    // no curl_close; see the probe above
+}
+curl_multi_close($multi);
+
+// ---- 6. what happened ----------------------------------------------------
+
+step('6. the witnesses');
+
+// The chain is the witness §7.2 actually asks for — the program's own count,
+// not the site's — and it is the slower of the two. `purchases` says how many
+// charges the server believes it made; `used` is what the program recorded.
+// Poll until the second agrees with the first rather than sleeping a guess,
+// because "the confirmation has not landed yet" and "the charge never
+// happened" look identical for a few seconds and mean opposite things.
+$purchasesAfter = $purchases();
+$purchaseDelta = $purchasesAfter - $purchasesBefore;
+
+$signature = null;
+$row = $pdo->prepare('SELECT signature, confirmed FROM grants WHERE wallet = ? AND article = ?');
+$row->execute([$wallet, $slug]);
+if ($found = $row->fetch()) {
+    $signature = $found['signature'] === null ? null : (string) $found['signature'];
+}
+
+$reader = new PayerReader($config, $rpc);
+$deadline = time() + 20;
+$views = 0;
+$usedDelta = 0;
+$after = null;
+
+while (true) {
+    try {
+        $after = $reader->read($wallet, $state);
+    } catch (RpcException $e) {
+        bad('the endpoint stopped answering before the after-reading: '.$e->getMessage());
+    }
+
+    $usedDelta = ($after->contract?->used ?? 0) - $contract->used;
+    $views = $pagePrice > 0 ? intdiv($usedDelta, $pagePrice) : 0;
+
+    if ($views >= max(1, $purchaseDelta) || time() >= $deadline) {
+        break;
+    }
+
+    say('   waiting for the chain to catch up…');
+    sleep(3);
+}
+
+$charges = count(array_filter($sent));
+
+say('   purchases moved by   '.$purchaseDelta.'   (what the server believes it did)');
+say('   used moved by        '.$amount($usedDelta)."   ({$views} view(s)) — the program's own count");
+say('   grant signature      '.($signature ?? '(none)'));
+$timingOn
+    ? say("   sendTransaction on   {$charges} of 2 responses")
+    : say('   X-Rpc headers        off — NEWSPRINT_RPC_TIMING=1 bin/run-dev turns them on');
+
+// ---- 7. the verdict ------------------------------------------------------
+
+step('7. verdict');
+
+/*
+ * The chain and the purchase counter decide this. The headers do not.
+ *
+ * `X-Rpc-Detail` is emitted only when `NEWSPRINT_RPC_TIMING=1` is set in the
+ * server's environment, and that is off by default. An earlier version of this
+ * script read "no sendTransaction on either response" as evidence and called a
+ * clean pass INCONCLUSIVE — with the charge on chain and the signature in the
+ * grant printed directly above the verdict. A witness that is absent by
+ * default is corroboration, never the finding.
+ */
+if ($purchaseDelta === 0 && $views === 0) {
+    say("\033[33m  INCONCLUSIVE\033[0m — nothing metered.");
+    say('  Neither request reached the chain: both were served from a grant, or');
+    say('  both failed before it. Nothing was charged. Check the HTTP statuses');
+    say('  above and run it again.');
+    exit(2);
+}
+
+if ($views === 0) {
+    say("\033[33m  INCONCLUSIVE\033[0m — the server charged but the chain has not said so yet.");
+    say("  purchases moved by {$purchaseDelta}, and `used` has not moved after 20s.");
+    say('  Either a confirmation is still in flight or the transaction failed.');
+    say('  Look up '.($signature ?? 'the signature').' and re-read '.$base.'/meter.');
+    exit(2);
+}
+
+if ($views === 1 && $purchaseDelta === 1 && $charges < 2) {
+    say("\033[32m  PASS\033[0m — two simultaneous readers, one meter_and_settle.");
+    say('  One request metered; the other was served from the grant it recorded.');
+    say('');
+    say('  For the results table in claude/manual-two-readers-one-meter.md:');
+    say(sprintf(
+        '  | %s | %s | %s | %s → %s | pass |',
+        date('Y-m-d'),
+        $slug,
+        $signature ?? '(none)',
+        Units::fromBaseUnits($contract->used, $decimals),
+        Units::fromBaseUnits($after?->contract?->used ?? 0, $decimals),
+    ));
+    exit(0);
+}
+
+say("\033[31m  FAIL\033[0m — the reader was charged more than once.");
+say("  `used` moved by {$views} view(s); purchases moved by {$purchaseDelta}"
+    .($timingOn ? "; {$charges} of 2 responses sent a transaction." : '.'));
+say('');
+say('  Note what the store does *not* show you: `grants` is keyed on');
+say('  (wallet, article) and recordGrant upserts, so it holds one row naming');
+say('  only the second signature. The first charge exists on chain and nowhere');
+say("  else — walk the contract's transactions to find it.");
+exit(1);

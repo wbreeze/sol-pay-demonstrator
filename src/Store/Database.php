@@ -35,13 +35,28 @@ final class Database
             PDO::ATTR_EMULATE_PREPARES => false,
         ]);
 
+        // **First, before anything that can contend.** A second request for the
+        // same payer waits here rather than failing; this is the visible half
+        // of §7.2's queue, and it is longer than §7.3's confirmation window on
+        // purpose.
+        //
+        // The order is the point. SQLite's default busy timeout is zero, so
+        // every statement issued before this line fails outright the moment
+        // another connection holds the write lock — including the pragma
+        // below, which takes a lock of its own to set the journal mode. This
+        // stood the other way round until 2026-09-12, when
+        // `Metering\OneMeterAtATimeTest` caught it: four requests opening the
+        // database together, and one dying with `database is locked` at
+        // `PRAGMA journal_mode` before it ever reached the queue it was
+        // supposed to join. Not a test artefact — the metering path holds its
+        // transaction across an RPC round trip, so the window in which a
+        // second request opens the database against a held write lock is
+        // exactly §7.3's confirmation window wide, and the reader sees a 500
+        // instead of their article.
+        $pdo->exec('PRAGMA busy_timeout = 30000');
         // Readers do not block the writer, which matters because the metering
         // path holds a write transaction across an RPC round trip (§7.3).
         $pdo->exec('PRAGMA journal_mode = WAL');
-        // A second request for the same payer waits here rather than failing;
-        // this is the visible half of §7.2's queue. Longer than §7.3's
-        // confirmation window on purpose.
-        $pdo->exec('PRAGMA busy_timeout = 30000');
         $pdo->exec('PRAGMA foreign_keys = ON');
         $pdo->exec('PRAGMA synchronous = NORMAL');
 
