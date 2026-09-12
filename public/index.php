@@ -124,6 +124,12 @@ $rpcFactory = static function () use ($config): Rpc {
  * arrow function would have captured `false` for the life of the request —
  * `FrontControllerTest` guards that shape, and it is no accident that the
  * front controller is where it kept happening.
+ *
+ * **The `static` is a per-request cache only because this file is executed
+ * again for every request**, which is true of `php -S` and of PHP-FPM and is
+ * not true of a worker SAPI that boots once. This object holds a *reader's*
+ * accounts, so there the staleness would be one reader shown another's
+ * contract. SPEC §12.1's second caveat says it properly.
  */
 $reads = static function (Request $request) use ($config, $rpcFactory, $wallet): RequestRead {
     static $reads = null;

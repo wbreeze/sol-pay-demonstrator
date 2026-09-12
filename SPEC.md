@@ -1460,6 +1460,21 @@ demonstration. Choosing it would be optimising the thing that is not the point.
   two-browsers-one-wallet test would pass there and fail under PHP-FPM. If PHP
   wins, that test runs with `PHP_CLI_SERVER_WORKERS` set, or against a real
   SAPI, or it is testing nothing.
+- **And one that would bite the code rather than the test suite** (written
+  2026-09-11, after `RequestRead` landed). The front controller memoises in a
+  `static` inside a closure — `$store` for the SQLite handle, `$reads` for this
+  request's one chain read — and that is a *per-request* cache only because the
+  file is executed again for every request. Under `php -S` and under PHP-FPM it
+  is. Under a worker SAPI that boots once and then serves many requests —
+  Swoole, RoadRunner, FrankenPHP in worker mode — it is not, and the two are
+  not equally bad: a shared store handle is wrong about a lifetime, while
+  `RequestRead` holds **a reader's** accounts, so the same staleness becomes a
+  reader being shown another reader's contract. §12.0 asks for one runtime and
+  `php -S`, so nothing here needs a worker SAPI; it is written down because a
+  port to one is exactly the change that looks like configuration. The rule
+  underneath, which §12.5's multi-instance caveat is the storage half of: a
+  value memoised against nothing is safe only while "the process" and "the
+  request" are the same thing.
 
 #### How it was decided
 
