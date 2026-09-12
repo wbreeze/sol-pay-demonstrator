@@ -482,6 +482,36 @@ instead of as a wall. It is also what makes claim 2 in §2 observable — the
 visitor sees the same page twice, once truncated and once whole, and the only
 thing that changed was a contract account.
 
+**Amended 2026-09-12: the index has an order, and the pieces link each other.**
+
+The index runs **newest first** by the piece's `created` date (§10.1), with the
+slug breaking a tie and an undated piece last. Until then it was the order
+`glob()` returned, which is alphabetical by *source filename*: deterministic,
+and a fact about filenames rather than about the writing. A reader saw one
+piece above another for a reason invisible from the page, and renaming a file
+reordered the front page silently. `revised` is deliberately not the key —
+correcting a typo in an old piece should not carry it back to the top.
+
+Each article links **the piece before and after it, chronologically**, and
+*previous* is the older one. That runs against the index's own direction on
+purpose: it is how the two words read to a reader, who is not holding the
+list's ordering in their head.
+
+**Where those links sit is the part worth recording**, and the paragraph above
+is why. They come *after whatever the page is for* — under the body for a
+reader who has paid, under the meter for one who has not — which puts them in
+the same place on the screen in both states. Navigation that moved between the
+two renderings would be a second thing that changed, and the claim this section
+makes is that only a contract account did. The waiting shell carries none: it
+exists for the second or two a POST is in flight, and links nobody has time to
+read are furniture.
+
+The article's own head is the title, then the lede, then the reading time and
+price — the order the index has always used, and the article did not. The lede
+is set in a different family from the body, as a newspaper deck is: a reader
+meets it twice, and the second time it is something to get past rather than to
+read.
+
 ### 6.2 A metered request, end to end
 
 ![a metered page request](metered-request.png)
@@ -928,11 +958,13 @@ is its job.
 
 Four things to show. **Amended 2026-09-08:** the panel renders them as up to
 seven headings, because the first two split by provenance rather than by topic
-and the split is the point — *Deployment*, *Site account, decoded*,
-*Treasury*, *Configuration drift* (only when config and chain disagree),
-*You, on chain*, *Preflight, for this request*, *The last transaction* (only on
-a request that made one). The four below are what the panel owes a reader; the
-headings are how it pays.
+and the split is the point. **Amended 2026-09-12:** there are up to eight, and
+they run in the order below rather than the order they were once written in —
+*What the short names mean*, *Preflight, for this request*, *The last
+transaction* (only on a request that made one), *You, on chain*, *Treasury*,
+*Configuration drift* (only when config and chain disagree), *Site account,
+decoded*, *Deployment*. Both amendments are argued further down. The four
+things below are what the panel owes a reader; the headings are how it pays.
 
 **Addresses, under short aliases.** Base58 is unreadable and, worse,
 *comparable-looking*: two addresses sharing four leading characters read as the
@@ -953,6 +985,8 @@ An alias is a role prefix plus a nonsense syllable:
 | `PATA` | the reader's token account |
 | `TKPG` | the token program |
 | `AUTH` | the site authority (added 2026-09-08) |
+| `ACCT` | an address this panel cannot place (added 2026-09-12) |
+| `DATA` | an instruction's Borsh bytes (added 2026-09-12) |
 
 giving `PIDalpha`, `SPDApep`, `CPDAcat`, `PAYRfig`.
 
@@ -975,7 +1009,74 @@ an alias. And the aliases are this site's invention, not a standard, which the
 panel says once, so nobody leaves thinking `CPDAcat` means anything to a wallet
 or an explorer.
 
-Each address also carries a link to the devnet explorer and, beside it, the
+**Amended 2026-09-12: the short names are defined once, at the top, and used
+alone below.** What this section already asked of the *site* — the alias alone,
+the base58 one click away — now holds inside the panel as well. Its first
+section is **What the short names mean**: one row per long value, the short
+name, the value with the explorer link on it and the copy button after it, and
+its provenance on the line beneath. Every other section writes the short name,
+linked to its row.
+
+Counted before the change, on a charging view with a payer and a landed
+transaction: **21 address occurrences of 9 distinct addresses** — the
+authority, the treasury and the contract three times each — and eight of them
+in one account list, where the reader's question is *which accounts, in what
+order* and a 44-character string answers it badly.
+
+**The argument that decided it is not tidiness.** The provenance this section
+asks for beside every address was silently missing from the section with the
+most addresses in it: a row's third cell held either the check it mirrors or
+the derivation, the mirrored check won, and so every account row in *The last
+transaction* carried `signer, writable` and no derivation at all, with nothing
+on the page saying so. Gathered into a table, each address states its
+provenance exactly once, always. The seeds, which are written with the aliases,
+now name rows in the same table rather than rows in whatever other section
+happened to show that address.
+
+The two new prefixes are the cost of the rule. An address with no role in the
+map used to be rendered bare, deliberately — a name invented on the spot would
+have looked exactly like the stable kind. With the base58 gathered into a
+table, a bare value is the one thing on the page that cannot be looked up, so
+it gets a name; `ACCT` claims nothing about the account, where a role prefix on
+an unplaced address would be a guess wearing a fact's clothes. `DATA` is the
+same argument for the one value in the panel that is not an address and is just
+as unreadable.
+
+The copy rule above survives and is stronger for it: **one copy button per
+address rather than one per sighting**, beside the address itself, which is the
+surest way to keep a copy button from ever yielding an alias. The one short
+name not linked to its row is the one in the decoded event line, which arrives
+from its endpoint as text and is written with `textContent` — linking a word of
+it would mean composing markup on the server and trusting it in the browser.
+
+**Amended 2026-09-12: the sections run from what changes to what does not.**
+After the table: *Preflight*, *The last transaction*, *You, on chain*,
+*Treasury*, *Site account, decoded*, *Deployment*. The panel had been built
+outwards from the deployment, which is the order the system is *assembled* in
+and the reverse of the order anybody reads it in — a reader opening the panel
+twice is looking for what moved, and the deployment never moves. Two things sit
+outside that gradient. The table stays on top, because it is the key to
+everything below whether or not it changed. And *Configuration drift* is not a
+readout: it appears only when the chain and `config/site.php` disagree, so by
+rate of change it belongs at the bottom, and it is placed instead with the
+account it disagrees with, where a reader can check the claim.
+
+**Amended 2026-09-12: one width, the article's.** This panel was the article's
+34rem collapsed and 52rem open, with a rule that widened on opening so the join
+did not read as a mistake. Two sections were the whole reason for the extra
+18rem — the table of short names and the preflight — and both were wide because
+a *sentence* sat in a third column. Put the sentence under the value it
+describes and they need 505px and 310px against the article's 544px; every
+other section already needed less than 300. At the same viewport the panel grew
+**seventeen pixels** in height, because the wide layout had been spending that
+space on those claims wrapping inside a third of the width. So there is one
+measure again and the rule that covered the join is deleted rather than
+maintained. `signer, writable` stays beside its value: two words read as a
+suffix, where a sentence reads as a caption. Which form a section uses is
+declared by the section, not measured from the text, so a reworded claim cannot
+change the panel's anatomy.
+
+Each address also carries a link to the devnet explorer and, in the table, the
 derivation that produced it.
 
 **Amended 2026-09-09: that is not one uniform thing, and the wording here used
@@ -1088,6 +1189,51 @@ script to remain reachable.
 Roughly twelve pieces, markdown in the repository, each with front matter for
 title, slug, lede and reading time. No external CMS, no fetch at request time,
 no images beyond what the text needs.
+
+**Amended 2026-09-12: the front matter carries dates, and the title is written
+once.**
+
+`created` is required of every piece — the day it was written. `revised` is
+optional and belongs only on a change a reader would notice. A **draft shows
+neither**: it has not been published, and a creation date standing where a
+publication date belongs answers a question nobody asked. The badge is what a
+draft has to say. The dates stay in the front matter meanwhile, so publishing a
+piece is one word rather than an archaeology exercise.
+
+The **title lives in the front matter and is rendered by the template**. It
+used to live in both places — the front matter *and* an `#` heading at the top
+of the body — so every paid article displayed it twice, and the two were one
+edit away from disagreeing. `bin/build-content` now refuses a body that carries
+an `<h1>`, which makes the disagreement unrepresentable rather than merely
+absent. The privacy page takes its heading from the same source, which it did
+not before.
+
+**The dates are the writer's claim; git is only the witness.** Deriving them
+from `git log` was considered and declined, and the argument is one commit old:
+on 2026-09-12 a single commit removed that repeated heading from all nine
+content files, and a derived `revised` would have told every reader that every
+article on the site changed that morning. Only a person can tell a revision
+from a touch-up. Two smaller costs pointed the same way — `actions/checkout`
+clones one commit deep, and a reader who downloads the ZIP has no `.git` at all
+while §12.0 promises them `composer install && bin/build-content`.
+
+This is the same distinction `bin/build-content` already draws about
+`reading_time`: *a number the writer sets is a promise to the reader; a number
+counted from the text is an estimate, and they should not be confused.* A date
+is a promise of exactly that kind.
+
+So `bin/content-dates` is the witness rather than the author. It reads the
+commit that added each file and the last one that changed it, and fails when a
+**published** piece has moved past the date it claims. Drafts are exempt from
+that check and from nothing else — a creation date later than the file's first
+commit is wrong whatever the status, because it is a claim about a file rather
+than to a reader. A commit that changes nothing a reader sees says so, in a
+`Reader-Visible: no` trailer, and drops out of the reckoning; a sentence
+written on purpose was chosen over a warning, because a warning that fires on
+typo fixes is one everybody learns to scroll past. No history is not a failure
+— a ZIP or a shallow clone exits 0 with a note — unless `--require-git` is
+passed, which CI does, with `fetch-depth: 0`. A green result that checked
+nothing is the failure that pair exists to prevent.
 
 Twelve rather than eight so that a reader who works through the publication
 reaches the ten-view settle by reading, and meets §7.4's control as an
