@@ -1316,11 +1316,18 @@ $app->get('/inspector/event/{signature}', function (Request $request, Response $
             // gets both unit forms, for the reason §9 gives about the panel
             // generally: a six-decimal scaling error is invisible in one form.
             //
-            // The contract carries its alias, because every other address in
-            // the panel does and an event line that showed a bare base58 would
-            // be the one place a reader had to match 44 characters by eye.
+            // The short name and nothing else, since 2026-09-12: the panel's
+            // first table defines it, beside the base58 and the copy button,
+            // and this line repeating all 44 characters was the last place a
+            // reader had to read an address instead of recognising one.
             // `Alias::for` is a hash of the address, so this needs no state.
-            $field === 'contract' => Alias::for(Alias::CONTRACT, (string) $value).'  '.$value,
+            //
+            // It is the one short name on the page that is not a link to its
+            // row. The sentence arrives from this endpoint as text and the
+            // panel writes it with `textContent`; making one word of it a link
+            // would mean composing markup here and trusting it there, for a
+            // row that already sits a few lines under the table.
+            $field === 'contract' => Alias::for(Alias::CONTRACT, (string) $value),
             $field === 'page_views' => (string) $value,
             default => sprintf('%s %s (%d)', Units::fromBaseUnits((int) $value, $decimals), $symbol, (int) $value),
         };

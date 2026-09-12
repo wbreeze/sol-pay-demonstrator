@@ -728,6 +728,97 @@ final class TemplateRenderTest extends TestCase
         );
     }
 
+    /**
+     * The panel writes a base58 once, and every short name can be looked up.
+     *
+     * Two claims, and they are each other's other half. A section that still
+     * wrote an address out in full would make the table decoration; a short
+     * name whose row is missing would make the panel a glossary with pages
+     * torn out. The second is the one that can break silently — a link to
+     * `#name-…` that matches no `id` scrolls nowhere and looks like a click
+     * that missed.
+     */
+    public function testThePanelDefinesEveryShortNameItUses(): void
+    {
+        $address = '7X4hDbm44UQYnmXshwSdCyAMhh3bJe2X5u1z2m1dSCVt';
+        $value = ['value' => $address, 'alias' => 'SPDAmux', 'explorer' => true, 'note' => '["site", AUTHfen] + bump'];
+
+        $html = $this->renderStrictly('inspector-sections', ['sections' => [
+            ['heading' => 'What the short names mean', 'names' => [$value]],
+            ['heading' => 'Site account, decoded', 'rows' => [['site account', $value], ['bump', '254']]],
+            ['heading' => 'The last transaction', 'rows' => [['ix 1 · account 1', $value, 'writable']]],
+        ]]);
+
+        // Three sightings of one address, and one place it is written out.
+        self::assertSame(3, substr_count($html, 'SPDAmux'), 'the table and the two rows');
+        // Three times in one cell — the explorer href, the text of the link
+        // and the copy button's attribute — and nowhere else on the page.
+        self::assertSame(3, substr_count($html, $address));
+        self::assertSame(1, preg_match_all('/data-copy-address/', $html), 'one copy button per address, not one per sighting');
+
+        preg_match_all('/href="#([^"]+)"/', $html, $hrefs);
+        preg_match_all('/id="([^"]+)"/', $html, $ids);
+        self::assertNotEmpty($hrefs[1], 'the short names are links');
+        self::assertSame([], array_diff($hrefs[1], $ids[1]), 'every short name links to a row that is there');
+    }
+
+    /**
+     * The deferred event spans, like the signature above it.
+     *
+     * It is a sentence and there is no check beside it to mirror, so stopping
+     * at the value column wrapped it inside a third of the width.
+     */
+    /**
+     * A claim that is a sentence goes under the value; a flag stays beside it.
+     *
+     * This is what lets the panel be the article's width: the two sections
+     * carrying sentences were the only ones needing 52rem, and they needed it
+     * for a third column. The section says which form it wants rather than the
+     * template measuring the text, so a reworded claim cannot silently change
+     * the panel's anatomy — and both forms are rendered here, because a rule
+     * with two branches and one test is a rule with one branch.
+     */
+    public function testASentenceGoesUnderTheValueAndAFlagStaysBesideIt(): void
+    {
+        $under = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'Preflight, for this request',
+            'claims' => 'under',
+            'rows' => [['can_meter', 'yes', 'require!(new_used <= limit, LimitReached)']],
+        ]]]);
+
+        self::assertStringContainsString('<span class="beneath">require!(new_used &lt;= limit, LimitReached)</span>', $under);
+        self::assertStringNotContainsString('class="mirrors"', $under, 'no third column, which is the point');
+        self::assertStringNotContainsString('class="mirrored"', $under);
+
+        $beside = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'The last transaction',
+            'rows' => [['ix 1 · account 1', 'CPDAash', 'writable']],
+        ]]]);
+
+        self::assertStringContainsString('<td class="mirrors">writable</td>', $beside);
+        self::assertStringNotContainsString('beneath', $beside);
+    }
+
+    public function testTheDeferredEventRowSpansTheMirroredColumn(): void
+    {
+        $html = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'The last transaction',
+            'rows' => [['page views', '1', 'this call settles']],
+            'event' => 'FKb3eeBw',
+        ]]]);
+
+        self::assertMatchesRegularExpression('/<td data-event-slot colspan="2"/', $html);
+
+        // And does not span where there is no second column to span into.
+        $plain = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'The last transaction',
+            'rows' => [['page views', '1']],
+            'event' => 'FKb3eeBw',
+        ]]]);
+
+        self::assertMatchesRegularExpression('/<td data-event-slot>/', $plain);
+    }
+
     public function testAContractDecodesIntoThePanelWithoutGuessingAtItsShape(): void
     {
         // Not a render: a reminder that `Contract` is a value object with

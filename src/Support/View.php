@@ -40,6 +40,19 @@ final class View
     }
 
     /**
+     * The id of a value's row in the inspector's table of short names.
+     *
+     * Derived from the value rather than from the short name, because the
+     * short name is one byte of a hash and two unplaced accounts could in
+     * principle draw the same one — a duplicate `id` is a link that goes to
+     * the wrong row, which is worse than a duplicate label beside it.
+     */
+    public static function nameAnchor(string $value): string
+    {
+        return 'name-'.substr(hash('sha256', $value), 0, 10);
+    }
+
+    /**
      * `2026-09-07` as `7 September 2026`.
      *
      * `DateTimeImmutable::format` and not `IntlDateFormatter` or anything else

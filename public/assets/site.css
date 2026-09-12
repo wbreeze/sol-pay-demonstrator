@@ -16,6 +16,7 @@
     --measure: 34rem;
     /* The body is serif; the deck is not. Both stacks are the reader's own
        (§10.3) — the contrast costs nothing because no font is fetched. */
+    --serif: Iowan Old Style, Palatino, Georgia, Cambria, "Times New Roman", serif;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
@@ -37,7 +38,7 @@ body {
     padding: 0 1.25rem 4rem;
     background: var(--paper);
     color: var(--ink);
-    font: 1.0625rem/1.65 Iowan Old Style, Palatino, Georgia, Cambria, "Times New Roman", serif;
+    font: 1.0625rem/1.65 var(--serif);
 }
 
 main, .masthead, .footer { max-width: var(--measure); margin: 0 auto; }
@@ -110,35 +111,50 @@ pre code { background: none; padding: 0; font-size: inherit; }
 
 /* inspector (§9) */
 
-/* The panel is wider than the article, and only the panel.
-   `--measure` is a reading measure — it exists so a line of prose is a
-   comfortable length — and it is the wrong measure for a table whose rows are
-   a label, a 44-character base58 address and a claim about the program. Those
-   three want room; the paragraphs around them still want 34rem.
-   So the width is applied per element rather than to the panel:
-     · the summary and the rule above it keep `--measure`, so a *collapsed*
-       inspector is a hairline that lines up with the article and the page's
-       silhouette does not change;
-     · the body opens to `--inspector-measure`;
-     · the prose inside it — the preamble, every section note — comes back to
-       `--measure`, because widening a paragraph to fit a table is how a panel
-       ends up with 90-character lines nobody reads.
-   Both are capped by the body's own padding, so nothing here can overflow a
-   narrow window. */
-.inspector { --inspector-measure: 52rem; margin-top: 3rem; font-size: 0.85rem; }
+/* One width, the article's (2026-09-12).
+
+   The panel used to be 34rem collapsed and 52rem open, on the argument that a
+   row of label, 44-character address and claim about the program wants more
+   room than a line of prose — with a rule that widened on opening so the join
+   did not look like a mistake, and the paragraphs inside pulled back to
+   `--measure` so they did not become 90-character lines.
+
+   Two sections were the whole reason for the extra 18rem: the table of short
+   names and the preflight, both wide because a *sentence* sat in a third
+   column. Put the sentence under the value it describes and they need 505px
+   and 310px against the article's 544px; every other section already needed
+   less than 300. Measured at the same viewport, the panel grew seventeen
+   pixels in height — the wide layout had been spending that space on those
+   claims wrapping inside a third of the width anyway.
+
+   So there is one measure again, and the rule that covered the join is gone
+   rather than maintained. The prose caps below are now the same width as the
+   body and do nothing; they stay because they say what they mean. */
+.inspector { margin-top: 3rem; font-size: 0.85rem; }
 .inspector > summary { max-width: var(--measure); margin: 0 auto; border-top: 1px solid var(--rule); cursor: pointer; padding: 0.85rem 0; letter-spacing: 0.06em; text-transform: uppercase; font-size: 0.75rem; color: var(--ink-soft); }
-/* Open, the rule widens with the content. Closed, it lines up with the
-   article. Without this the panel reads as a narrow rule under-hanging a wide
-   block — the two halves of one thing at two different widths, which looks
-   like a mistake rather than a disclosure. */
-.inspector[open] > summary { max-width: var(--inspector-measure); }
-.inspector-body { max-width: var(--inspector-measure); margin: 0 auto; }
+.inspector-body { max-width: var(--measure); margin: 0 auto; }
 .inspector-preamble { max-width: var(--measure); color: var(--ink-soft); margin: 0 0 1rem; }
 .inspector section { margin-bottom: 1.5rem; }
 .inspector h3 { font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 0.4rem; }
 .inspector table { width: 100%; border-collapse: collapse; }
-.inspector th { text-align: left; font-weight: 400; color: var(--ink-soft); padding: 0.25rem 1rem 0.25rem 0; white-space: nowrap; vertical-align: top; }
-.inspector td { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; word-break: break-all; padding: 0.25rem 0; }
+/* `width: 1%` with `nowrap` is the narrowest a column can be asked to be: the
+   label takes what its text needs and the value column takes the rest. Without
+   it an auto-layout table shares the slack between the two columns in
+   proportion to their content, which put 165px of nothing between `metering
+   program` and `PIDash` — a gap that grew as the values got shorter, so
+   replacing addresses with short names made it worse. */
+.inspector th { text-align: left; font-weight: 400; color: var(--ink-soft); width: 1%; padding: 0.25rem 1rem 0.25rem 0; white-space: nowrap; vertical-align: top; }
+/* `overflow-wrap: anywhere` and not `word-break: break-all`, which is what
+   this was until 2026-09-12. The difference is when each one breaks: break-all
+   breaks wherever the line ends, so `0.01 DEMO  (10000 base units)` lost its
+   last two characters to a line of their own on a narrow window rather than
+   wrapping at the space in front of them; anywhere breaks only a word that
+   cannot fit at all — a base58 address, or an 88-character signature, both of
+   which still have to break or the table takes the page sideways on a phone.
+   It also counts in a table's minimum width, which `break-word` does not, and
+   a table is the one place that matters. */
+.inspector td { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; overflow-wrap: anywhere; padding: 0.25rem 0; vertical-align: top; }
+.inspector table.names td.value { padding-right: 1.5rem; }
 /* An address row (§9). The alias is a badge rather than two spaces of padding:
    it is this site's invention and it should not look like part of the address
    it sits beside. The two controls take the panel's existing UI voice — small,
@@ -148,6 +164,18 @@ pre code { background: none; padding: 0; font-size: inherit; }
    They are quiet at rest and full strength on hover or keyboard focus; not
    hidden, because a control nobody can see on a touch screen is not a control. */
 .inspector .alias { background: var(--paper-sunk); color: var(--ink-soft); padding: 0 0.3em; border-radius: 2px; margin-right: 0.5em; }
+/* A short name where a value would be, linked to the row that defines it.
+   It wears the same badge as the alias in the table, because it is the same
+   token and a reader has to recognise it as one; what marks it as a link is
+   the accent on hover and focus, not a colour at rest — a panel with a dozen
+   of them would otherwise be a page of blue. */
+.inspector .shorthand { background: var(--paper-sunk); color: var(--ink-soft); padding: 0 0.3em; border-radius: 2px; text-decoration: none; white-space: nowrap; }
+.inspector .shorthand:hover,
+.inspector .shorthand:focus-visible { color: var(--accent); }
+/* The row a short name links to, for the moment after the jump. Anything
+   louder would still be on the screen ten minutes later. */
+.inspector table.names tr:target .alias { color: var(--accent); }
+
 .inspector .copy { margin-left: 0.7em; font-family: inherit; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); opacity: 0.65; word-break: normal; white-space: nowrap; background: none; border: 0; padding: 0; cursor: pointer; }
 .inspector .copy:hover,
 .inspector .copy:focus-visible { opacity: 1; color: var(--accent); }
@@ -175,6 +203,21 @@ pre code { background: none; padding: 0; font-size: inherit; }
    is a hint, and the browser gives the column back when the text is short. */
 .inspector table.mirrored { table-layout: auto; }
 .inspector td.mirrors { font-family: inherit; font-size: 0.78rem; color: var(--ink-soft); text-align: left; white-space: normal; word-break: normal; overflow-wrap: anywhere; padding-left: 1.25rem; width: 38%; }
+/* The same claim as `.mirrors`, under the value instead of beside it: the
+   serif face and the soft ink are what make it read as a caption to the value
+   rather than as more data, which matters more here than it did in a column of
+   its own — it is inside the value's cell now, and nothing but the type tells
+   a reader the two are different kinds of thing. */
+.inspector .beneath { display: block; margin-top: 0.1rem; font-family: var(--serif); font-size: 0.78rem; line-height: 1.45; color: var(--ink-soft); overflow-wrap: normal; }
+.inspector table.names th, .inspector table.names td { padding-bottom: 0.55rem; }
+
+/* The flags column, pulled in tight. `signer, writable` is the last third
+   column in the panel, and with the value beside it now seven characters of
+   short name the auto-layout slack all landed between the two — the same gap
+   `th { width: 1% }` closed in front of the label. Same fix, one column
+   along: the value takes what it needs and the flags follow it. */
+.inspector table.mirrored td:not(.mirrors) { width: 1%; }
+
 .inspector .section-link { margin: 0.5rem 0 0; font-size: 0.8rem; }
 .inspector .note { max-width: var(--measure); color: var(--ink-soft); font-size: 0.8rem; margin: 0.5rem 0 0; }
 
