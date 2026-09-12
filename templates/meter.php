@@ -214,16 +214,45 @@ $contract = $meter['contract'];
         · settled <?= View::e((string) $contract['paid']) ?>
         · <?= View::e((string) $meter['views_remaining']) ?> views left.
     </p>
-    <p class="pending">
-        The body is not delivered yet: <code>meter_and_settle</code> is the
-        next rung. Your contract is on chain and the arithmetic above is read
-        from it.
+    <?php /* This branch is the panel's fallback and nothing reaches it through
+             the article (2026-09-11). `meter.php` renders only where the body
+             is withheld, and a reader with a contract who is not blocked gets
+             the body — so `metered` here needs a null `MeterResult`, which the
+             POST always sets and the GET only reaches with a grant. It used to
+             be the prefetch's branch, and it carried both the exit below and a
+             sentence saying the body was "not delivered yet: meter_and_settle
+             is the next rung", two rungs after that stopped being true. The
+             sentence is gone; the branch stays so that no stage can render
+             blank, which `TemplateRenderTest` checks. */ ?>
+<?php endif ?>
+
+<?php /* §6 asks manage_meter to carry a permanent link from the meter widget,
+         not only at the limit — a reader who has authorized a site to draw
+         from their wallet should not have to exhaust something to find the
+         exit. It was written into the branch above, which nobody reaches, so
+         for months it was permanent in the way a locked fire door is.
+
+         Here it renders on **every stage that stores a wallet**, including the
+         three a stuck reader is actually in — `unfunded`, `set-meter`, and
+         `unreadable`, where the chain cannot be read and §10.4's promise is
+         the one thing that still works, because `POST /signout` never asks the
+         chain anything.
+
+         Two wordings, because one would be false somewhere: §6's case is about
+         a reader who *authorized*, and a reader without a contract has not.
+         Their claim is §10.4's instead — the site is holding an address — so
+         that is what the line says to them. Stages that offer their own
+         `/meter` link in context keep it; this is the one that is always in
+         the same place. */ ?>
+<?php if ($meter['wallet'] !== null): ?>
+    <p class="fine">
+<?php if ($contract !== null): ?>
+        <a href="/meter">The meter</a> — what you have spent, and the way out.
+<?php else: ?>
+        <a href="/meter">The meter</a> — what this site is holding for you, and
+        how to have it forgotten.
+<?php endif ?>
     </p>
-    <?php /* §6: manage_meter carries a permanent link from the meter widget,
-             not only at the limit. A reader who has authorized a site to draw
-             from their wallet should not have to exhaust something to find the
-             exit. */ ?>
-    <p class="fine"><a href="/meter">The meter</a> — what you have spent, and the way out.</p>
 <?php endif ?>
 
     <p class="pending" data-meter-status hidden></p>

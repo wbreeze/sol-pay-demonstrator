@@ -29,13 +29,20 @@
  * scanning for an action actually looks, and closing keeps the last word
  * because its four disclosures have to run uninterrupted into its button.
  *
- * @var bool $has_contract
+ * **Null means "the chain could not be read"** (2026-09-11), which is a third
+ * thing to say rather than a missing one. This control is the only operation
+ * §10.4 promises unconditionally and the only one with no chain dependency —
+ * `POST /signout` drops a cookie and a row — so a reader whose endpoint is
+ * down must still be offered it. What cannot be said then is whether they have
+ * a contract, and the false branch says they have none.
+ *
+ * @var bool|null $has_contract  null when the chain could not be read
  * @var array<string, string>|null $contract
  */
 use Newsprint\Support\View;
 ?>
             <h2>Forget this wallet</h2>
-<?php if ($has_contract): ?>
+<?php if ($has_contract === true): ?>
             <p>
                 Forgetting drops the cookie and the row that tie this browser to
                 your address. That is the whole of it: the browser end of the
@@ -54,12 +61,25 @@ use Newsprint\Support\View;
                 To end the authorization rather than the session, that is
                 <strong>Close and revoke</strong>, below.
             </p>
-<?php else: ?>
+<?php elseif ($has_contract === false): ?>
             <p>
                 Forgetting drops the cookie and the row that tie this browser to
                 your address, which is all there is to drop. You have no
                 contract, so there is nothing on chain to change and nothing to
                 close.
+            </p>
+<?php else: ?>
+            <p>
+                Forgetting drops the cookie and the row that tie this browser to
+                your address. It asks the chain nothing, which is why it is
+                offered even now, with the chain unreadable — this is the one
+                thing here that never depended on it.
+            </p>
+            <p>
+                Whatever you have on chain is untouched either way. If a
+                contract exists, its limit, its residue and this site's
+                delegation all stay exactly as they are, and connecting the
+                same wallet later finds them again.
             </p>
 <?php endif ?>
             <form class="forget" method="post" action="/signout">

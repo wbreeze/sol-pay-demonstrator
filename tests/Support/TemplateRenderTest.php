@@ -280,9 +280,17 @@ final class TemplateRenderTest extends TestCase
      * Three things are held here. The form posts to the article's own URL, so
      * the no-JS path is the same request as the scripted one. The script's
      * reset is safe for the advance's reason: the server never renders the
-     * button disabled or the sentence shown. And the shell carries **nothing a
+     * button disabled or a line shown. And the shell carries **nothing a
      * charge can change** — no body, no meter, no price — which is what lets
      * the POST's answer replace it rather than reload it.
+     *
+     * **The waiting copy is not asserted, on purpose.** It is Gato's to
+     * reword, and a test quoting it turns every edit of a sentence into an
+     * edit of a test — which is what happened the first time it was reworded.
+     * What matters to the script is the shape: which line is visible when the
+     * region appears, which is held back and for how long, which is empty
+     * until a failure. So the shape is read out of the markup, and the words
+     * only have to be there.
      */
     public function testTheShellPostsToItsOwnUrlAndClaimsNothingTheChainWouldAnswer(): void
     {
@@ -290,23 +298,87 @@ final class TemplateRenderTest extends TestCase
         $html = $this->renderStrictly('article-pending', ['piece' => $piece, 'longWaitMs' => 7000]);
 
         self::assertMatchesRegularExpression('/<form method="post" action="\/a\/two%20orderings"[^>]*\bdata-read-on\b/', $html);
-        // One live region, hidden: without JavaScript nothing is under way.
-        self::assertMatchesRegularExpression('/<div[^>]*\bdata-read-on-status\b[^>]*\brole="status"[^>]*\bhidden\b[^>]*>\s*<p class="pending" data-read-on-now>Straight support/u', $html);
-        // The second line is hidden until the wait is longer than usual, and
-        // carries the threshold the script reads.
-        self::assertMatchesRegularExpression('/<p[^>]*\bdata-read-on-later\b[^>]*\bdata-after-ms="7000"[^>]*\bhidden\b[^>]*>\s*Thank you/u', $html);
-        // The failure line is empty and hidden: only the script knows a reason.
-        self::assertMatchesRegularExpression('/<p[^>]*\bdata-read-on-failed\b[^>]*\bhidden\b[^>]*><\/p>/', $html);
-        self::assertMatchesRegularExpression('/<p[^>]*\bdata-read-on-manual\b[^>]*>\s*<button type="submit"/', $html);
         self::assertDoesNotMatchRegularExpression('/<button[^>]*\bdisabled\b/', $html);
         self::assertStringContainsString('<script type="module" src="/assets/read-on.js"></script>', $html);
         self::assertFileExists(dirname(__DIR__, 2).'/public/assets/read-on.js');
         self::assertStringContainsString('The lede.', $html);
 
+        $shell = $this->elements($html);
+
+        // One live region, hidden: without JavaScript nothing is under way.
+        $status = $shell['data-read-on-status'] ?? null;
+        self::assertNotNull($status, 'the live region');
+        self::assertSame('status', $status->getAttribute('role'));
+        self::assertTrue($status->hasAttribute('hidden'), 'the region is hidden until the POST goes out');
+
+        // The first line shows with the region; the second is held back until
+        // the wait is longer than usual, and carries the threshold the script
+        // reads; the third is empty, because only the script knows a reason.
+        $now = $shell['data-read-on-now'] ?? null;
+        self::assertNotNull($now, 'the first line');
+        self::assertFalse($now->hasAttribute('hidden'));
+        self::assertNotSame('', trim($now->textContent), 'the first line says something');
+
+        $later = $shell['data-read-on-later'] ?? null;
+        self::assertNotNull($later, 'the second line');
+        self::assertTrue($later->hasAttribute('hidden'));
+        self::assertSame('7000', $later->getAttribute('data-after-ms'));
+        self::assertNotSame('', trim($later->textContent), 'the second line says something');
+
+        $failed = $shell['data-read-on-failed'] ?? null;
+        self::assertNotNull($failed, 'the failure line');
+        self::assertTrue($failed->hasAttribute('hidden'));
+        self::assertSame('', trim($failed->textContent));
+
+        // All three are inside the one live region, so the second line and
+        // the failure are announced when they appear rather than arriving
+        // silently.
+        self::assertSame($status, $now->parentNode);
+        self::assertSame($status, $later->parentNode);
+        self::assertSame($status, $failed->parentNode);
+
         // Nothing a charge can change.
         self::assertStringNotContainsString('class="body"', $html);
         self::assertStringNotContainsString('data-meter', $html);
         self::assertStringNotContainsString('DEMO', $html);
+    }
+
+    /** Rendered text with its wrapping collapsed, so a line break cannot hide a sentence. */
+    private static function said(string $html): string
+    {
+        return (string) preg_replace('/\s+/u', ' ', $html);
+    }
+
+    /**
+     * The elements carrying a `data-read-on…` attribute, by that attribute.
+     *
+     * `ext-dom` rather than a regular expression: the questions above are
+     * about which element is hidden and what is inside which, and an attribute
+     * moved to the next line should not be able to fail a test about that.
+     * PHPUnit requires the extension, so anywhere this suite runs, it is there.
+     *
+     * @return array<string, \DOMElement>
+     */
+    private function elements(string $html): array
+    {
+        $document = new \DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        $document->loadHTML('<meta charset="utf-8">'.$html, LIBXML_NOERROR);
+        libxml_use_internal_errors($previous);
+
+        $found = [];
+        foreach ((new \DOMXPath($document))->query('//*') as $element) {
+            if (!$element instanceof \DOMElement) {
+                continue;
+            }
+            foreach ($element->attributes as $attribute) {
+                if (str_starts_with($attribute->nodeName, 'data-read-on')) {
+                    $found[$attribute->nodeName] = $element;
+                }
+            }
+        }
+
+        return $found;
     }
 
     /**
@@ -345,6 +417,107 @@ final class TemplateRenderTest extends TestCase
         // The threshold travels as `data-after-ms`, read as `dataset.afterMs`.
         self::assertStringContainsString('data-after-ms=', $shell);
         self::assertStringContainsString('dataset.afterMs', $script);
+    }
+
+    /**
+     * **The way out is on every screen that holds a wallet** (§6, §10.4).
+     *
+     * It used to sit in the panel's last branch, which the trace of 2026-09-09
+     * found is reachable only on a prefetch — so the "permanent" link had
+     * almost certainly never been on a screen, while `unfunded`, `set-meter`
+     * and `unreadable` stored an address and offered nothing. Those three are
+     * the states a stuck reader is in.
+     *
+     * The condition is the stored wallet and not the contract, because §10.4's
+     * promise is about the address rather than the authorization — and the
+     * wording follows the contract, because §6's "you have spent" is false for
+     * a reader who has not spent anything.
+     */
+    public function testEveryStageHoldingAWalletOffersTheWayOut(): void
+    {
+        $shortfall = Shortfall::diagnose(new TokenAccount(self::MINT, self::PAYER, 1000, self::CONTRACT, 500000), 210000);
+        $site = ['symbol' => 'DEMO', 'page_price_demo' => '0.01'];
+
+        $render = function (string $stage, bool $contract) use ($shortfall, $site): string {
+            $meter = $this->panel([
+                'stage' => $stage,
+                'blocked' => (string) Blocked::limitReached(1000),
+                'result' => MeterResult::failed('refused', null, $shortfall, null),
+            ]);
+            if (!$contract) {
+                $meter['contract'] = null;
+                $meter['views_remaining'] = null;
+            }
+
+            return self::said($this->renderStrictly('meter', ['meter' => $meter, 'site' => $site]));
+        };
+
+        // A reader who has authorized: §6's case, and the wording it asks for.
+        foreach (['failed', 'limit', 'metered'] as $stage) {
+            $html = $render($stage, true);
+            self::assertStringContainsString('href="/meter"', $html, $stage);
+            self::assertStringContainsString('what you have spent', $html, $stage);
+        }
+
+        // A reader who has not, and whose address the site is holding anyway:
+        // §10.4's case. These three are where a stuck reader is.
+        foreach (['unreadable', 'unfunded', 'set-meter'] as $stage) {
+            $html = $render($stage, false);
+            self::assertStringContainsString('href="/meter"', $html, $stage);
+            self::assertStringContainsString('holding for you', $html, $stage);
+            self::assertStringNotContainsString('what you have spent', $html, $stage);
+        }
+
+        // Nobody's wallet, nothing to offer: a visitor who has not identified
+        // is not invited to be forgotten.
+        $anonymous = self::said($this->renderStrictly('meter', [
+            'meter' => $this->panel(['stage' => 'anonymous', 'wallet' => null, 'contract' => null, 'views_remaining' => null]),
+            'site' => $site,
+        ]));
+        self::assertStringNotContainsString('href="/meter"', $anonymous);
+    }
+
+    /**
+     * `/meter` offers the forget path in every state that holds a wallet,
+     * including `unreadable` — the state where it is the only thing the site
+     * can still do, because `POST /signout` asks the chain nothing.
+     */
+    public function testTheMeterPageOffersForgettingEvenWhenTheChainIsUnreadable(): void
+    {
+        $common = [
+            'site' => ['symbol' => 'DEMO', 'page_price_demo' => '0.01'],
+            'wallet' => self::PAYER,
+            'chain' => 'solana:devnet',
+            'program' => $this->program()->id,
+            'token_program' => $this->program()->tokenProgram,
+            'symbol' => 'DEMO',
+            'contract' => ['address' => self::CONTRACT, 'limit' => '0.5', 'used' => '0.42', 'paid' => '0.28', 'unpaid' => '0.14'],
+            'views_remaining' => 8,
+            'blocked' => (string) Blocked::limitReached(1000),
+            'limit_floor' => '0.5',
+            'balance' => '0.05',
+            'live_grants' => 2,
+            'token_account' => self::ATA,
+            'delegate' => self::CONTRACT,
+            'approved' => '0.5',
+        ];
+
+        foreach (['unreadable', 'no-contract', 'open'] as $stage) {
+            $html = self::said($this->renderStrictly('manage-meter', ['stage' => $stage] + $common));
+            self::assertStringContainsString('action="/signout"', $html, $stage);
+        }
+
+        // What it does not do is guess. With the chain unreadable it says
+        // neither that a contract exists nor that none does. Compared with the
+        // whitespace collapsed, because these sentences are wrapped in the
+        // template and a line break is not a difference in what was said.
+        $unreadable = self::said($this->renderStrictly('manage-meter', ['stage' => 'unreadable'] + $common));
+        self::assertStringNotContainsString('You have no contract', $unreadable);
+        self::assertStringNotContainsString('Your contract stays open', $unreadable);
+
+        // And a visitor with no wallet is not offered it.
+        $anonymous = self::said($this->renderStrictly('manage-meter', ['stage' => 'anonymous'] + $common));
+        self::assertStringNotContainsString('action="/signout"', $anonymous);
     }
 
     public function testManageMeterRendersInEveryState(): void

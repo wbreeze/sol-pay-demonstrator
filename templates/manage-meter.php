@@ -38,6 +38,20 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
     <p class="lede">The chain could not be read just now, so this page cannot say where you stand.</p>
     <p class="pending">Nothing was charged and nothing was changed. Try again in a moment.</p>
 
+    <?php /* And the way out is still here (2026-09-11). This page used to end
+             at the line above, which withdrew §10.4's one unconditional
+             promise on exactly the day it mattered: the endpoint is slow, the
+             article's panel cannot say where the reader stands either, and the
+             site is still holding their address. `POST /signout` never touches
+             the chain, so there is nothing about a bad endpoint that makes it
+             unavailable — only this template, which did not render it.
+
+             `has_contract` is null rather than false: what the chain would
+             have said is exactly what is unknown here. */ ?>
+    <section class="gate meter">
+<?= $view->render('forget-wallet', ['has_contract' => null, 'contract' => null]) ?>
+    </section>
+
 <?php elseif ($stage === 'no-contract'): ?>
     <p class="lede">
         This wallet has no contract with this site, so there is nothing to
@@ -49,7 +63,7 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
     <p><a href="/">Open an article</a> and the meter will offer you a limit.</p>
 
     <section class="gate meter">
-<?= $view->render('forget-wallet', ['has_contract' => false]) ?>
+<?= $view->render('forget-wallet', ['has_contract' => false, 'contract' => null]) ?>
     </section>
 
 <?php else: ?>
