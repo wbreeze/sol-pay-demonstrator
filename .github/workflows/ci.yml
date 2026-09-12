@@ -67,7 +67,13 @@ jobs:
         run: bin/build-content --quiet
 
       - name: phpunit
-        run: composer test
+        # The 8.5 leg names its deprecations; the others stay quiet. This leg
+        # is at the top of the matrix precisely because it sees what the others
+        # cannot, and a summary line reading `Deprecations: 1` does not say
+        # which one — which is the whole of the information worth having.
+        # `failOnDeprecation` is deliberately not set: a deprecation on the
+        # version above the supported top is a thing to read, not a red build.
+        run: composer test ${{ matrix.php == '8.5' && '-- --display-deprecations' || '' }}
 
   analyse:
     # The third incident of one shape is the one that buys a tool. `php -l`
