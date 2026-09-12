@@ -1,6 +1,7 @@
 ---
 title: Three wallets, one name, and a refusal that wasn't true
 slug: three-phantoms
+created: 2026-09-07
 metered: true
 status: draft
 lede: >

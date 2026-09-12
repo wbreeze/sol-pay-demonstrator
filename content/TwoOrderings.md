@@ -1,6 +1,7 @@
 ---
 title: Two orderings that disagree on purpose
 slug: two-orderings
+created: 2026-09-07
 metered: true
 status: draft
 lede: >

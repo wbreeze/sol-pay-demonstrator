@@ -1,6 +1,7 @@
 ---
 title: The request nobody made
 slug: request-nobody-made
+created: 2026-09-11
 metered: true
 status: draft
 lede: >

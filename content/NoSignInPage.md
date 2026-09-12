@@ -1,6 +1,7 @@
 ---
 title: The screen the diagram never had
 slug: no-sign-in-page
+created: 2026-09-07
 metered: true
 status: draft
 lede: >

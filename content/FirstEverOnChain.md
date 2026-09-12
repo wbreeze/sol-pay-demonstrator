@@ -1,6 +1,7 @@
 ---
 title: The transaction that proved less than it looked like
 slug: first-transaction
+created: 2026-09-05
 metered: true
 status: draft
 lede: >

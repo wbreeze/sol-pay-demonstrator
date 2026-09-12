@@ -1,6 +1,8 @@
 ---
 title: Privacy
 slug: privacy
+created: 2026-09-04
+revised: 2026-09-07
 metered: false
 status: draft
 ---
