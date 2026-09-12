@@ -33,6 +33,7 @@ smallest honest form.
 composer install
 bin/devnet-smoke          # airdrop, then one real transaction (see below)
 php -S localhost:8000 -t public
+bin/check                 # what CI checks, before CI sees it
 ```
 
 PHP 8.2 or later, with `sodium`, `pdo_sqlite` and `curl` — all bundled.
@@ -83,13 +84,24 @@ reason for the level. `templates/` is excluded on purpose: `View` renders with
 The analyser is a pinned PHAR fetched from its release rather than a
 `require-dev` entry — `composer.lock` stays a record of what the *site* needs,
 and a floating analyser is one that can turn CI red on a morning when nobody
-committed anything. To run the same version by hand:
+committed anything.
+
+`bin/check` runs all of that here, in CI's order: validate, install, build the
+content, PHPUnit, the pinned analyser, the vendored assets, and the boot check.
 
 ```
-curl -fsSL -o /tmp/phpstan.phar \
-  https://github.com/phpstan/phpstan/releases/download/2.2.7/phpstan.phar
-php /tmp/phpstan.phar analyse
+bin/check                        all of it
+bin/check tests --filter Shell   phpunit only; the rest of the line goes to it
+bin/check analyse                the analyser only
+bin/check boot                   the boot check only
 ```
+
+It reads the analyser's version out of `ci.yml` and the floor out of
+`composer.json` rather than repeating either, so a pin bumped in one place
+cannot quietly disagree with a copy in the script, and it caches the PHAR under
+`var/`. What it cannot reproduce is the matrix — this machine has one PHP — so
+it runs the analyser a second time with `phpVersion` set to the floor, which is
+a language-level check and not a run. Green here means push and read the run.
 
 `.github/workflows/canary.yml`, daily, for the failures that arrive without a
 commit. Two of them, and they mean different things:

@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+#
+# What CI checks, before CI sees it.
+#
+#   bin/check                 everything, in CI's order
+#   bin/check tests           PHPUnit only; extra arguments go to it
+#   bin/check tests --filter Shell
+#   bin/check analyse         PHPStan only, at both PHP versions
+#   bin/check boot            the floor job's boot check only
+#
+# `.github/workflows/ci.yml` is the authority on what a green run means, and
+# this script is a convenience, not a second opinion. So it takes what it can
+# **from the files CI reads** rather than repeating them here: the analyser's
+# pinned version comes out of the workflow, and the PHP floor comes out of
+# `composer.json`. A pin bumped in one place cannot silently disagree with the
+# other, which is the failure a local runner usually introduces.
+#
+# **What it cannot check** is the part CI exists for. The matrix runs the suite
+# on 8.2, 8.3, 8.4 and 8.5, and this machine has one PHP. The floor job
+# installs `--no-dev` and boots what a reader installs, which would mean
+# destroying `vendor/` here. The nearest honest approximation is PHPStan a
+# second time with `phpVersion` set to the floor — a language-level check, not
+# a run — and that is what the `analyse` step does. Green here means push and
+# read the run; it does not mean the run will be green.
+#
+# Nothing in here touches the network except fetching the analyser once, which
+# is cached in `var/`, and the boot check's own request to the site — which
+# reaches devnet, and is allowed to fail: `/` renders from config when the
+# chain cannot be read, and a 200 is the whole claim.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+WORKFLOW='.github/workflows/ci.yml'
+step=0
+
+say() {
+    step=$((step + 1))
+    printf '\n\033[1m%d. %s\033[0m\n' "$step" "$1"
+}
+
+fail() {
+    printf '\n\033[31mbin/check: %s\033[0m\n' "$1" >&2
+    exit 1
+}
+
+# The pinned analyser version, from the workflow that pins it.
+phpstan_version() {
+    local version
+    version="$(sed -n "s/.*PHPSTAN_VERSION: *'\([0-9.]*\)'.*/\1/p" "$WORKFLOW" | head -1)"
+    [ -n "$version" ] || fail "no PHPSTAN_VERSION in ${WORKFLOW} — has the workflow changed?"
+    echo "$version"
+}
+
+# The floor, from the constraint a reader installs against: "php": "^8.2" is
+# 80200 in PHPStan's spelling.
+floor_php_version() {
+    local floor
+    floor="$(sed -n 's/.*"php": *"[^0-9]*\([0-9]*\)\.\([0-9]*\)".*/\1 \2/p' composer.json | head -1)"
+    [ -n "$floor" ] || fail 'no php constraint in composer.json'
+    # shellcheck disable=SC2086
+    printf '%d%02d00\n' $floor
+}
+
+phpstan_phar() {
+    local version phar
+    version="$(phpstan_version)"
+    phar="var/phpstan-${version}.phar"
+    if [ ! -f "$phar" ]; then
+        mkdir -p var
+        printf 'fetching phpstan %s…\n' "$version" >&2
+        curl -fsSL -o "$phar" \
+            "https://github.com/phpstan/phpstan/releases/download/${version}/phpstan.phar" \
+            || fail "could not fetch phpstan ${version}"
+    fi
+    echo "$phar"
+}
+
+run_install() {
+    say 'composer.json and composer.lock agree'
+    composer validate --strict
+
+    say 'install'
+    composer install --no-interaction --quiet
+
+    say 'content renders'
+    bin/build-content --quiet
+}
+
+run_tests() {
+    say 'phpunit'
+    vendor/bin/phpunit "$@"
+}
+
+run_analyse() {
+    local phar floor neon
+    phar="$(phpstan_phar)"
+
+    say "phpstan $(phpstan_version)"
+    php -d memory_limit=1G "$phar" analyse --no-progress
+
+    floor="$(floor_php_version)"
+    neon="var/phpstan-floor.neon"
+    # Written into `var/`, not /tmp: its `includes:` is relative, and a config
+    # outside the tree cannot resolve `../phpstan.neon`.
+    printf 'includes:\n  - ../phpstan.neon\nparameters:\n  phpVersion: %s\n' "$floor" > "$neon"
+
+    say "phpstan again at the floor (phpVersion ${floor})"
+    php -d memory_limit=1G "$phar" analyse -c "$neon" --no-progress
+}
+
+run_assets() {
+    say 'the committed browser dependencies are present'
+    local missing=0
+    for f in \
+        public/vendor/README.md \
+        public/vendor/sol-pay-client/sol_pay_client.js \
+        public/vendor/sol-pay-client/sol_pay_client_bg.wasm \
+        public/vendor/solana-kit/kit.min.js
+    do
+        if [ -s "$f" ]; then
+            printf '  %8s  %s\n' "$(wc -c < "$f" | tr -d ' ')" "$f"
+        else
+            printf '  missing or empty: %s — re-run bin/vendor-assets\n' "$f"
+            missing=1
+        fi
+    done
+    [ "$missing" -eq 0 ] || fail 'a vendored browser dependency is missing'
+}
+
+run_boot() {
+    say 'the site boots'
+    local port="${PORT:-8123}" code='' server
+    php -S "127.0.0.1:${port}" -t public > var/boot.log 2>&1 &
+    server=$!
+    # On the way out however this ends, including `set -e` on a failed check.
+    trap 'kill $server 2>/dev/null || true' EXIT
+
+    for _ in $(seq 1 40); do
+        code="$(curl -s -o var/boot.html -w '%{http_code}' "http://127.0.0.1:${port}/" || true)"
+        [ -n "$code" ] && [ "$code" != "000" ] && break
+        sleep 0.25
+    done
+
+    printf '  GET / -> %s\n' "${code:-no answer}"
+    if [ "$code" != "200" ]; then
+        echo '--- server log ---'; cat var/boot.log
+        echo '--- body ---'; head -c 2000 var/boot.html
+        fail 'the site did not answer with a page — 503 means var/content/ is empty, anything else is a fatal in the front controller'
+    fi
+    grep -qi '<title' var/boot.html || fail 'the answer was 200 but not a page'
+
+    kill "$server" 2>/dev/null || true
+    trap - EXIT
+}
+
+case "${1:-all}" in
+    all)
+        run_install
+        run_tests
+        run_analyse
+        run_assets
+        run_boot
+        printf '\n\033[32mall green here. CI still has the versions this machine does not.\033[0m\n'
+        ;;
+    tests)
+        shift
+        run_tests "$@"
+        ;;
+    analyse)
+        run_analyse
+        ;;
+    boot)
+        run_boot
+        ;;
+    *)
+        fail "unknown: $1 — try: all, tests, analyse, boot"
+        ;;
+esac
