@@ -14,6 +14,14 @@ use Newsprint\Support\View;
              written once, in the front matter. `bin/build-content` refuses a
              body that supplies a second one. */ ?>
     <h1><?= View::e($piece->title) ?></h1>
+<?php /* §10.2's page is a list of what this site holds, and a list like that
+         is a weaker claim undated. No price and no reading time: this one is
+         not for sale and nobody reads it for pleasure. */ ?>
+<?php if ($piece->shownDate() !== null): ?>
+    <p class="meta">
+<?= $view->render('piece-dates', ['piece' => $piece, 'lead' => '']) ?>
+    </p>
+<?php endif ?>
     <div class="body">
 <?= $body ?>
     </div>

@@ -44,6 +44,7 @@ use Newsprint\Support\View;
 
     <p class="meta">
         <?= View::e((string) $piece->readingTime) ?> min
+<?= $view->render('piece-dates', ['piece' => $piece, 'lead' => '· ']) ?>
 <?php if ($piece->isDraft()): ?>
         · <span class="draft">draft</span>
 <?php endif ?>

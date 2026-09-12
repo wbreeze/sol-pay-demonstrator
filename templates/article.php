@@ -23,6 +23,7 @@ use Newsprint\Support\View;
     <p class="meta">
         <?= View::e((string) $piece->readingTime) ?> min
         · <?= View::e((string) $site['page_price_demo']) ?> <?= View::e((string) $site['symbol']) ?>
+<?= $view->render('piece-dates', ['piece' => $piece, 'lead' => '· ']) ?>
 <?php if ($piece->isDraft()): ?>
         · <span class="draft">draft</span>
 <?php endif ?>
