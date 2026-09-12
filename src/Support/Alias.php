@@ -45,6 +45,25 @@ final class Alias
     public const AUTHORITY = 'AUTH';
 
     /**
+     * An address this panel cannot place, and the instruction data.
+     *
+     * Until 2026-09-12 an address with no role in the map was rendered bare,
+     * and the reason was good: a name invented on the spot for an unknown role
+     * would have looked exactly like the stable kind. **A distinct prefix is
+     * what makes it safe to invent one** — `ACCT` says only "an account this
+     * panel cannot name", which is the truth, and it is still derived from the
+     * address, so it is as stable as any other. What made it necessary is the
+     * table: with the addresses gathered at the top and short names used
+     * everywhere else, an address with no short name has nowhere to be
+     * defined.
+     *
+     * `DATA` is the same argument for the one value in the panel that is not
+     * an address and is just as unreadable — an instruction's Borsh bytes.
+     */
+    public const UNNAMED = 'ACCT';
+    public const DATA = 'DATA';
+
+    /**
      * Sixty-four syllables, so one byte of the hash chooses one with no
      * modulo bias. Pronounceable, short, and meaningless — a syllable that
      * looked like a word would invite someone to read significance into it.

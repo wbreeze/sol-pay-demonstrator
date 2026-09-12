@@ -1,6 +1,7 @@
 ---
 title: The permission nobody shows you
 slug: the-delegate
+created: 2026-09-07
 metered: true
 status: draft
 lede: >
@@ -10,8 +11,6 @@ lede: >
   repairing anything in the code.
 reading_time: 4
 ---
-
-# The permission nobody shows you
 
 This project keeps a list of things the demo has to prove. Six of the seven are
 about money moving. The sixth is about it stopping:

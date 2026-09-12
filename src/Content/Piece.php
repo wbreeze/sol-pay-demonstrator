@@ -24,6 +24,16 @@ final class Piece
         public readonly int $readingTime,
         public readonly bool $metered,
         public readonly string $status,
+        /**
+         * When the piece was written, and when it last changed in a way a
+         * reader would notice — `YYYY-MM-DD`, or null for a manifest built
+         * before either existed. Both are the writer's claim rather than
+         * anything counted: see `bin/build-content` on `reading_time` for why
+         * that distinction is kept, and `bin/content-dates` for what stops the
+         * claim going stale.
+         */
+        public readonly ?string $created,
+        public readonly ?string $revised,
         private readonly string $bodyPath,
     ) {
     }
@@ -38,6 +48,8 @@ final class Piece
             (int) $row['reading_time'],
             (bool) $row['metered'],
             (string) ($row['status'] ?? 'published'),
+            isset($row['created']) ? (string) $row['created'] : null,
+            isset($row['revised']) ? (string) $row['revised'] : null,
             $contentDir.'/'.$row['slug'].'.html',
         );
     }
@@ -60,5 +72,29 @@ final class Piece
     public function isDraft(): bool
     {
         return $this->status === 'draft';
+    }
+
+    /**
+     * The date to show, and nothing for a draft.
+     *
+     * A draft is not published, so it has no publication date to give — and a
+     * creation date shown where a reader expects one would answer a question
+     * nobody asked with a date about the workshop. The draft badge says what
+     * there is to say. The dates stay in the front matter meanwhile, so
+     * publishing a piece is one word rather than an archaeology exercise.
+     */
+    public function shownDate(): ?string
+    {
+        return $this->isDraft() ? null : $this->created;
+    }
+
+    /** The revision, when there is one and it is not the day it was written. */
+    public function shownRevision(): ?string
+    {
+        if ($this->isDraft() || $this->revised === null) {
+            return null;
+        }
+
+        return $this->revised === $this->created ? null : $this->revised;
     }
 }

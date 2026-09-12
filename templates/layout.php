@@ -29,7 +29,7 @@ use Newsprint\Support\View;
 <body>
 <header class="masthead">
     <a class="wordmark" href="/">Newsprint</a>
-    <p class="tagline">A cent an article, and no record of which ones.</p>
+    <p class="tagline">Reading without leaving profiles of your principles.</p>
 <?php /* §5 asks that a site which can charge you say who it thinks you are.
          It said so here, in the masthead, and that was the wrong place: a
          name and a sign-out link across every page is the furniture of an

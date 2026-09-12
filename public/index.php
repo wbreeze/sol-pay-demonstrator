@@ -412,7 +412,7 @@ $app->get('/', function (Request $request, Response $response) use ($view, $shel
  * has nobody to charge, and the POST, which charges — so the one state cannot
  * be rendered two ways depending on which request happened to produce it.
  */
-$articleContent = static function (Request $request, Piece $piece, ?MeterResult $result, ?array $advanced = null) use ($view, $siteVars, $meterVars, $reads): string {
+$articleContent = static function (Request $request, Library $library, Piece $piece, ?MeterResult $result, ?array $advanced = null) use ($view, $siteVars, $meterVars, $reads): string {
     $body = $result !== null && $result->serves() ? $piece->body() : null;
 
     // What the seven-view control just did. The advance's own answer carries
@@ -430,11 +430,19 @@ $articleContent = static function (Request $request, Piece $piece, ?MeterResult 
         'settled' => ($query['settled'] ?? '') === '1',
     ];
 
+    // The library is already open — the route found this piece in it — so the
+    // two links under the body cost a lookup rather than a second read of the
+    // manifest. They are rendered whether or not the body is there; the
+    // template shows them only where there is an afterwards to offer.
+    [$previous, $next] = $library->neighbours($piece->slug);
+
     return $view->render('article', [
         'piece' => $piece,
         'body' => $body,
         'site' => $siteVars($reads($request)),
         'meter' => $meterVars($request, $result) + ['advanced' => $advanced],
+        'previous' => $previous,
+        'next' => $next,
     ]);
 };
 
@@ -469,7 +477,8 @@ $app->get('/a/{slug}', function (Request $request, Response $response, array $ar
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
 
-    $piece = Library::load($contentDir)->find((string) $args['slug']);
+    $library = Library::load($contentDir);
+    $piece = $library->find((string) $args['slug']);
     if (!$piece instanceof Piece || !$piece->metered) {
         return $page($response, $shell('Not found', $view->render('not-found')), 404);
     }
@@ -490,7 +499,7 @@ $app->get('/a/{slug}', function (Request $request, Response $response, array $ar
         $result = MeterResult::granted();
     }
 
-    return $page($response, $shell($piece->title, $articleContent($request, $piece, $result), $reads($request), $result));
+    return $page($response, $shell($piece->title, $articleContent($request, $library, $piece, $result), $reads($request), $result));
 });
 
 /**
@@ -522,7 +531,8 @@ $articlePost = $app->post('/a/{slug}', function (Request $request, Response $res
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
 
-    $piece = Library::load($contentDir)->find((string) $args['slug']);
+    $library = Library::load($contentDir);
+    $piece = $library->find((string) $args['slug']);
     if (!$piece instanceof Piece || !$piece->metered) {
         return $page($response, $shell('Not found', $view->render('not-found')), 404);
     }
@@ -533,7 +543,7 @@ $articlePost = $app->post('/a/{slug}', function (Request $request, Response $res
     // which is §7.1's defect.
     $metering = $request->getAttribute(MeterMiddleware::ATTRIBUTE);
     $result = $metering instanceof MeterResult ? $metering : null;
-    $content = $articleContent($request, $piece, $result);
+    $content = $articleContent($request, $library, $piece, $result);
 
     if ($request->getHeaderLine('X-Fragment') === '1') {
         $response->getBody()->write($content.$view->render('inspector', [
@@ -632,9 +642,10 @@ $app->post('/meter/advance', function (Request $request, Response $response) use
         }
     }
 
-    $piece = Library::isBuilt($contentDir) ? Library::load($contentDir)->find($slug) : null;
+    $library = Library::isBuilt($contentDir) ? Library::load($contentDir) : null;
+    $piece = $library?->find($slug);
 
-    if ($request->getHeaderLine('X-Fragment') === '1' && $piece instanceof Piece) {
+    if ($request->getHeaderLine('X-Fragment') === '1' && $library instanceof Library && $piece instanceof Piece) {
         // **This is what pays off §9's last debt.** The redirect carries the
         // signature and cannot carry the instructions — they are built in this
         // request and §10.4 leaves nowhere to keep them — so the panel that
@@ -658,7 +669,7 @@ $app->post('/meter/advance', function (Request $request, Response $response) use
         ];
 
         $response->getBody()->write(
-            $articleContent($request, $piece, $granted ? MeterResult::granted() : null, $advanced)
+            $articleContent($request, $library, $piece, $granted ? MeterResult::granted() : null, $advanced)
             .$view->render('inspector', ['sections' => $inspector($reads($request), $result)])
         );
 
@@ -1305,11 +1316,18 @@ $app->get('/inspector/event/{signature}', function (Request $request, Response $
             // gets both unit forms, for the reason §9 gives about the panel
             // generally: a six-decimal scaling error is invisible in one form.
             //
-            // The contract carries its alias, because every other address in
-            // the panel does and an event line that showed a bare base58 would
-            // be the one place a reader had to match 44 characters by eye.
+            // The short name and nothing else, since 2026-09-12: the panel's
+            // first table defines it, beside the base58 and the copy button,
+            // and this line repeating all 44 characters was the last place a
+            // reader had to read an address instead of recognising one.
             // `Alias::for` is a hash of the address, so this needs no state.
-            $field === 'contract' => Alias::for(Alias::CONTRACT, (string) $value).'  '.$value,
+            //
+            // It is the one short name on the page that is not a link to its
+            // row. The sentence arrives from this endpoint as text and the
+            // panel writes it with `textContent`; making one word of it a link
+            // would mean composing markup here and trusting it there, for a
+            // row that already sits a few lines under the table.
+            $field === 'contract' => Alias::for(Alias::CONTRACT, (string) $value),
             $field === 'page_views' => (string) $value,
             default => sprintf('%s %s (%d)', Units::fromBaseUnits((int) $value, $decimals), $symbol, (int) $value),
         };

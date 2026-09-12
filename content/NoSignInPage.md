@@ -1,6 +1,7 @@
 ---
 title: The screen the diagram never had
 slug: no-sign-in-page
+created: 2026-09-07
 metered: true
 status: draft
 lede: >
@@ -9,8 +10,6 @@ lede: >
   design had been drawn against — and the diagram was right.
 reading_time: 5
 ---
-
-# The screen the diagram never had
 
 The objection was one sentence: *a sign-in page feels like identifying for
 tracking.*

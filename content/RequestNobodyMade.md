@@ -1,6 +1,7 @@
 ---
 title: The request nobody made
 slug: request-nobody-made
+created: 2026-09-11
 metered: true
 status: draft
 lede: >
@@ -10,8 +11,6 @@ lede: >
   to announce themselves.
 reading_time: 4
 ---
-
-# The request nobody made
 
 Until yesterday, this site charged you a cent on a `GET`.
 

@@ -1,11 +1,11 @@
 ---
 title: Privacy
 slug: privacy
+created: 2026-09-04
+revised: 2026-09-07
 metered: false
 status: draft
 ---
-
-# Privacy
 
 This is the page where a privacy policy would go. It isn't one. A privacy
 policy describes what a site collects about you in language broad enough to

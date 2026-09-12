@@ -186,7 +186,7 @@ final class TemplateRenderTest extends TestCase
 
     public function testTheStripRendersEveryAdvanceOutcomeAndEveryWarning(): void
     {
-        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '');
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
 
         $outcomes = [
             MeterOutcome::Metered,
@@ -225,7 +225,7 @@ final class TemplateRenderTest extends TestCase
      */
     public function testTheAdvanceFormCarriesItsProgressSentenceHidden(): void
     {
-        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '');
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
         $meter = $this->panel(['result' => MeterResult::granted()]);
         $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
 
@@ -294,7 +294,7 @@ final class TemplateRenderTest extends TestCase
      */
     public function testTheShellPostsToItsOwnUrlAndClaimsNothingTheChainWouldAnswer(): void
     {
-        $piece = new \Newsprint\Content\Piece('two orderings', 'T', 'The lede.', 4, true, 'draft', '');
+        $piece = new \Newsprint\Content\Piece('two orderings', 'T', 'The lede.', 4, true, 'draft', '2026-09-07', null, '');
         $html = $this->renderStrictly('article-pending', ['piece' => $piece, 'longWaitMs' => 7000]);
 
         self::assertMatchesRegularExpression('/<form method="post" action="\/a\/two%20orderings"[^>]*\bdata-read-on\b/', $html);
@@ -569,6 +569,254 @@ final class TemplateRenderTest extends TestCase
         // A closed contract: no delegate left, which is claim 6's own case.
         $html = $this->renderStrictly('manage-meter', ['stage' => 'open', 'delegate' => null, 'approved' => '0'] + $common);
         self::assertStringContainsString('none', $html);
+    }
+
+    /**
+     * A piece is titled once.
+     *
+     * The title was rendered twice on every paid article: once by
+     * `article.php` from the front matter, and again by the body, which
+     * repeated it as a `#` heading. Two renderings of one string can disagree,
+     * and this one was one edit away from doing so. The heading is now the
+     * template's on both the article and the page, and the markdown carries
+     * none — which is only safe if `page.php` actually renders it, since the
+     * privacy page has no other source of a heading.
+     */
+    public function testEachPieceIsTitledOnce(): void
+    {
+        $piece = new \Newsprint\Content\Piece('privacy', 'Privacy', '', 4, false, 'draft', '2026-09-04', null, '');
+
+        $page = $this->renderStrictly('page', ['piece' => $piece, 'body' => '<p>Body.</p>']);
+        self::assertSame(1, preg_match_all('/<h1[\s>]/i', $page), 'the page carries exactly one heading');
+        self::assertStringContainsString('<h1>Privacy</h1>', $page);
+
+        $article = $this->renderStrictly('article', [
+            'piece' => new \Newsprint\Content\Piece('two-orderings', 'Two orderings', 'L', 4, true, 'draft', '2026-09-07', null, ''),
+            'body' => '<p>Body.</p>',
+            'site' => ['symbol' => 'DEMO', 'page_price_demo' => '0.01'],
+            'meter' => $this->panel(['result' => MeterResult::granted()]),
+            'previous' => null,
+            'next' => null,
+        ]);
+        self::assertSame(1, preg_match_all('/<h1[\s>]/i', $article), 'the article carries exactly one heading');
+        self::assertStringContainsString('<h1>Two orderings</h1>', $article);
+    }
+
+    /**
+     * And the other half of it: no published source supplies a second one.
+     *
+     * `bin/build-content` refuses a body with an `<h1>`, but the build is not
+     * what runs here, so the sources are scanned directly — and the scanner is
+     * run over a broken sample in the same test, because a scanner that
+     * matches nothing passes this kind of check silently.
+     */
+    public function testNoPublishedPieceCarriesItsOwnHeading(): void
+    {
+        $heading = '/^# /m';
+
+        $checked = 0;
+        foreach (glob(dirname(__DIR__, 2).'/content/*.md') ?: [] as $path) {
+            $source = (string) file_get_contents($path);
+
+            // Files without front matter are working notes, not pieces:
+            // `bin/build-content` skips them and they keep their headings.
+            if (!str_starts_with($source, "---\n")) {
+                continue;
+            }
+
+            ++$checked;
+            self::assertDoesNotMatchRegularExpression($heading, $source, basename($path).' carries its own heading');
+        }
+
+        self::assertGreaterThan(0, $checked, 'pieces were found to check');
+        self::assertMatchesRegularExpression($heading, "---\ntitle: T\n---\n\n# T\n\nBody.\n", 'the scanner finds a heading when there is one');
+    }
+
+    /**
+     * The dates, and the state that has none.
+     *
+     * A draft carries its dates in front matter and shows neither, because it
+     * has not been published and a creation date standing where a publication
+     * date belongs is an answer to a question nobody asked. The badge is what
+     * a draft has to say. Both halves are asserted here: the published piece
+     * must show the dates, and the draft must not, since a rule that only ever
+     * renders one of its two branches has been read, not tested.
+     */
+    public function testDatesShowOnAPublishedPieceAndOnNoDraft(): void
+    {
+        $published = new \Newsprint\Content\Piece('privacy', 'Privacy', '', 3, false, 'published', '2026-09-04', '2026-09-07', '');
+        $page = $this->renderStrictly('page', ['piece' => $published, 'body' => '<p>The list.</p>']);
+
+        self::assertStringContainsString('<time datetime="2026-09-04">4 September 2026</time>', $page);
+        self::assertStringContainsString('· revised <time datetime="2026-09-07">7 September 2026</time>', $page);
+
+        $draft = new \Newsprint\Content\Piece('privacy', 'Privacy', '', 3, false, 'draft', '2026-09-04', '2026-09-07', '');
+        $hidden = $this->renderStrictly('page', ['piece' => $draft, 'body' => '<p>The list.</p>']);
+
+        self::assertStringNotContainsString('<time', $hidden);
+        self::assertStringNotContainsString('2026', $hidden, 'no date reaches the page in any spelling');
+        self::assertStringNotContainsString('class="meta"', $hidden, 'and no empty line is left where one would have gone');
+
+        // On an article the dates share the line with the reading time and the
+        // price, and a revision on the day the piece was written says only
+        // that the file was saved twice.
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'Two orderings', 'L', 4, true, 'published', '2026-09-07', '2026-09-07', '');
+        $article = $this->renderStrictly('article', [
+            'piece' => $piece,
+            'body' => '<p>Body.</p>',
+            'site' => ['symbol' => 'DEMO', 'page_price_demo' => '0.01'],
+            'meter' => $this->panel(['result' => MeterResult::granted()]),
+            'previous' => null,
+            'next' => null,
+        ]);
+
+        self::assertStringContainsString('<time datetime="2026-09-07">7 September 2026</time>', $article);
+        self::assertStringNotContainsString('revised', $article);
+        self::assertStringNotContainsString('draft', $article);
+    }
+
+    /**
+     * The two links at the end of a piece, and the two states with none.
+     *
+     * The nav comes after whatever the page is for — under the body when there
+     * is one, under the meter when there is not — and an article at either end
+     * of the sequence shows one link, not an empty slot. All of it is asserted
+     * here because each is a branch of the template rather than a consequence
+     * of the data, and the position is the whole of the decision.
+     */
+    public function testTheArticleLinksToItsNeighboursUnderTheBody(): void
+    {
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'Two orderings', 'L', 4, true, 'draft', '2026-09-07', null, '');
+        $older = new \Newsprint\Content\Piece('the-delegate', 'The permission nobody shows you', 'L', 4, true, 'draft', '2026-09-05', null, '');
+        $newer = new \Newsprint\Content\Piece('request-nobody-made', 'The request nobody made', 'L', 4, true, 'draft', '2026-09-11', null, '');
+
+        $vars = [
+            'piece' => $piece,
+            'site' => ['symbol' => 'DEMO', 'page_price_demo' => '0.01'],
+            'meter' => $this->panel(['result' => MeterResult::granted()]),
+        ];
+
+        $html = $this->renderStrictly('article', $vars + ['body' => '<p>Body.</p>', 'previous' => $older, 'next' => $newer]);
+
+        self::assertMatchesRegularExpression('#<a class="previous" rel="prev" href="/a/the-delegate">#', $html);
+        self::assertMatchesRegularExpression('#<a class="next" rel="next" href="/a/request-nobody-made">#', $html);
+        self::assertStringContainsString('The permission nobody shows you', $html);
+
+        // The nav is above the strip, which is the position the whole thing
+        // is about: the end of the reading, before the report of the charge.
+        self::assertLessThan(
+            (int) strpos($html, 'meter-strip'),
+            (int) strpos($html, 'piece-nav'),
+            'the links come before the meter strip',
+        );
+
+        // One end of the sequence: one link, and no empty half.
+        $oneWay = $this->renderStrictly('article', $vars + ['body' => '<p>Body.</p>', 'previous' => $older, 'next' => null]);
+        self::assertStringContainsString('rel="prev"', $oneWay);
+        self::assertStringNotContainsString('rel="next"', $oneWay);
+
+        // And the gate, where the links come after the offer rather than
+        // between the lede and it: a reader who does not want this piece
+        // still has somewhere to go, and the one decision the page asks for
+        // is not interrupted to say so.
+        $gated = $this->renderStrictly('article', $vars + ['body' => null, 'previous' => $older, 'next' => $newer]);
+        self::assertStringContainsString('piece-nav', $gated);
+        self::assertGreaterThan(
+            (int) strpos($gated, 'class="gate'),
+            (int) strpos($gated, 'piece-nav'),
+            'the links come after the meter, not before it',
+        );
+    }
+
+    /**
+     * The panel writes a base58 once, and every short name can be looked up.
+     *
+     * Two claims, and they are each other's other half. A section that still
+     * wrote an address out in full would make the table decoration; a short
+     * name whose row is missing would make the panel a glossary with pages
+     * torn out. The second is the one that can break silently — a link to
+     * `#name-…` that matches no `id` scrolls nowhere and looks like a click
+     * that missed.
+     */
+    public function testThePanelDefinesEveryShortNameItUses(): void
+    {
+        $address = '7X4hDbm44UQYnmXshwSdCyAMhh3bJe2X5u1z2m1dSCVt';
+        $value = ['value' => $address, 'alias' => 'SPDAmux', 'explorer' => true, 'note' => '["site", AUTHfen] + bump'];
+
+        $html = $this->renderStrictly('inspector-sections', ['sections' => [
+            ['heading' => 'What the short names mean', 'names' => [$value]],
+            ['heading' => 'Site account, decoded', 'rows' => [['site account', $value], ['bump', '254']]],
+            ['heading' => 'The last transaction', 'rows' => [['ix 1 · account 1', $value, 'writable']]],
+        ]]);
+
+        // Three sightings of one address, and one place it is written out.
+        self::assertSame(3, substr_count($html, 'SPDAmux'), 'the table and the two rows');
+        // Three times in one cell — the explorer href, the text of the link
+        // and the copy button's attribute — and nowhere else on the page.
+        self::assertSame(3, substr_count($html, $address));
+        self::assertSame(1, preg_match_all('/data-copy-address/', $html), 'one copy button per address, not one per sighting');
+
+        preg_match_all('/href="#([^"]+)"/', $html, $hrefs);
+        preg_match_all('/id="([^"]+)"/', $html, $ids);
+        self::assertNotEmpty($hrefs[1], 'the short names are links');
+        self::assertSame([], array_diff($hrefs[1], $ids[1]), 'every short name links to a row that is there');
+    }
+
+    /**
+     * The deferred event spans, like the signature above it.
+     *
+     * It is a sentence and there is no check beside it to mirror, so stopping
+     * at the value column wrapped it inside a third of the width.
+     */
+    /**
+     * A claim that is a sentence goes under the value; a flag stays beside it.
+     *
+     * This is what lets the panel be the article's width: the two sections
+     * carrying sentences were the only ones needing 52rem, and they needed it
+     * for a third column. The section says which form it wants rather than the
+     * template measuring the text, so a reworded claim cannot silently change
+     * the panel's anatomy — and both forms are rendered here, because a rule
+     * with two branches and one test is a rule with one branch.
+     */
+    public function testASentenceGoesUnderTheValueAndAFlagStaysBesideIt(): void
+    {
+        $under = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'Preflight, for this request',
+            'claims' => 'under',
+            'rows' => [['can_meter', 'yes', 'require!(new_used <= limit, LimitReached)']],
+        ]]]);
+
+        self::assertStringContainsString('<span class="beneath">require!(new_used &lt;= limit, LimitReached)</span>', $under);
+        self::assertStringNotContainsString('class="mirrors"', $under, 'no third column, which is the point');
+        self::assertStringNotContainsString('class="mirrored"', $under);
+
+        $beside = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'The last transaction',
+            'rows' => [['ix 1 · account 1', 'CPDAash', 'writable']],
+        ]]]);
+
+        self::assertStringContainsString('<td class="mirrors">writable</td>', $beside);
+        self::assertStringNotContainsString('beneath', $beside);
+    }
+
+    public function testTheDeferredEventRowSpansTheMirroredColumn(): void
+    {
+        $html = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'The last transaction',
+            'rows' => [['page views', '1', 'this call settles']],
+            'event' => 'FKb3eeBw',
+        ]]]);
+
+        self::assertMatchesRegularExpression('/<td data-event-slot colspan="2"/', $html);
+
+        // And does not span where there is no second column to span into.
+        $plain = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'The last transaction',
+            'rows' => [['page views', '1']],
+            'event' => 'FKb3eeBw',
+        ]]]);
+
+        self::assertMatchesRegularExpression('/<td data-event-slot>/', $plain);
     }
 
     public function testAContractDecodesIntoThePanelWithoutGuessingAtItsShape(): void

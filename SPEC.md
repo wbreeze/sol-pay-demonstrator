@@ -651,12 +651,57 @@ deployment running more than one instance needs a lock that spans them**, and
 that is a real constraint on §12's hosting decision rather than an
 implementation detail — one file on one machine is not such a lock.
 
-**How this is tested:** two browsers, one wallet, the same article requested
-simultaneously. The pass condition is one `meter_and_settle` on chain and one
-grant, with the second request served from that grant. Asserting it needs the
-inspector's event log rather than the rendered page, since both browsers show
-the same article either way — which is the point: the defect this prevents is
-invisible from the front end.
+**How this is tested.** The original plan was two browsers, one wallet, the
+same article requested simultaneously, with the pass condition one
+`meter_and_settle` on chain. That needs devnet, a funded payer and a real
+wallet, so it is an observation someone makes and not something CI can hold —
+which is why it went unwritten for as long as it did.
+
+Since 2026-09-12 the half that carries the defect *is* held, by
+`tests/Metering/OneMeterAtATimeTest.php`: four separate PHP processes, one
+wallet, one article, one SQLite file, rendezvousing so they enter together.
+Exactly one does the work and the other three find it done. The same four with
+the lock removed and nothing else changed must double-charge — a race test
+that cannot fail proves nothing, so the control is asserted rather than
+assumed. A second, positional check keeps `Meter::forArticle` honest: the lock
+is its first statement and the grant check happens inside it, because a grant
+check in front of the lock is this defect exactly — both requests read "no
+grant", both queue, and the second meters anyway because it decided before it
+waited.
+
+Writing it found one. `Database::open()` set `PRAGMA journal_mode` before
+`PRAGMA busy_timeout`, and SQLite's default timeout is zero, so a request
+opening the database while another held the write lock died with `database is
+locked` before it reached the queue at all. The metering path holds its
+transaction across an RPC round trip, which makes that window exactly §7.3's
+confirmation window wide. Fixed by arming the timeout first.
+
+What remains an observation rather than a test is the chain half: one
+`meter_and_settle` for two simultaneous readers. `bin/two-readers` makes that
+observation — it checks the five preconditions that would each turn a failure
+into a false pass, races two requests through the whole stack, and judges by
+the contract's own `used` rather than by anything the site reports about
+itself.
+
+**Made 2026-09-12.** Two overlapping requests for `no-sign-in-page`, both HTTP
+200 in 3.47s and 2.84s; `used` moved by one page price and the purchase counter
+by one; signature
+`4WsXACXRZNhD9zHr2bguGDU2r5ZGmfBtRv8nKjdDVaE4PrUWeTMzqn3HoP3DhrDKSYPoDdEiUZ5chUYWuT2aWm1`.
+One meter, one grant, the second request served from it.
+
+Made again the same day, after a fault in the script's own verdict was fixed —
+signature
+`3THBQqBLtianfcR4vvTZ8M8DYiRddcYdnmCETH2qU8Dj8uBJdYTxziPebtT3GwhXZUy9S71LpzawtMfrinyWWKo2`,
+`used` 0.01 → 0.02. Worth recording as a separate fact: the first run is the
+observation, and the second is the observation made by a tool that judged it
+correctly without help. Only the second makes the procedure repeatable by
+someone who was not there.
+
+The reading has to come from the chain and not the page, because both browsers
+show the same article either way — which is the point. The defect this prevents
+is invisible from the front end, and it is invisible from the store too:
+`grants` is keyed on `(wallet, article)` and upserts, so two charges leave one
+row naming only the second signature.
 
 ### 7.3 Order, and who absorbs an ambiguous confirmation
 

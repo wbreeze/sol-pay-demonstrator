@@ -1,6 +1,7 @@
 ---
 title: Three wallets, one name, and a refusal that wasn't true
 slug: three-phantoms
+created: 2026-09-07
 metered: true
 status: draft
 lede: >
@@ -9,8 +10,6 @@ lede: >
   and kept a different one with the same name.
 reading_time: 4
 ---
-
-# Three wallets, one name, and a refusal that wasn't true
 
 For a day this site would not let anyone in. Connect a wallet, and the panel
 answered:

@@ -46,9 +46,125 @@ final class Inspector
      * fetches when it is opened rather than on the request that made it. See
      * {@see lastTransaction()} for why that read is deferred.
      *
-     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool, derivation: ?string}, 2?: string}>, note?: string, link?: array{href: string, text: string}, event?: string}>
+     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, note?: string, link?: array{href: string, text: string}, event?: string}>
      */
     public function sections(?SiteState $state = null, ?string $error = null, ?PayerState $payer = null, ?MeterResult $result = null): array
+    {
+        $sections = $this->order($this->build($state, $error, $payer, $result));
+        $names = $this->names($sections);
+
+        return $names === null ? $sections : array_merge([$names], $sections);
+    }
+
+    /**
+     * Most-changing first (2026-09-12).
+     *
+     * The panel was built outwards from the deployment — program, site,
+     * treasury, then the reader, then this request — which is the order the
+     * *system* is assembled in and the reverse of the order anybody reads it
+     * in. A reader opening the panel twice in a row is looking for what moved:
+     * the preflight numbers and the transaction change on every request, the
+     * reader's own accounts change when they are charged, the treasury when a
+     * settle lands, the site account when setup runs, and the deployment
+     * never. Scrolling past four sections of constants to reach the two that
+     * moved is the whole of the complaint.
+     *
+     * The table of short names stays above all of it: it is the key to
+     * everything below, and a key belongs at the top whether or not it
+     * changed.
+     *
+     * `Configuration drift` is the exception to the gradient and the one
+     * section here that is not a readout. It appears only when the chain and
+     * `config/site.php` disagree, so by rate of change it belongs at the
+     * bottom; it sits with the site account it disagrees with, which is where
+     * a reader can check the claim.
+     *
+     * @param list<array<string, mixed>> $sections
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function order(array $sections): array
+    {
+        $order = [
+            // A site that could not be read, or is not set up yet, has one
+            // thing to say and everything else on the page is furniture.
+            'This site, on chain',
+            'Preflight, for this request',
+            'The last transaction',
+            'You, on chain',
+            'Treasury',
+            'Configuration drift',
+            'Site account, decoded',
+            'Deployment',
+            'Site parameters, configured',
+        ];
+
+        // A stable sort, so a heading not named above keeps its place rather
+        // than being flung to the end by a comparison it never entered.
+        usort($sections, static function (array $a, array $b) use ($order): int {
+            $rank = static function (array $section) use ($order): int {
+                $at = array_search($section['heading'], $order, true);
+
+                return $at === false ? count($order) : $at;
+            };
+
+            return $rank($a) <=> $rank($b);
+        });
+
+        return $sections;
+    }
+
+    /**
+     * The short names used below, defined once, at the top (2026-09-12).
+     *
+     * Every address used to carry its own base58 and its own copy button at
+     * every sighting. A charging view showed **21 addresses of 9 distinct
+     * ones** that way — the authority, the treasury and the contract three
+     * times each — and the worst of it was the transaction's account list,
+     * eight rows of 44 characters where the question a reader has is *which
+     * accounts, in what order*.
+     *
+     * Two things made the repetition worse than verbose. A row's third cell
+     * holds either the check it mirrors or the address's provenance, and the
+     * mirrored check wins — so every account row in the last transaction
+     * carried `signer, writable` and silently dropped the derivation §9 asks
+     * for beside every address. And the seeds are written in short names, so a
+     * derivation cell in one section named rows in another. Gathered here,
+     * every address states its provenance exactly once, and a seed names a row
+     * three lines up.
+     *
+     * Order of first appearance, which is the order a reader met them in.
+     *
+     * @param list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, note?: string, link?: array{href: string, text: string}, event?: string}> $sections
+     *
+     * @return ?array{heading: string, names: list<array{value: string, alias: string, explorer: bool, note: ?string}>}
+     */
+    private function names(array $sections): ?array
+    {
+        $names = [];
+        foreach ($sections as $section) {
+            foreach ($section['rows'] as $row) {
+                if (is_array($row[1])) {
+                    // Keyed by the value, so the same address seen in three
+                    // sections is one row here — which is the whole point, and
+                    // it is the same matching-by-value rule the panel already
+                    // uses to label a transaction's accounts.
+                    $names[$row[1]['value']] ??= $row[1];
+                }
+            }
+        }
+
+        if ($names === []) {
+            return null;
+        }
+
+        return ['heading' => 'What the short names mean', 'names' => array_values($names)];
+    }
+
+    /**
+     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, note?: string, link?: array{href: string, text: string}, event?: string}>
+     */
+    private function build(?SiteState $state = null, ?string $error = null, ?PayerState $payer = null, ?MeterResult $result = null): array
     {
         $program = $this->config->program();
         $params = $this->config->siteParams();
@@ -208,7 +324,7 @@ final class Inspector
      *
      * @param array<string, array{alias: string, derivation: ?string}> $known every address this request can name
      *
-     * @return array{heading: string, rows: list<array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool, derivation: ?string}, 2?: string}>, note?: string, link?: array{href: string, text: string}, event?: string}
+     * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, note?: string, link?: array{href: string, text: string}, event?: string}
      */
     private function lastTransaction(MeterResult $result, array $known): array
     {
@@ -250,11 +366,18 @@ final class Inspector
                 ];
             }
 
+            // The one value in the panel that is not an address and is just
+            // as unreadable, so it follows the same rule: a short name here,
+            // the bytes in the table with everything else long.
             $data = bin2hex($instruction->data);
             $rows[] = [
                 sprintf('ix %d · data', $n),
-                strlen($data) > 16 ? substr($data, 0, 16).' '.substr($data, 16) : $data,
-                sprintf('%d bytes: 8-byte discriminator, then borsh', strlen($instruction->data)),
+                [
+                    'value' => strlen($data) > 16 ? substr($data, 0, 16).' '.substr($data, 16) : $data,
+                    'alias' => Alias::for(Alias::DATA, $instruction->data),
+                    'explorer' => false,
+                    'note' => sprintf('%d bytes: 8-byte discriminator, then borsh', strlen($instruction->data)),
+                ],
             ];
         }
 
@@ -308,22 +431,25 @@ final class Inspector
      *
      * @param array<string, array{alias: string, derivation: ?string}> $known
      *
-     * @return array{address: string, alias: ?string, explorer: bool, derivation: ?string}
+     * @return array{value: string, alias: string, explorer: bool, note: ?string}
      */
     private function address(string $address, array $known, bool $onChain = true): array
     {
         return [
-            'address' => $address,
-            // Bare rather than invented on the spot: §9's aliases are stable
-            // per address across sessions, and one made up here for a role
-            // this panel could not identify would look exactly like the stable
-            // kind.
-            'alias' => $known[$address]['alias'] ?? null,
+            'value' => $address,
+            // Every address has a short name now, because every address has to
+            // be findable in the table where the base58 lives. An address with
+            // no role in the map gets the `ACCT` prefix rather than a role's —
+            // see {@see Alias::UNNAMED}: the objection to inventing one was
+            // that it would look like the stable kind, and a prefix that says
+            // "unplaced" answers it without leaving the address undefined.
+            'alias' => $known[$address]['alias'] ?? Alias::for(Alias::UNNAMED, $address),
             'explorer' => $onChain,
-            // The third cell, when there is one to give. An address this panel
-            // cannot place gets null and the row spans, rather than a blank
-            // column that would read as "derived from nothing".
-            'derivation' => $known[$address]['derivation'] ?? null,
+            // What the table says about it: the derivation where there is one,
+            // where it came from where there is not, and null for an address
+            // this panel cannot place — which is the honest answer and reads
+            // differently from "derived from nothing".
+            'note' => $known[$address]['derivation'] ?? null,
         ];
     }
 
@@ -477,7 +603,7 @@ final class Inspector
      *
      * @param callable(int): string $amount both unit forms, at the mint's own decimals
      *
-     * @return array{heading: string, rows: list<array{0: string, 1: string, 2?: string}>, note?: string}
+     * @return array{heading: string, rows: list<array{0: string, 1: string, 2?: string}>, claims: string, note?: string}
      */
     private function preflight(SiteState $state, PayerState $payer, callable $amount): array
     {
@@ -539,6 +665,13 @@ final class Inspector
 
         return [
             'heading' => 'Preflight, for this request',
+            // The third cell here is a sentence, so it goes under the value
+            // rather than beside it (2026-09-12). Declared by the section
+            // rather than guessed from the length of the text, which would
+            // make the panel's anatomy depend on how a claim happened to be
+            // worded. The last transaction's `signer, writable` stays beside:
+            // two words read as a suffix, a sentence reads as a caption.
+            'claims' => 'under',
             'rows' => $rows,
             'note' => 'Asked before a fee was spent finding out, from the same account fields shown above. The '
                 .'program checks all of it again and its answer is the one that charges — these are predictions, '
@@ -565,7 +698,7 @@ final class Inspector
      * @param callable(int): string $amount both unit forms, at the mint's own decimals
      * @param array<string, array{alias: string, derivation: ?string}> $known every address this request can name, for {@see address()}
      *
-     * @return array{heading: string, rows: list<array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool, derivation: ?string}, 2?: string}>, note?: string}
+     * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, note?: string}
      */
     private function reader(PayerState $payer, callable $amount, array $known): array
     {

@@ -1,6 +1,7 @@
 ---
 title: The transaction that proved less than it looked like
 slug: first-transaction
+created: 2026-09-05
 metered: true
 status: draft
 lede: >
@@ -10,8 +11,6 @@ lede: >
   about.
 reading_time: 4
 ---
-
-# The transaction that proved less than it looked like
 
 On 5 September a validator accepted a transaction assembled by this site's
 server. It cost about a hundredth of a cent in devnet fees and it took two

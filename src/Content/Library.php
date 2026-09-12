@@ -41,10 +41,63 @@ final class Library
         return is_file($contentDir.'/index.json');
     }
 
-    /** @return list<Piece> the metered pieces, which is what the index lists */
+    /**
+     * The metered pieces, newest first — what the index lists and the order
+     * the articles link each other in.
+     *
+     * Until 2026-09-12 this was manifest order, which is `glob('content/*.md')`
+     * order, which is alphabetical by *source filename*. Deterministic, and a
+     * fact about filenames rather than about the writing: a reader saw one
+     * piece above another for a reason invisible from the page, and renaming a
+     * file reordered the front page silently.
+     *
+     * `created` and not `revised`, so that fixing a typo in an old piece does
+     * not carry it back to the top; the slug breaks a tie, because four pieces
+     * share a day and an order that wobbles between builds is worse than an
+     * arbitrary one that does not. A piece with no date sorts last rather than
+     * first — an unknown date is not news.
+     *
+     * @return list<Piece>
+     */
     public function articles(): array
     {
-        return array_values(array_filter($this->pieces, static fn (Piece $p): bool => $p->metered));
+        $articles = array_values(array_filter($this->pieces, static fn (Piece $p): bool => $p->metered));
+
+        usort($articles, static function (Piece $a, Piece $b): int {
+            return [$b->created ?? '', $a->slug] <=> [$a->created ?? '', $b->slug];
+        });
+
+        return $articles;
+    }
+
+    /**
+     * What comes before and after a piece, chronologically.
+     *
+     * **Previous is the older one**, which is the way a reader reads those two
+     * words and the opposite of the list's own direction: the index runs
+     * newest first, so the previous piece is the one *below* this one there.
+     *
+     * @return array{0: ?Piece, 1: ?Piece} previous (older), next (newer)
+     */
+    public function neighbours(string $slug): array
+    {
+        $articles = $this->articles();
+        $at = null;
+        foreach ($articles as $i => $piece) {
+            if ($piece->slug === $slug) {
+                $at = $i;
+                break;
+            }
+        }
+
+        // Not a metered piece, or not a piece at all: the privacy page asks
+        // this question too and the honest answer is that it is not in the
+        // sequence.
+        if ($at === null) {
+            return [null, null];
+        }
+
+        return [$articles[$at + 1] ?? null, $articles[$at - 1] ?? null];
     }
 
     /** @return list<Piece> */

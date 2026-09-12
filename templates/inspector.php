@@ -52,19 +52,23 @@ use Newsprint\Support\View;
         <p class="inspector-preamble">
             Short names like <code>SPDApep</code> are this site's own invention,
             derived from the address so they never change. They mean nothing to
-            a wallet or an explorer. The full address is always beside them,
-            and it is the full address that the copy button gives you — never
-            the short name.
+            a wallet or an explorer. Every one of them is defined in the first
+            table below, next to the address it stands for — click a short name
+            anywhere on this page to go to its row — and it is the full address
+            that the copy button there gives you, never the short name. An
+            account this panel cannot place is named <code>ACCT…</code> rather
+            than for a role it does not know, and an instruction's bytes get a
+            <code>DATA…</code> name on the same terms.
         </p>
         <p class="inspector-preamble">
-            Beside each address is the derivation that produced it: the seeds
-            it was computed from, written with the short names above so you can
-            match each one to its row, and the program that did the computing.
-            Not every address has one. Two of them are computed by Solana's
-            associated-token program rather than by this site's, and several
-            were never derived at all — a keypair setup generated, your own
-            wallet, a deployed program, an address every Solana cluster shares.
-            Those say so instead.
+            Beside each address in that table is the derivation that produced
+            it: the seeds it was computed from, written with the short names so
+            you can match each one to its row, and the program that did the
+            computing. Not every address has one. Two of them are computed by
+            Solana's associated-token program rather than by this site's, and
+            several were never derived at all — a keypair setup generated, your
+            own wallet, a deployed program, an address every Solana cluster
+            shares. Those say so instead.
         </p>
 <?= $view->render('inspector-sections', ['sections' => $sections]) ?>
 <?php endif ?>

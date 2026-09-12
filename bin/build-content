@@ -86,12 +86,65 @@ foreach (glob($source.'/*.md') ?: [] as $path) {
     // what it is for: §6.1 wants something honest to render beside the meter
     // to a visitor with no contract. A public page — the privacy page (§10.2)
     // — is served whole, so there is nothing to stand in for.
-    $required = $metered ? ['title', 'slug', 'lede'] : ['title', 'slug'];
+    $required = $metered ? ['title', 'slug', 'lede', 'created'] : ['title', 'slug', 'created'];
     foreach ($required as $key) {
         if (!isset($front[$key])) {
-            fwrite(STDERR, "{$name}: front matter has no '{$key}'".($key === 'lede' ? " (metered pieces need one; set 'metered: false' for a public page)" : '')."\n");
+            $hint = match ($key) {
+                'lede' => " (metered pieces need one; set 'metered: false' for a public page)",
+                'created' => " (the day it was written, YYYY-MM-DD; add 'revised' when it changes)",
+                default => '',
+            };
+            fwrite(STDERR, "{$name}: front matter has no '{$key}'".$hint."\n");
             exit(1);
         }
+    }
+
+    // The dates are the writer's, like `reading_time` below, and the same
+    // sentence applies: a date the writer sets is a promise to a reader, and
+    // one derived from the repository is a fact about a commit. What the build
+    // owes them is the shape — `bin/content-dates` is what asks whether the
+    // promise is still true.
+    $dates = [];
+    foreach (['created', 'revised'] as $key) {
+        if (!isset($front[$key])) {
+            continue;
+        }
+
+        // What YAML hands back for a date is not a date. `symfony/yaml` parses
+        // an unquoted `2026-09-07` into a **Unix timestamp**, a quoted one
+        // into a string, and would give a `DateTimeImmutable` only under a
+        // flag the front matter extension does not pass. All three are
+        // accepted here and all three end up as one spelling, because the
+        // alternative is a front matter key whose meaning depends on whether
+        // the writer used quotes.
+        $raw = $front[$key];
+        if ($raw instanceof \DateTimeInterface) {
+            $value = $raw->format('Y-m-d');
+        } elseif (is_int($raw)) {
+            $value = gmdate('Y-m-d', $raw);
+        } else {
+            $value = trim((string) $raw);
+        }
+
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $value, new \DateTimeZone('UTC'));
+        if ($parsed === false || $parsed->format('Y-m-d') !== $value) {
+            fwrite(STDERR, "{$name}: '{$key}' is '{$value}'; it must be a date written YYYY-MM-DD\n");
+            exit(1);
+        }
+
+        // A date in the future is always a mistake and never a plan: the build
+        // runs when it runs, and nothing here schedules anything.
+        if ($parsed->format('Y-m-d') > (new \DateTimeImmutable('today', new \DateTimeZone('UTC')))->format('Y-m-d')) {
+            fwrite(STDERR, "{$name}: '{$key}' is {$value}, which has not happened yet\n");
+            exit(1);
+        }
+
+        $dates[$key] = $value;
+    }
+
+    if (isset($dates['revised']) && $dates['revised'] < $dates['created']) {
+        fwrite(STDERR, "{$name}: 'revised' ({$dates['revised']}) is before 'created' ({$dates['created']})\n");
+        exit(1);
     }
 
     $slug = (string) $front['slug'];
@@ -101,6 +154,17 @@ foreach (glob($source.'/*.md') ?: [] as $path) {
     }
 
     $body = $rendered->getContent();
+
+    // The title is written once, in the front matter, and rendered once, by
+    // `article.php` and `page.php`. A body that opens with its own `#` heading
+    // renders the title twice on every paid article, and — worse than the
+    // repetition — makes it possible for the two to disagree. Refused here so
+    // that they cannot: there is one place a piece is titled.
+    if (preg_match('/<h1[\s>]/i', $body) === 1) {
+        fwrite(STDERR, "{$name}: the body carries an <h1>; the title comes from front matter and is rendered by the template. Remove the '# ' heading.\n");
+        exit(1);
+    }
+
     file_put_contents($target.'/'.$slug.'.html', $body);
 
     // 238 words a minute, rounded up, and only when the piece does not say.
@@ -114,6 +178,8 @@ foreach (glob($source.'/*.md') ?: [] as $path) {
         'reading_time' => (int) ($front['reading_time'] ?? max(1, (int) ceil($words / 238))),
         'metered' => $metered,
         'status' => (string) ($front['status'] ?? 'published'),
+        'created' => $dates['created'],
+        'revised' => $dates['revised'] ?? null,
         'source' => $name,
         'words' => $words,
     ];

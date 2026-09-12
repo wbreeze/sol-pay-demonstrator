@@ -1,6 +1,7 @@
 ---
 title: Two orderings that disagree on purpose
 slug: two-orderings
+created: 2026-09-07
 metered: true
 status: draft
 lede: >
@@ -9,8 +10,6 @@ lede: >
   and making them agree would put a bug in one of them.
 reading_time: 4
 ---
-
-# Two orderings that disagree on purpose
 
 Two paths in this site do the same two things — talk to a chain, and change a
 local record — in opposite orders.
