@@ -11,7 +11,12 @@
 #            endpoint answers. A failure here means the demo is down now.
 #   drift    the published sol-pay-client has moved past what this repository
 #            pins. A failure here means the demo is teaching an old API. It is
-#            news, not an outage.
+#            news, not an outage. The same job also asks a second question with
+#            a different answer: whether the vendored `@solana/kit` is still
+#            inside the range `sol-pay-client` asserts its instruction shape
+#            against. That one is not news — nothing declares that agreement,
+#            so nothing else would notice it breaking until a wallet prompt was
+#            already open. It reports separately, under `canary:agreement`.
 #
 # Neither spends money. `bin/devnet-smoke` does, needs a funded key, and is not
 # on a schedule for exactly that reason — it is available below on demand.
@@ -132,9 +137,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           case "$status" in
-            0)  echo 'state=ok'       >> "$GITHUB_OUTPUT" ;;
-            75) echo 'state=tempfail' >> "$GITHUB_OUTPUT" ;;
-            *)  echo 'state=behind'   >> "$GITHUB_OUTPUT" ;;
+            0)  echo 'state=ok'           >> "$GITHUB_OUTPUT" ;;
+            2)  echo 'state=disagreement' >> "$GITHUB_OUTPUT" ;;
+            75) echo 'state=tempfail'     >> "$GITHUB_OUTPUT" ;;
+            *)  echo 'state=behind'       >> "$GITHUB_OUTPUT" ;;
           esac
 
           {
@@ -257,6 +263,21 @@ jobs:
             note 'canary: pinned behind a published release' 'canary:drift' /tmp/drift-issue.md
           fi
 
-          if [ "$DEVNET_STATE" != "broken" ] && [ "$DRIFT_STATE" != "behind" ]; then
+          if [ "$DRIFT_STATE" = "disagreement" ]; then
+            {
+              echo "The vendored \`@solana/kit\` is outside the range \`sol-pay-client\` asserts its instruction shape against."
+              echo
+              echo '```'
+              printf '%s\n' "$DRIFT_DETAIL"
+              echo '```'
+              echo
+              echo "Run: $RUN_URL"
+              echo
+              echo "This one is not the same kind of news as being behind a release. \`sol-pay-client\` returns instructions shaped like kit's \`IInstruction\` and \`public/assets/tx.js\` hands them straight to \`appendTransactionMessageInstructions\`, and **neither package declares the other** — sol-pay's wasm client has no JavaScript dependency at all. So nothing fails at install time. It fails at \`compileTransaction\`, in a browser, with a wallet prompt already open."
+            } > /tmp/agreement-issue.md
+            note 'canary: kit is outside the asserted range' 'canary:agreement' /tmp/agreement-issue.md
+          fi
+
+          if [ "$DEVNET_STATE" != "broken" ] && [ "$DRIFT_STATE" != "behind" ] && [ "$DRIFT_STATE" != "disagreement" ]; then
             echo "nothing to report (devnet=$DEVNET_STATE drift=$DRIFT_STATE)"
           fi

@@ -23,10 +23,37 @@ declare(strict_types=1);
  * version is news, and the answer may well be "not yet". It is here so the
  * answer is a decision rather than a thing discovered months later.
  *
+ * And a fourth question, which is not about being behind at all.
+ *
+ * `sol-pay-client` returns instructions already shaped like kit's
+ * `IInstruction` — `{ programAddress, accounts: [{ address, role }], data }` —
+ * and `public/assets/tx.js` hands that array straight to
+ * `appendTransactionMessageInstructions` with nothing adapting between the two.
+ * **Neither package declares the other.** sol-pay's `wasm-client` is Rust with
+ * no JavaScript dependency of any kind, and this repository chose kit for
+ * itself. So that agreement is checked nowhere, and a move on either side of it
+ * fails at `compileTransaction`, in a browser, with a wallet prompt already
+ * open.
+ *
+ * The assertion belongs in sol-pay, which owns one half of the shape and can
+ * exercise it under `bin/test-node`. What belongs *here* is reading the answer:
+ * the `@solana/kit` range `sol-pay-client` declares in `peerDependencies` for
+ * the exact version this repository vendors, compared against the kit that is
+ * actually committed in `public/vendor/`.
+ *
+ * Until sol-pay publishes that range this check reports that it is not asserted
+ * and changes nothing — no exit code, no issue comment. It starts working on
+ * its own the day the other half ships, which is the only way to add a check
+ * across two repositories without a flag day.
+ *
  * Usage:  bin/upstream-drift
  *
- *   0   every pin is current
- *   1   at least one pin is behind a published release
+ *   0   every pin is current and the shape agreement holds
+ *   1   a pin is behind a published release — news, not an outage
+ *   2   the vendored kit is outside the range sol-pay-client asserts against.
+ *       A louder code than 1 on purpose: being behind is an opportunity, and
+ *       this is two packages that no longer agree about a shape neither one
+ *       declares. It takes precedence when both are true.
  *   75  EX_TEMPFAIL — a registry did not answer; nothing was learned
  *
  * No autoloader on purpose: this runs before `composer install` and says
@@ -35,6 +62,7 @@ declare(strict_types=1);
 
 const DRIFT_OK = 0;
 const DRIFT_BEHIND = 1;
+const DRIFT_DISAGREE = 2;
 const DRIFT_TEMPFAIL = 75;
 
 $root = dirname(__DIR__);
@@ -154,6 +182,64 @@ function latestOnNpm(string $package): array
     return [$version, $version === null ? 'no version in the npm response' : null];
 }
 
+// --- the shape agreement ----------------------------------------------------
+
+/**
+ * The `@solana/kit` range `sol-pay-client` asserts its instruction shape
+ * against, read from the npm manifest of the exact version vendored here.
+ *
+ * The vendored version and not `latest` on purpose: the question is what the
+ * wasm *in this repository* was tested against, which is not what a newer
+ * release may have been tested against.
+ *
+ * @return array{0: ?string, 1: ?string} the range and an error, exactly one null
+ */
+function assertedKitRange(string $solPayVersion): array
+{
+    [$body, $error] = fetch('https://registry.npmjs.org/sol-pay-client/'.rawurlencode($solPayVersion));
+    if ($body === null) {
+        return [null, $error];
+    }
+    $decoded = decode($body);
+    if ($decoded === null) {
+        return [null, 'the npm manifest did not decode'];
+    }
+
+    $range = $decoded['peerDependencies']['@solana/kit'] ?? null;
+
+    return [is_string($range) && trim($range) !== '' ? trim($range) : null, null];
+}
+
+/**
+ * Does $version satisfy $range, where $range is npm's `^x.y.z`?
+ *
+ * The caret form only, and deliberately. There is no autoloader here, so there
+ * is no composer/semver to lean on, and a hand-rolled range parser that quietly
+ * gets a form wrong is worse than one that says it does not know: a false
+ * "current" on this check is the exact failure it exists to prevent. Anything
+ * else returns null and the caller reports it as not checked.
+ */
+function satisfiesCaret(string $version, string $range): ?bool
+{
+    if (preg_match('/^\^(\d+)\.(\d+)\.(\d+)$/', trim($range), $m) !== 1) {
+        return null;
+    }
+    [, $major, $minor, $patch] = $m;
+    $floor = "{$major}.{$minor}.{$patch}";
+
+    // npm's caret pins the leftmost non-zero digit: `^8.2.0` is `< 9.0.0`,
+    // `^0.2.3` is `< 0.3.0`, and `^0.0.3` is `< 0.0.4`.
+    if ($major !== '0') {
+        $ceiling = ((int) $major + 1).'.0.0';
+    } elseif ($minor !== '0') {
+        $ceiling = '0.'.((int) $minor + 1).'.0';
+    } else {
+        $ceiling = '0.0.'.((int) $patch + 1);
+    }
+
+    return version_compare($version, $floor, '>=') && version_compare($version, $ceiling, '<');
+}
+
 // --- the three pins ---------------------------------------------------------
 
 $pins = [
@@ -182,6 +268,7 @@ $pins = [
 
 printf("%-24s %-18s %-10s %-10s %s\n", 'package', 'pinned in', 'pinned', 'latest', '');
 $behind = [];
+$disagreements = [];
 $unreachable = [];
 
 foreach ($pins as $pin) {
@@ -215,13 +302,53 @@ foreach ($pins as $pin) {
 
 echo "\n";
 
-if ($behind !== []) {
+// --- the shape agreement, asked ---------------------------------------------
+
+$vendoredSolPay = vendoredVersion($root, 'sol-pay-client');
+$vendoredKit = vendoredVersion($root, '@solana/kit');
+
+if ($vendoredSolPay === null || $vendoredKit === null) {
+    // The pins loop has already said which one could not be read.
+    $unreachable[] = 'the shape agreement: it needs both vendored versions from public/vendor/README.md';
+} else {
+    [$range, $agreementError] = assertedKitRange($vendoredSolPay);
+
+    if ($agreementError !== null) {
+        $unreachable[] = "the shape agreement: {$agreementError}";
+    } elseif ($range === null) {
+        // Neither an error nor news. sol-pay has not published a range yet, so
+        // there is nothing to disagree with — and saying so costs one line and
+        // no exit code. See the header: this check turns itself on.
+        echo "shape agreement: sol-pay-client {$vendoredSolPay} declares no @solana/kit range yet; nothing to check.\n\n";
+    } else {
+        $holds = satisfiesCaret($vendoredKit, $range);
+
+        if ($holds === null) {
+            $unreachable[] = "the shape agreement: sol-pay-client {$vendoredSolPay} declares '{$range}', which is not a range this script knows how to read";
+        } elseif ($holds) {
+            echo "shape agreement: kit {$vendoredKit} satisfies {$range}, which sol-pay-client {$vendoredSolPay} asserts its instruction shape against.\n\n";
+        } else {
+            echo "shape agreement: kit {$vendoredKit} is OUTSIDE {$range}, which sol-pay-client {$vendoredSolPay} asserts its instruction shape against.\n\n";
+            $disagreements[] = "the vendored @solana/kit is {$vendoredKit}, outside the {$range} that sol-pay-client {$vendoredSolPay} asserts its instruction shape against. Nothing fails at install; it fails at compileTransaction, in a browser, with a wallet prompt already open. To move: KIT_VERSION=<a version in {$range}> bin/vendor-assets and commit public/vendor/, or take a newer sol-pay-client first if it asserts against the kit you want";
+        }
+    }
+}
+
+if ($behind !== [] || $disagreements !== []) {
     foreach ($behind as $note) {
         echo "behind: {$note}\n";
     }
+    // A different word on purpose. Behind is an opportunity; a disagreement is
+    // two packages that no longer agree about a shape neither one declares,
+    // which is the more interesting mail to get.
+    foreach ($disagreements as $note) {
+        echo "disagreement: {$note}\n";
+    }
     // Deliberately louder than the unreachable case below and quieter than
     // `devnet-canary`'s exit 1: nothing is broken, something is available.
-    exit(DRIFT_BEHIND);
+    // A disagreement wins when both are true — it is the one that ends in a
+    // browser rather than in a decision.
+    exit($disagreements !== [] ? DRIFT_DISAGREE : DRIFT_BEHIND);
 }
 
 if ($unreachable !== []) {

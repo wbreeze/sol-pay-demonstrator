@@ -119,7 +119,24 @@ bin/upstream-drift    whether the published `sol-pay-client` has moved past
                       server half, `public/vendor/README.md`'s provenance
                       table for the two browser files. An example pinned to a
                       version nobody installs still passes its tests and still
-                      teaches the wrong API.
+                      teaches the wrong API. Exits 1: news, not an outage.
+
+                      The same script asks one more question, and it is not a
+                      version question. `sol-pay-client` returns instructions
+                      already shaped like `@solana/kit`'s `IInstruction`, and
+                      `public/assets/tx.js` hands them straight to
+                      `appendTransactionMessageInstructions` — an agreement
+                      that neither package declares, because sol-pay's wasm
+                      client has no JavaScript dependency at all and this
+                      repository chose kit for itself. So the script reads the
+                      kit range `sol-pay-client` publishes in
+                      `peerDependencies` for the exact version vendored here,
+                      and checks the committed kit against it. Outside the
+                      range exits 2, louder than 1, because that one does not
+                      fail at install — it fails at `compileTransaction`, in a
+                      browser, with a wallet prompt already open. Until
+                      `sol-pay-client` publishes such a range the check says so
+                      and changes nothing.
 ```
 
 Both run by hand too, and neither needs a key. A failure opens one issue and
