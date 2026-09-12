@@ -78,30 +78,6 @@ $contract = $meter['contract'];
 <?php endif ?>
 <?php endif ?>
 
-<?php /* Asked before the click, not only after it: `can_meter` is a limit
-         check and cannot see a short balance, because the payment happens
-         inside a CPI that SPL refuses. The button is still offered — watching
-         it fail is a legitimate thing to want from a demo — but not silently.
-         */ ?>
-<?php if (($meter['solvency'] ?? null) !== null && !$meter['solvency']['clear'] && ($meter['advanced'] ?? null) === null): ?>
-    <p class="pending">
-<?php if ($meter['solvency']['balance_short'] > 0): ?>
-        Heads up: the next advance would try to move
-        <?= View::e((string) $meter['solvency']['would_move']) ?> <?= $symbol ?>
-        and your balance is short by
-        <?= View::e((string) $meter['solvency']['balance_short_demo']) ?>.
-        It will be refused, and nothing will be charged.
-<?php elseif (!$meter['solvency']['delegate_present']): ?>
-        Heads up: this site is no longer a delegate on your token account, so a
-        settle would be refused. <a href="/meter">Renewing re-approves</a>.
-<?php else: ?>
-        Heads up: the amount you approved is short by
-        <?= View::e((string) $meter['solvency']['allowance_short_demo']) ?>
-        <?= $symbol ?> of what the next advance would move.
-        <a href="/meter">Renewing re-approves</a>.
-<?php endif ?>
-    </p>
-<?php endif ?>
 <?php if ($result->outcome === MeterOutcome::Granted): ?>
     <p>
         Served from a grant you already hold. <strong>The chain was not
@@ -142,6 +118,31 @@ $contract = $meter['contract'];
     <p class="fine">
         <a href="https://explorer.solana.com/tx/<?= View::e($result->signature) ?>?cluster=devnet"
            rel="noreferrer noopener" target="_blank">This transaction on the explorer</a>
+    </p>
+<?php endif ?>
+
+<?php /* Asked before the click, not only after it: `can_meter` is a limit
+         check and cannot see a short balance, because the payment happens
+         inside a CPI that SPL refuses. The button is still offered — watching
+         it fail is a legitimate thing to want from a demo — but not silently.
+         */ ?>
+<?php if (($meter['solvency'] ?? null) !== null && !$meter['solvency']['clear'] && ($meter['advanced'] ?? null) === null): ?>
+    <p class="pending">
+<?php if ($meter['solvency']['balance_short'] > 0): ?>
+        Heads up: the next advance would try to move
+        <?= View::e((string) $meter['solvency']['would_move']) ?> <?= $symbol ?>
+        and your balance is short by
+        <?= View::e((string) $meter['solvency']['balance_short_demo']) ?>.
+        It will be refused, and nothing will be charged.
+<?php elseif (!$meter['solvency']['delegate_present']): ?>
+        Heads up: this site is no longer a delegate on your token account, so a
+        settle would be refused. <a href="/meter">Renewing re-approves</a>.
+<?php else: ?>
+        Heads up: the amount you approved is short by
+        <?= View::e((string) $meter['solvency']['allowance_short_demo']) ?>
+        <?= $symbol ?> of what the next advance would move.
+        <a href="/meter">Renewing re-approves</a>.
+<?php endif ?>
     </p>
 <?php endif ?>
 
