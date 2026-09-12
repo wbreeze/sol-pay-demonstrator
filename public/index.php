@@ -28,6 +28,7 @@ use Newsprint\Content\Piece;
 use Newsprint\Support\Alias;
 use Newsprint\Support\Config;
 use Newsprint\Support\RpcTimingMiddleware;
+use Newsprint\Metering\Decision;
 use Newsprint\Metering\Meter;
 use Newsprint\Metering\MeterMiddleware;
 use Newsprint\Metering\MeterOutcome;
@@ -148,10 +149,12 @@ $panel = new Inspector($config);
  * "did something already read" rather than "is this page cheap". The last
  * transaction needs a `MeterResult` that exists only on the request that
  * produced it — §10.4 leaves no history for a second request to find — so it
- * could never survive a deferred fetch. It does not have to: on the article
- * route `MeterMiddleware` has already read the chain to make the metering
- * decision, so the state is in hand, the panel renders inline, and the read
- * costs nothing extra because it was required work either way.
+ * could never survive a deferred fetch. It does not have to: on the article's
+ * POST `MeterMiddleware` has already read the chain to make the metering
+ * decision, so the state is in hand, the panel renders with the answer, and the
+ * read costs nothing extra because it was required work either way. (The
+ * article's GET shell defers the panel like `/privacy` does, and the POST's
+ * answer replaces it — see `assets/read-on.js`.)
  *
  * `$payer` and `$result` are checked too, belt and braces: either one means a
  * caller has request-scoped data the deferred route could not reconstruct.
@@ -362,7 +365,7 @@ $shell = static function (string $title, string $content, ?RequestRead $reads = 
         // not spend an RPC call to say nothing.
         //
         // §9's last section is narrower still: it needs a transaction *this
-        // request* produced, which is the article route and nowhere else. §10.4
+        // request* produced, which is the article's POST and nowhere else. §10.4
         // leaves no stored history for any other page to show.
         'inspector' => $inspector($reads, $result),
     ]);
@@ -395,22 +398,15 @@ $app->get('/', function (Request $request, Response $response) use ($view, $shel
     ]), $reads($request)));
 });
 
-$article = $app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $siteVars, $meterVars, $reads): Response {
-    if (!Library::isBuilt($contentDir)) {
-        return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
-    }
-
-    $piece = Library::load($contentDir)->find((string) $args['slug']);
-    if (!$piece instanceof Piece || !$piece->metered) {
-        return $page($response, $shell('Not found', $view->render('not-found')), 404);
-    }
-
-    // §7's decision was made by the middleware, before this handler ran, and
-    // this is the whole of what the handler does with it. Anything else here —
-    // a second read, a "just in case" charge — would be metering per request,
-    // which is §7.1's defect.
-    $metering = $request->getAttribute(MeterMiddleware::ATTRIBUTE);
-    $result = $metering instanceof MeterResult ? $metering : null;
+/**
+ * The article as a reader sees it once the metering question is answered: the
+ * lede, then the body or the meter.
+ *
+ * Shared by the two article routes — the GET, which answers from a grant or
+ * has nobody to charge, and the POST, which charges — so the one state cannot
+ * be rendered two ways depending on which request happened to produce it.
+ */
+$articleContent = static function (Request $request, Piece $piece, ?MeterResult $result) use ($view, $siteVars, $meterVars, $reads): string {
     $body = $result !== null && $result->serves() ? $piece->body() : null;
 
     // What the seven-view control just did, carried back from its redirect and
@@ -426,21 +422,133 @@ $article = $app->get('/a/{slug}', function (Request $request, Response $response
         'settled' => ($query['settled'] ?? '') === '1',
     ];
 
-    return $page($response, $shell($piece->title, $view->render('article', [
+    return $view->render('article', [
         'piece' => $piece,
         'body' => $body,
         'site' => $siteVars($reads($request)),
         'meter' => $meterVars($request, $result) + ['advanced' => $advanced],
-    ]), $reads($request), $result));
+    ]);
+};
+
+/**
+ * SPEC §7.1: **a GET never meters** (2026-09-11). Charging is the POST below.
+ *
+ * This route answers one of three ways, and decides which without asking the
+ * chain anything — the wallet comes from the cookie and the store, and the
+ * grant is a row:
+ *
+ * - **A reader holding a live grant** gets the article, whole. §7.1 says a
+ *   request that finds a live grant is served without touching the chain, and
+ *   the decision here does not; the one read on this page is the meter strip's
+ *   arithmetic, which claim 7 says must come from an account.
+ * - **A reader the site could charge** — a wallet, a metered piece, no grant —
+ *   gets the *shell*: the lede, and a form that posts to this same URL. It is
+ *   rendered from nothing but the content index, so it arrives in the time it
+ *   takes to send it, and `assets/read-on.js` posts the form at once and puts
+ *   the answer where the form was. The three to ten seconds of validator that
+ *   used to pass with the old page on screen now pass with the new one, saying
+ *   what it is waiting for. Without JavaScript the form is a button.
+ * - **Anybody else** — no wallet, an unmetered piece, a copy not set up — gets
+ *   the lede and the meter, exactly as before.
+ *
+ * The shell does not know whether the POST will charge, set a meter, or stop
+ * at a limit, because knowing would cost the read the shell exists to avoid.
+ * So it claims nothing the chain would have to answer — not even the price,
+ * which comes from the `Site` account and arrives with the rest.
+ */
+$app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $articleContent, $reads, $wallet, $store, $config): Response {
+    if (!Library::isBuilt($contentDir)) {
+        return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
+    }
+
+    $piece = Library::load($contentDir)->find((string) $args['slug']);
+    if (!$piece instanceof Piece || !$piece->metered) {
+        return $page($response, $shell('Not found', $view->render('not-found')), 404);
+    }
+
+    $address = $wallet($request);
+    $result = null;
+
+    if ($address !== null && $config->isProvisioned() && Decision::shouldMeter($piece, $address)) {
+        if ($store()->liveGrant($address, $piece->slug) === null) {
+            // No `$reads`: the inspector is deferred exactly as it is on
+            // `/privacy`, and the POST's answer fills it.
+            return $page($response, $shell($piece->title, $view->render('article-pending', [
+                'piece' => $piece,
+                'longWaitMs' => (int) $config->metering()['long_wait_ms'],
+            ])));
+        }
+
+        $result = MeterResult::granted();
+    }
+
+    return $page($response, $shell($piece->title, $articleContent($request, $piece, $result), $reads($request), $result));
+});
+
+/**
+ * SPEC §7: the page view. `MeterMiddleware` has made the metering decision by
+ * the time this runs, and a live grant found inside §7.2's lock makes a second
+ * POST — a double click, a retry after a lost response, a second tab — free.
+ *
+ * Two answers from one handler, and the difference is only packaging:
+ *
+ * - **`X-Fragment: 1`** — what `assets/read-on.js` asks for. The article, then
+ *   the inspector, rendered by this request from the `MeterResult` this request
+ *   produced, which is the only place §9's last-transaction section can come
+ *   from (§10.4 leaves no history for a later request to find). The script
+ *   swaps both in together, so nothing on screen predates the charge — the
+ *   stale-inspector problem that sank an in-place re-render of the advance
+ *   does not arise, because the shell carries nothing a charge can change.
+ * - **Anything else** — the form submitted without JavaScript. The whole page,
+ *   rendered directly rather than redirected: a redirect would land on the GET,
+ *   find the grant and report "served from a grant you already hold", losing
+ *   the charge's report and its transaction on the way. A refresh of this page
+ *   asks to resubmit, and resubmitting finds the grant.
+ *
+ * `no-store` on both, for the inspector fragment's reason: these are account
+ * values read on this request, and a cached copy would be the server's memory
+ * answering for the chain.
+ */
+$articlePost = $app->post('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $articleContent, $inspector, $reads): Response {
+    if (!Library::isBuilt($contentDir)) {
+        return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
+    }
+
+    $piece = Library::load($contentDir)->find((string) $args['slug']);
+    if (!$piece instanceof Piece || !$piece->metered) {
+        return $page($response, $shell('Not found', $view->render('not-found')), 404);
+    }
+
+    // §7's decision was made by the middleware, before this handler ran, and
+    // this is the whole of what the handler does with it. Anything else here —
+    // a second read, a "just in case" charge — would be metering per request,
+    // which is §7.1's defect.
+    $metering = $request->getAttribute(MeterMiddleware::ATTRIBUTE);
+    $result = $metering instanceof MeterResult ? $metering : null;
+    $content = $articleContent($request, $piece, $result);
+
+    if ($request->getHeaderLine('X-Fragment') === '1') {
+        $response->getBody()->write($content.$view->render('inspector', [
+            'sections' => $inspector($reads($request), $result),
+        ]));
+
+        return $response
+            ->withHeader('Content-Type', 'text/html; charset=utf-8')
+            ->withHeader('Cache-Control', 'no-store');
+    }
+
+    return $page($response, $shell($piece->title, $content, $reads($request), $result))
+        ->withHeader('Cache-Control', 'no-store');
 });
 
 /**
  * §12.1: the metering decision is a middleware, in front of the handler that
  * renders the body. It runs after routing, so the slug is available, and it
  * sets one attribute rather than rendering anything — every branch is a value
- * the handler turns into a screen (§8).
+ * the handler turns into a screen (§8). On the POST and only the POST: see the
+ * middleware's own docblock for why the GET has none.
  */
-$article->add(new MeterMiddleware(
+$articlePost->add(new MeterMiddleware(
     static fn (string $slug): ?Piece => Library::isBuilt($contentDir)
         ? Library::load($contentDir)->find($slug)
         : null,

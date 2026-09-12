@@ -612,6 +612,27 @@ The grant is keyed by article rather than by request because that is what
 "a fee per page view" means when the site is honest about it. Charging for a
 refresh is not metering, it is a billing bug with a chain underneath.
 
+**The page view is a POST, and a GET never meters** (2026-09-11). A GET is
+what a browser makes on its own account — a prefetch, a prerender, a restore
+from history, a link preview — and HTTP defines it as safe to repeat. A charge
+is not. So `GET /a/{slug}` answers from a live grant or, for a reader the site
+could charge, sends a *shell*: the lede and a form posting to the same URL,
+rendered without a chain read so that it arrives at once. A small script posts
+the form straight away and swaps the answer in, so the seconds the validator
+takes pass on the new page with a line saying what it is waiting for, instead
+of on the old page with nothing. Without JavaScript the form is a button and
+the POST answers with the whole page.
+
+This replaced a GET that metered and defended itself with a list of prefetch
+headers, which covered the requests that announced themselves and nothing
+else. The one speculative load that can still reach the POST is a prerendered
+page running the script, and the script waits for `document.prerendering` to
+clear. A cross-site page cannot spend a reader's money by posting a form here
+either: the session cookie is `SameSite=Lax`, which is not sent on a
+cross-site POST, so such a request arrives anonymous and nothing is metered.
+A repeated POST — a double click, a retry after a lost answer, a second tab —
+finds the grant the first one recorded under §7.2's lock.
+
 ### 7.2 One meter at a time per payer
 
 Two requests from one reader that both reach the metering step build two
@@ -1517,7 +1538,11 @@ Two decisions already made take the work a framework would do away from the
 browser. §12.4 puts RPC on the server, so the page needs no RPC client — which
 is most of what a modern Solana SDK is for. §7 requires the metered body to be
 delivered by the server after a successful meter and never fetched afterwards,
-so the article route cannot be a client-side render whatever else is true. What
+so the article route cannot be a client-side render whatever else is true.
+(Since 2026-09-11 the metering request is a POST whose answer — the body,
+rendered by the server that metered it — a small script swaps into the page;
+§7.1 says why. That is still the server delivering the body in the response to
+the charge. What the browser never does is fetch the body on its own later.) What
 is left for JavaScript is the wallet: discover it, sign in, and sign three
 transactions. That is a script on two screens, not an application.
 

@@ -273,6 +273,80 @@ final class TemplateRenderTest extends TestCase
         self::assertSame($sorted($written[1]), $sorted($read[1]), 'written by /meter/advance vs read by the article route');
     }
 
+    /**
+     * The article shell (2026-09-11), which `GET /a/{slug}` sends without a
+     * chain read and `assets/read-on.js` posts at once.
+     *
+     * Three things are held here. The form posts to the article's own URL, so
+     * the no-JS path is the same request as the scripted one. The script's
+     * reset is safe for the advance's reason: the server never renders the
+     * button disabled or the sentence shown. And the shell carries **nothing a
+     * charge can change** — no body, no meter, no price — which is what lets
+     * the POST's answer replace it rather than reload it.
+     */
+    public function testTheShellPostsToItsOwnUrlAndClaimsNothingTheChainWouldAnswer(): void
+    {
+        $piece = new \Newsprint\Content\Piece('two orderings', 'T', 'The lede.', 4, true, 'draft', '');
+        $html = $this->renderStrictly('article-pending', ['piece' => $piece, 'longWaitMs' => 7000]);
+
+        self::assertMatchesRegularExpression('/<form method="post" action="\/a\/two%20orderings"[^>]*\bdata-read-on\b/', $html);
+        // One live region, hidden: without JavaScript nothing is under way.
+        self::assertMatchesRegularExpression('/<div[^>]*\bdata-read-on-status\b[^>]*\brole="status"[^>]*\bhidden\b[^>]*>\s*<p class="pending" data-read-on-now>Straight support/u', $html);
+        // The second line is hidden until the wait is longer than usual, and
+        // carries the threshold the script reads.
+        self::assertMatchesRegularExpression('/<p[^>]*\bdata-read-on-later\b[^>]*\bdata-after-ms="7000"[^>]*\bhidden\b[^>]*>\s*Thank you/u', $html);
+        // The failure line is empty and hidden: only the script knows a reason.
+        self::assertMatchesRegularExpression('/<p[^>]*\bdata-read-on-failed\b[^>]*\bhidden\b[^>]*><\/p>/', $html);
+        self::assertMatchesRegularExpression('/<p[^>]*\bdata-read-on-manual\b[^>]*>\s*<button type="submit"/', $html);
+        self::assertDoesNotMatchRegularExpression('/<button[^>]*\bdisabled\b/', $html);
+        self::assertStringContainsString('<script type="module" src="/assets/read-on.js"></script>', $html);
+        self::assertFileExists(dirname(__DIR__, 2).'/public/assets/read-on.js');
+        self::assertStringContainsString('The lede.', $html);
+
+        // Nothing a charge can change.
+        self::assertStringNotContainsString('class="body"', $html);
+        self::assertStringNotContainsString('data-meter', $html);
+        self::assertStringNotContainsString('DEMO', $html);
+    }
+
+    /**
+     * What `read-on.js` looks for, against what the templates render.
+     *
+     * The script finds the shell by three data attributes and takes two parts
+     * out of the POST's answer — `article.piece` and `.inspector-body`. Rename
+     * any of them on one side only and the article sits on "Checking your
+     * meter…" for good, having charged, with no error anywhere: the fragment
+     * arrives, the selector finds nothing, and the body never lands. So the
+     * two sides are read and compared.
+     */
+    public function testReadOnJsLooksForWhatTheTemplatesRender(): void
+    {
+        $root = dirname(__DIR__, 2);
+        $script = (string) file_get_contents($root.'/public/assets/read-on.js');
+        $shell = (string) file_get_contents($root.'/templates/article-pending.php');
+
+        preg_match_all('/\[(data-read-on[a-z-]*)\]/', $script, $sought);
+        self::assertNotSame([], $sought[1], 'a scanner that found nothing proves nothing');
+        foreach (array_unique($sought[1]) as $attribute) {
+            self::assertMatchesRegularExpression('/\s'.preg_quote($attribute, '/').'[\s>]/', $shell, $attribute);
+        }
+
+        // The shell is replaced by the answer's article, so both are one.
+        self::assertStringContainsString("querySelector('article.piece')", $script);
+        self::assertStringContainsString('<article class="piece">', $shell);
+        self::assertStringContainsString('<article class="piece">', (string) file_get_contents($root.'/templates/article.php'));
+
+        self::assertStringContainsString("querySelector('.inspector-body')", $script);
+        self::assertStringContainsString('class="inspector-body"', (string) file_get_contents($root.'/templates/inspector.php'));
+
+        // And the header the POST route branches on is the one the script sends.
+        self::assertStringContainsString("'X-Fragment': '1'", $script);
+
+        // The threshold travels as `data-after-ms`, read as `dataset.afterMs`.
+        self::assertStringContainsString('data-after-ms=', $shell);
+        self::assertStringContainsString('dataset.afterMs', $script);
+    }
+
     public function testManageMeterRendersInEveryState(): void
     {
         $common = [

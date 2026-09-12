@@ -40,8 +40,7 @@ $contract = $meter['contract'];
 <?php elseif ($meter['stage'] === 'unreadable'): ?>
     <h2>The rest is metered</h2>
     <p class="pending">
-        The chain could not be read just now, so the meter cannot say where you
-        stand. The article is still here; nothing was charged.
+        Currently unable to consult the meter.
     </p>
 
 <?php elseif ($meter['stage'] === 'anonymous'): ?>

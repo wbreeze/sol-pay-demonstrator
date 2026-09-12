@@ -100,5 +100,15 @@ return [
     'metering' => [
         'grant_ttl_s' => 1_800, // thirty minutes
         'demo_step_views' => 7, // below the ten-view threshold, so the settle is intermittent
+
+        // When the article shell's second line appears (`assets/read-on.js`):
+        // only once the wait is longer than usual. "Usual" is measured, not
+        // guessed — ten charging views across four HARs, 2026-09-09 to 09-11,
+        // took 3.0, 3.1, 4.1, 4.4, 4.8, 5.2, 6.7, 7.5, 8.2 and 9.6 s, median
+        // about 5 s. At 7 s the line shows on three of those ten, and never on
+        // a reader bound for `set_meter`, whose answer is one call and about a
+        // second. Six sequential round trips set this, so it moves with the
+        // endpoint: re-measure after changing `rpc.url` or its tier.
+        'long_wait_ms' => 7_000,
     ],
 ];

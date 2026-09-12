@@ -64,80 +64,92 @@ document.addEventListener('click', async (event) => {
  * panel is collapsed by default, so the read belongs to the reader who opens
  * it. The paragraph is a real link, so this is an upgrade rather than a
  * requirement — with no JavaScript the link still goes to the panel. */
-const panelBody = document.querySelector('details.inspector');
-const deferred = document.querySelector('[data-panel-src]');
-
-if (panelBody && deferred) {
-    let asked = false;
-
-    const load = async () => {
-        if (asked) return;
-        asked = true;
-        const saying = deferred.textContent;
-        deferred.textContent = 'reading the accounts…';
-
-        try {
-            const response = await fetch(deferred.dataset.panelSrc, {
-                headers: { 'X-Fragment': '1' },
-            });
-            if (!response.ok) throw new Error(`the site answered ${response.status}`);
-            const markup = await response.text();
-
-            // `insertAdjacentHTML` and then remove the paragraph, rather than
-            // replacing `innerHTML` on a parent: the parent holds the script
-            // tag and the summary too, and rewriting it would tear down the
-            // element whose toggle event is running.
-            deferred.insertAdjacentHTML('afterend', markup);
-            deferred.remove();
-        } catch (error) {
-            // Put the reader back where they started -- a link they can click
-            // -- rather than leaving a spinner that never resolves. Lowering
-            // the flag means the next open tries again, which is what a reader
-            // reopening it is asking for.
-            asked = false;
-            deferred.textContent = `${saying.trim()} (that read failed: ${error.message})`;
-        }
-    };
-
-    if (panelBody.open) load();
-    panelBody.addEventListener('toggle', () => {
-        if (panelBody.open) load();
-    });
-}
-
 const panel = document.querySelector('details.inspector');
-const row = document.querySelector('[data-event-for]');
-const slot = row?.querySelector('[data-event-slot]');
 
-if (panel && row && slot) {
-    /** Once, not once per toggle: the answer cannot change for a landed signature. */
-    let asked = false;
+/* ---- found when asked for, not when the page loaded ----
+ *
+ * An article shell (`assets/read-on.js`, 2026-09-11) replaces this panel's
+ * body with the one its POST rendered — the deferred paragraph goes, and a
+ * last-transaction row may arrive that was not there at load. So neither the
+ * paragraph nor the row is looked up once and kept: each open asks the
+ * document what is there now, and a replaced body is a fresh start. The shell
+ * says so with a `newsprint:inspector` event. */
+let panelAsked = false;
+let eventAsked = false;
 
-    const read = async () => {
-        if (asked) return;
-        asked = true;
-        slot.textContent = 'reading it from the chain…';
+const loadPanel = async () => {
+    const deferred = panel.querySelector('[data-panel-src]');
+    if (!deferred || panelAsked) return;
+    panelAsked = true;
+    const saying = deferred.textContent;
+    deferred.textContent = 'reading the accounts…';
 
-        try {
-            const response = await fetch(
-                `/inspector/event/${encodeURIComponent(row.dataset.eventFor)}`,
-                { headers: { Accept: 'application/json' } },
-            );
-            const body = await response.json();
-            slot.textContent = typeof body.text === 'string'
-                ? body.text
-                : 'the answer was not in the shape this page expected';
-        } catch (error) {
-            // A transaction that has not landed yet is a "try again", so the
-            // flag goes back down and the next open asks once more. A reader
-            // who closes and reopens is asking again on purpose.
-            asked = false;
-            slot.textContent = `could not reach this site to read it: ${error.message}`;
-        }
-    };
+    try {
+        const response = await fetch(deferred.dataset.panelSrc, {
+            headers: { 'X-Fragment': '1' },
+        });
+        if (!response.ok) throw new Error(`the site answered ${response.status}`);
+        const markup = await response.text();
 
-    if (panel.open) read();
-    panel.addEventListener('toggle', () => {
-        if (panel.open) read();
+        // A shell's answer may have replaced the body while this read was
+        // out. It is the newer of the two, rendered by the request that
+        // charged, so this one is dropped rather than put beside it.
+        if (!deferred.isConnected) return;
+
+        // `insertAdjacentHTML` and then remove the paragraph, rather than
+        // replacing `innerHTML` on a parent: the parent holds the script
+        // tag and the summary too, and rewriting it would tear down the
+        // element whose toggle event is running.
+        deferred.insertAdjacentHTML('afterend', markup);
+        deferred.remove();
+    } catch (error) {
+        // Put the reader back where they started -- a link they can click
+        // -- rather than leaving a spinner that never resolves. Lowering
+        // the flag means the next open tries again, which is what a reader
+        // reopening it is asking for.
+        panelAsked = false;
+        deferred.textContent = `${saying.trim()} (that read failed: ${error.message})`;
+    }
+};
+
+/** Once per row, not once per toggle: the answer cannot change for a landed signature. */
+const readEvent = async () => {
+    const row = panel.querySelector('[data-event-for]');
+    const slot = row?.querySelector('[data-event-slot]');
+    if (!row || !slot || eventAsked) return;
+    eventAsked = true;
+    slot.textContent = 'reading it from the chain…';
+
+    try {
+        const response = await fetch(
+            `/inspector/event/${encodeURIComponent(row.dataset.eventFor)}`,
+            { headers: { Accept: 'application/json' } },
+        );
+        const body = await response.json();
+        slot.textContent = typeof body.text === 'string'
+            ? body.text
+            : 'the answer was not in the shape this page expected';
+    } catch (error) {
+        // A transaction that has not landed yet is a "try again", so the
+        // flag goes back down and the next open asks once more. A reader
+        // who closes and reopens is asking again on purpose.
+        eventAsked = false;
+        slot.textContent = `could not reach this site to read it: ${error.message}`;
+    }
+};
+
+const opened = () => {
+    if (!panel.open) return;
+    loadPanel();
+    readEvent();
+};
+
+if (panel) {
+    opened();
+    panel.addEventListener('toggle', opened);
+    document.addEventListener('newsprint:inspector', () => {
+        panelAsked = false;
+        eventAsked = false;
+        opened();
     });
 }

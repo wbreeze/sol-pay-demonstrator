@@ -16,7 +16,9 @@ participant "RPC" as R
 participant "pay_on_chain" as P #pink
 participant "SPL Token" as T #pink
 
-V -> S : GET /read/{slug}
+== GET: never meters, never reads the chain to decide ==
+
+V -> S : GET /a/{slug}
 activate S
 
 S -> S : session cookie -> wallet address
@@ -29,12 +31,25 @@ break grant is live
   S -[#00A0A0]-> V : metered_page (no charge)
 end
 
+S -[#00A0A0]-> V : shell: lede + "checking your meter…"
+deactivate S
+
+== POST: the page view ==
+
+V -> S : POST /a/{slug} (the shell's script at once; without one, a button)
+activate S
+
 S -> S : derive site PDA, contract PDA
 S -> R : getMultipleAccounts(site, contract, payer ATA)
 R --> S : account data
 S -> S : decode Site, Contract, TokenAccount
 break no contract account
   S -[#00A0A0]-> V : set_meter
+end
+
+S -> S : take the payer lock; live view grant?
+break grant is live (a repeated POST)
+  S -[#00A0A0]-> V : metered_page (no charge)
 end
 
 S -> S : preflight can_meter(contract, site, 1)
@@ -64,7 +79,7 @@ break transaction failed
 end
 
 S -> S : record view grant
-S -[#00A0A0]-> V : metered_page + inspector
+S -[#00A0A0]-> V : metered_page + inspector (swapped into the shell)
 deactivate S
 
 legend left
@@ -72,6 +87,7 @@ Colour follows state-machine.plantuml in the sol-pay repository.
   pink ..... on chain
   teal ..... a screen this site builds
 Every break is a screen, not an error page.
+A GET never meters: the charge is the POST (SPEC section 7.1).
 The site authority signs meter_and_settle. The payer is not present.
 An ambiguous confirmation is served, not refused; see SPEC section 7.3.
 endlegend

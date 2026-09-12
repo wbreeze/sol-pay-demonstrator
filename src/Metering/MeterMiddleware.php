@@ -27,6 +27,28 @@ use Slim\Routing\RouteContext;
  * blocked, refused, unreachable — is a value the handler turns into a screen,
  * because §8 says every branch that leaves the happy path early is a screen
  * and not an error page.
+ *
+ * **It sits in front of `POST /a/{slug}`, and nothing else** (2026-09-11).
+ * Metering changes state — it moves a reader's money — so the request that
+ * does it is a POST, and `GET /a/{slug}` never meters at all: it serves the
+ * body from a live grant, or it serves a shell with the lede and a form that
+ * posts here. That is ordinary HTTP rather than a policy of this site's, and
+ * it is the shape an integrator should copy: a GET is safe to repeat, to
+ * prefetch, to prerender and to follow from a link preview, and none of those
+ * can charge anybody because none of them is a POST.
+ *
+ * This used to be a GET, and a GET that charges needs defending from
+ * everything that makes GETs for its own reasons. The defence was a list of
+ * prefetch headers — `Sec-Purpose`, `Purpose`, `X-Moz` — which covered the
+ * requests that announced themselves and nothing that did not. It is gone
+ * because the hazard is gone. What remains is a prerendered page *running
+ * the script* that sends this POST, and that is answered where it arises, in
+ * `assets/read-on.js`, which waits for `document.prerendering` to clear.
+ *
+ * A POST is also why a cross-site page cannot spend a reader's money by
+ * embedding a form: the session cookie is `SameSite=Lax`, which a browser
+ * does not send on a cross-site POST, so such a request arrives anonymous and
+ * this middleware lets it through without metering.
  */
 final class MeterMiddleware implements MiddlewareInterface
 {
@@ -57,21 +79,13 @@ final class MeterMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
-        // §7.1 lists a browser prefetch among the things that are not page
-        // views. The grant covers the *second* one and every one after it,
-        // but the first would charge a reader for an article they never
-        // opened — so a request that announces itself as speculative is not
-        // metered at all. Chrome and Firefox each say so their own way.
-        if (self::isSpeculative($request)) {
-            return $handler->handle($request);
-        }
-
         $reads = ($this->reads)($request);
         $wallet = $reads->wallet();
 
-        // §7.5, and the only caller of it. Asked before anything is read,
-        // because a request that is not going to meter should not pay to find
-        // that out — `wallet()` comes from the cookie and the store.
+        // §7.5. Asked before anything is read, because a request that is not
+        // going to meter should not pay to find that out — `wallet()` comes
+        // from the cookie and the store. The GET route asks the same question
+        // for a different reason: to decide whether to send the shell.
         if (!Decision::shouldMeter($piece, $wallet)) {
             return $handler->handle($request);
         }
@@ -120,26 +134,5 @@ final class MeterMiddleware implements MiddlewareInterface
         }
 
         return $handler->handle($request->withAttribute(self::ATTRIBUTE, $result));
-    }
-
-    /**
-     * A request the browser made on its own guess, not because a reader asked.
-     *
-     * Trusting a header the client sets is exactly right here: the header only
-     * ever costs the site a charge it chose not to make, and a client that
-     * lies about it is asking to be given the article for free — which is a
-     * problem this demo does not have and a real site bounds with the grant it
-     * would then write. Nothing is served differently; the body still waits on
-     * a real request.
-     */
-    private static function isSpeculative(ServerRequestInterface $request): bool
-    {
-        foreach (['Sec-Purpose' => 'prefetch', 'Purpose' => 'prefetch', 'X-Moz' => 'prefetch'] as $header => $needle) {
-            if (str_contains(strtolower($request->getHeaderLine($header)), $needle)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 }
