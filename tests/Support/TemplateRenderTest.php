@@ -46,7 +46,9 @@ final class TemplateRenderTest extends TestCase
 
     private function view(): View
     {
-        return new View(dirname(__DIR__, 2).'/templates');
+        // The real words, not a stub: a fixture catalogue would let a template
+        // ask for a key that does not exist and still render.
+        return new View(dirname(__DIR__, 2).'/templates', \Newsprint\Support\Copy::load(dirname(__DIR__, 2)));
     }
 
     /**

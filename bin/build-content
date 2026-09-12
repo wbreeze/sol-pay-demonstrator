@@ -63,6 +63,47 @@ $environment->addExtension(new CommonMarkCoreExtension());
 $environment->addExtension(new FrontMatterExtension());
 $converter = new MarkdownConverter($environment);
 
+/**
+ * The screens' own prose, rendered with the articles and by the same rules.
+ *
+ * `content/ui/*.md` holds the paragraphs the templates used to carry inline —
+ * every block introduced by a `##` heading that is its key. Rendered here
+ * rather than in a second builder because everything that matters is already
+ * configured: `html_input => 'strip'`, `allow_unsafe_links => false`, and one
+ * commonmark version to be surprised by instead of two.
+ *
+ * @return array<string, string>
+ */
+$renderUi = static function (string $dir, MarkdownConverter $converter): array {
+    $blocks = [];
+    foreach (glob($dir.'/*.md') ?: [] as $path) {
+        $screen = basename($path, '.md');
+        $body = (string) file_get_contents($path);
+        $body = (string) preg_replace('/\A---\n.*?\n---\n/s', '', $body);
+
+        // Split on the `##` headings, which are the keys. A block with no
+        // heading in front of it has no key and would be silently dropped, so
+        // it is refused instead.
+        $parts = preg_split('/^## +([a-z][a-z0-9_.]*)\s*$/m', $body, -1, PREG_SPLIT_DELIM_CAPTURE);
+        if ($parts === false || trim((string) $parts[0]) !== '') {
+            fwrite(STDERR, "content/ui/{$screen}.md: text before the first '## key' heading\n");
+            exit(1);
+        }
+
+        for ($i = 1; $i < count($parts); $i += 2) {
+            $key = $screen.'.'.$parts[$i];
+            if (isset($blocks[$key])) {
+                fwrite(STDERR, "content/ui/{$screen}.md: '{$parts[$i]}' appears twice\n");
+                exit(1);
+            }
+
+            $blocks[$key] = trim($converter->convert(trim((string) $parts[$i + 1]))->getContent());
+        }
+    }
+
+    return $blocks;
+};
+
 $manifest = [];
 $skipped = [];
 
@@ -202,6 +243,12 @@ foreach (glob($target.'/*.html') ?: [] as $built) {
 }
 
 file_put_contents($target.'/index.json', json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
+
+$ui = $renderUi($source.'/ui', $converter);
+file_put_contents($target.'/ui.json', json_encode($ui, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
+if (!$quiet) {
+    printf("%d block%s of screen copy into var/content/ui.json\n", count($ui), count($ui) === 1 ? '' : 's');
+}
 
 if (!$quiet) {
     foreach ($skipped as $name) {

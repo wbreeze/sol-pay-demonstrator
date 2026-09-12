@@ -11,7 +11,12 @@ namespace Newsprint\Support;
  */
 final class View
 {
-    public function __construct(private readonly string $templateDir)
+    /**
+     * The copy is handed to every template the way `$view` is, because a
+     * template that has to be *given* its words by every caller is a template
+     * whose callers all have to remember to.
+     */
+    public function __construct(private readonly string $templateDir, private readonly ?Copy $copy = null)
     {
     }
 
@@ -19,6 +24,7 @@ final class View
     public function render(string $template, array $vars = []): string
     {
         $vars['view'] = $this;
+        $vars['copy'] ??= $this->copy;
         extract($vars, EXTR_SKIP);
 
         ob_start();

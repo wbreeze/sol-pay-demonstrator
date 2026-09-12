@@ -27,6 +27,7 @@ use Newsprint\Content\Library;
 use Newsprint\Content\Piece;
 use Newsprint\Support\Alias;
 use Newsprint\Support\Config;
+use Newsprint\Support\Copy;
 use Newsprint\Support\RpcTimingMiddleware;
 use Newsprint\Metering\Decision;
 use Newsprint\Metering\Meter;
@@ -49,7 +50,10 @@ require __DIR__.'/../vendor/autoload.php';
 
 $root = dirname(__DIR__);
 $config = Config::load($root);
-$view = new View($root.'/templates');
+// The words, alongside the templates that arrange them: `config/strings.php`
+// for the lines and `var/content/ui.json` for the prose blocks, both handed to
+// every template the way `$view` is. See `Newsprint\Support\Copy`.
+$view = new View($root.'/templates', Copy::load($root));
 $contentDir = $root.'/var/content';
 
 $params = $config->siteParams();
