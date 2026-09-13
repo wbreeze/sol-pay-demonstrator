@@ -2,9 +2,11 @@
 
 The sol-pay demonstrator site.
 
-Status: draft, 2026-09-02, revised after review. Nothing is implemented. Platform choices are
-deliberately open; they are collected in §12 and are the next decision, not
-this document's.
+Status: **implemented**. The site is built and runs, and every platform choice
+in §12 is decided and in service. This began as a draft on 2026-09-02 and has
+been amended in place since, each amendment dated where it sits — so a section
+carries the date it last moved rather than the date the document started. What
+is still genuinely open is collected in §14 and §15.
 
 Companion to [`sol-pay`](https://github.com/wbreeze/sol-pay). Where this
 document and `wasm-client/SPEC.md` disagree about the library, that document is
@@ -55,9 +57,10 @@ design:
    the meter move, and sees the transfer land on the explorer.
 2. **The reference integration.** Someone who has decided to adopt sol-pay
    reads this repository to find out what they have to write. Every part the
-   library does not supply — RPC, wallet adapter, session, the viewer-to-wallet
-   map, the decision to meter, error attribution, log hygiene — appears here in
-   one place, in the smallest honest form.
+   library does not supply — remote procedure calls to a node (RPC), a wallet
+   adapter, session, the viewer-to-wallet map, the decision to meter, error
+   attribution, log hygiene — appears here in one place, in the smallest honest
+   form.
 
 The second purpose is why the machinery is visible (§9) rather than hidden. A
 demo that conceals the plumbing proves the reading experience is unobtrusive
@@ -65,10 +68,11 @@ and teaches nothing. This one shows both halves at once.
 
 ### What it is not
 
-Not a product, not a template to fork into production, and not a CMS. It runs
-on devnet with a token that is worth nothing, and it holds a signing key on a
-web server, which is defensible only because that key controls nothing of
-value. Both facts are stated on the site itself, not only here.
+Not a product, not a template to fork into production, and not a content
+management system (CMS). It runs on devnet with a token that is worth nothing,
+and it holds a signing key on a web server, which is defensible only because
+that key controls nothing of value. Both facts are stated on the site itself,
+not only here.
 
 ## 2. What the demo has to prove
 
@@ -90,13 +94,13 @@ own state proves nothing; this one reports what it read.
 
 **Claim 6 named the wrong witness until 2026-09-07**, and it is worth saying
 why rather than quietly editing it. It read "the wallet shows no delegate
-afterwards". It does not: the delegate is two fields on the payer's **SPL token
-account** — `delegate` and `delegated_amount` — and a wallet shows balances.
-Tested against Phantom, the reader could not perform the check the claim
-required. So the claim now points at the account, which §9 was already going to
-decode, and at an explorer, so the check does not depend on this site's own
-rendering either. A falsifiable claim whose test nobody can run is not
-falsifiable.
+afterwards". It does not: the delegate is two fields on the payer's **Solana
+Program Library (SPL) token account** — `delegate` and `delegated_amount` —
+and a wallet shows balances. Tested against Phantom, the reader could not
+perform the check the claim required. So the claim now points at the account,
+which §9 was already going to decode, and at an explorer, so the check does
+not depend on this site's own rendering either. A falsifiable claim whose test
+nobody can run is not falsifiable.
 
 ## 3. Shape
 
@@ -157,7 +161,7 @@ with the DEMO figure beside them:
 
 | parameter | base units | DEMO | in views |
 | --- | --- | --- | --- |
-| `page_price` | 10_000 | 0.01 | — |
+| `page_price` | 10_000 | 0.01 | 1 |
 | `collection_threshold` | 100_000 | 0.10 | 10 |
 | `min_limit` | 500_000 | 0.50 | 50 |
 
@@ -170,9 +174,8 @@ a visitor reaches the collection threshold in ten views, not from any analysis
 of what an article is worth. The evidence says a real deployment would price
 several times higher — every venture that has actually sold articles landed
 between 10¢ and 40¢, and the break-even arithmetic against news ad revenue
-agrees with them. `handoff/sol-pay/03-the-revenue-claim.md` has the numbers.
-Nothing in the program constrains `page_price`, so this is a per-site decision
-rather than a property of the design.
+agrees with them. Nothing in the program constrains `page_price`, so this is a
+per-site decision rather than a property of the design.
 
 What the visitor experiences follows from those three numbers and is the reason
 they were chosen: a settle transaction on the tenth article, and the limit on
@@ -254,8 +257,10 @@ says that out loud rather than implying a security posture it does not have.
 
 The library takes a wallet address and is silent about where it came from
 (`wasm-client/SPEC.md` §4). The demo has to choose, and it chooses **Sign In
-With Solana** over a server session, because §6.6 recommends exactly that and
-ships none of it. The missing worked example is the one this repository owes.
+With Solana (SIWS)** over a server session, because `wasm-client/SPEC.md` §6.6
+recommends exactly that and ships none of it. Supplying the worked example it
+recommends is what the rest of this section is: everything below is implemented
+here and nowhere upstream.
 
 **Decided 2026-09-05: `signIn`, and no fallback.** A wallet that does not
 offer the Wallet Standard `signIn` feature is not supported here, and the
@@ -361,7 +366,8 @@ entitled to that argument if the cookie actually behaves that way. It carries a
 session id and nothing else. (Not legal advice; an integrator's counsel
 decides.)
 
-**The verification is written here, and §6.6's advice does not reach this
+**The verification is written here, and `wasm-client/SPEC.md` §6.6's advice
+does not reach this
 server.** It names `@solana/wallet-standard-util`'s `verifySignIn` for the
 browser and an existing `siws` crate for the server, and its reason is sound —
 two implementations of one byte-exact format disagree eventually. But that was
@@ -397,7 +403,8 @@ Stated plainly, because the decision to drop the fallback is what buys them.
 - **The fallback that was dropped was the stronger check.** `connect` plus
   `signMessage` over server-composed bytes would have been verified
   byte-for-byte, with no parser in existence to disagree. Requiring `signIn`
-  means the format risk §6.6 warns about is taken on deliberately, in exchange
+  means the format risk `wasm-client/SPEC.md` §6.6 warns about is taken on
+  deliberately, in exchange
   for one user gesture instead of two and for demonstrating the feature the
   ecosystem actually recommends.
 - **A browser can stand in front of the wallet, and the refusal then lands on
@@ -539,9 +546,9 @@ It is not one extra path. It is two, and they share almost nothing.
 | how the reader arrives | normally | a user-clicked "open in Phantom / Solflare" link |
 | SIWS `signIn` | required (§5); untested on a device | required (§5); depends on the wallet browser the reader arrives in |
 
-**Android.** MWA registers as a Wallet Standard wallet and the rest of the
-integration is the desktop one. Four constraints that are not obvious and each
-of which breaks the flow outright:
+**Android.** The Mobile Wallet Adapter (MWA) registers as a Wallet Standard
+wallet and the rest of the integration is the desktop one. Four constraints
+that are not obvious and each of which breaks the flow outright:
 
 - **Chrome for Android only**, over **HTTPS** — the support check tests
   `window.isSecureContext` and an Android user agent, so there is no
@@ -844,7 +851,7 @@ fixes these:
 | 6005 | `DelegateMismatch` | `open_contract`, `renew_contract` | the wallet's token account is delegated elsewhere (§8.3) |
 | 6006 | `DelegateAllowanceTooLow` | `open_contract`, `renew_contract` | the approved amount does not cover the limit asked for |
 | 6007 | `LimitBelowUsage` | `renew_contract` | the renewal screen's own `limit_floor` check should have caught this; if it appears, the screen is wrong |
-| 1 (SPL) | `InsufficientFunds` | the `transfer_checked` CPI inside `meter_and_settle` | ambiguous — see below |
+| 1 (SPL) | `InsufficientFunds` | the `transfer_checked` cross-program invocation (CPI) inside `meter_and_settle` | ambiguous — see below |
 | — | `Unknown` | anywhere | the program address and the code, and a link. No guess. |
 
 The `raised by` column matters more than it looks. The program checks the
@@ -856,7 +863,8 @@ the CPI, which is the ambiguity the next paragraph is about.
 
 `InsufficientFunds` is ambiguous by construction: SPL Token appears to return
 it both for a short balance and for a short allowance, and the two need
-opposite responses. The demo answers it the way §6.4 prescribes — read the
+opposite responses. The demo answers it the way `wasm-client/SPEC.md` §6.4
+prescribes — read the
 payer's token account, call `diagnose(account, unpaid)`, and act on the
 `Shortfall`:
 
@@ -870,23 +878,34 @@ payer's token account, call `diagnose(account, unpaid)`, and act on the
 `Shortfall` is a struct and not a verdict for exactly this reason, and the demo
 is the site making the choice the library refused to make for it.
 
-### 8.3 The one-delegate consequence, and the objection it raises
+### 8.3 One delegate per token account, and what multi-site metering requires
 
 An SPL token account has exactly one delegate, and `approve` replaces it rather
-than adding to it. So a reader who has an open contract with one sol-pay site
-cannot open one with a second site **using the same token account**: the second
-`approve` silently repoints the delegate, and the first site's next settle fails
-inside the token program.
+than adding to it. Two sites therefore cannot both be delegated on the same
+token account: the second `approve` silently repoints the delegate, and the
+first site's next settle fails inside the token program as `DelegateMismatch`.
+
+**It belongs in §8 because of the shape of that failure.** Nothing rejects the
+second `approve` — it succeeds — and the damage surfaces later, on the *first*
+site, in a transaction the reader did not initiate and an error they cannot
+read.
 
 **This is not a property of the demo's mint.** It is SPL Token's account layout
-— one `delegate`, one `delegated_amount` — and it is identical for USDC, and
-identical again under Token-2022. The obvious objection follows immediately:
-*if this were widely adopted with USDC, could a reader only ever be metered by
-one site at a time?* It is the first question a serious evaluator asks, so it
-is answered here rather than left to be discovered.
+— one `delegate`, one `delegated_amount` — identical for USDC, and identical
+again under Token-2022. So the question it raises is about the design rather
+than about this demo, and it is the first question a serious evaluator asks:
+*what would it take for one wallet to hold metering contracts with several
+sites at once, in one currency?*
 
-**The answer is no, and the reason is in the program's account constraints.**
-`payer_token_account` is constrained in both `OpenContract` and
+That is worth answering as a list of requirements rather than as a defence.
+There are five. Three are already met by the program as it stands, the fourth
+is one column in a database, and the fifth — the only real one — is not on
+chain at all.
+
+#### What multi-site metering requires
+
+**1. The program must accept a token account that is not the canonical one.**
+**Met.** `payer_token_account` is constrained in both `OpenContract` and
 `MeterAndSettle` by exactly two things:
 
 ```rust
@@ -894,58 +913,81 @@ constraint = payer_token_account.owner == payer.key(),
 constraint = payer_token_account.mint  == site.mint,
 ```
 
-There is no associated-token-account constraint. Any token account the payer
-owns for the site's mint is acceptable — and a wallet may own arbitrarily many
-token accounts for one mint, the ATA being merely the canonical one. **One
-token account per site gives one delegate per site, and a reader can hold as
-many concurrent contracts as they have token accounts.**
+Ownership and mint, and nothing else. In particular there is no constraint
+requiring the **associated token account (ATA)** — the single canonical account
+that everything derives for a given owner and mint. Any token account the payer
+owns for the site's mint is acceptable.
 
-That is a real answer, and it is not a free one. The costs, stated plainly:
+**2. The wallet must be able to hold more than one token account per mint.**
+**Met, and it is ordinary.** The SPL token program has always allowed it; the
+ATA is merely the account everyone agrees to use by default. One token account
+per site gives one delegate per site, and a reader can hold as many concurrent
+contracts as they have token accounts.
 
-- **Rent.** Each token account is 165 bytes and costs roughly 0.002 SOL,
-  recoverable when it is closed.
-- **Split balances.** Balance is per account, not per wallet, so the reader has
-  to decide in advance how much USDC to park with each site — which is a second
-  budgeting decision on top of the limit, and a worse one, because it is
-  invisible in most wallet interfaces.
-- **Wallet support.** Wallets show the ATA. Auxiliary token accounts for the
-  same mint are second-class in nearly every interface, and asking an ordinary
-  reader to create and fund one is not a viable onboarding step today.
-- **A second integrator obligation.** `wasm-client/SPEC.md` §4.1 says the
-  payment core needs exactly one input, the payer's wallet address. That holds
-  only while everyone uses the ATA. A site that supports auxiliary accounts must
-  store *which* token account this reader uses alongside the address, because
-  `meter_and_settle` takes it as an account and the `Contract` does not record
-  it.
+**3. Each site's reach must stay bounded by what the reader agreed to with
+*that* site.** **Met**, and this is the requirement that makes the arrangement
+safe rather than merely possible. The delegate on each account is that site's
+contract **program derived address (PDA)** — an address derived from the site
+and the payer, which only the program can sign for — and the amount it may draw
+is that site's own `Contract.limit`. Holding three contracts does not let any
+one of them reach past its own limit, and the reader's total exposure is the
+sum of limits they agreed to one at a time.
 
-So the honest summary is: **the constraint is per token account, not per
-wallet; the workaround exists on chain today and is not yet practical in a
-wallet.** Anyone evaluating sol-pay should hear both halves.
+**4. The site must record which token account this reader uses.** **Not met,
+and small.** `wasm-client/SPEC.md` §4.1 says the payment core needs exactly one
+input, the payer's wallet address. That holds only while everyone uses the ATA.
+A site supporting auxiliary accounts stores the account alongside the address,
+because `meter_and_settle` takes it as an account and the `Contract` does not
+record it. One column and one lookup: an integrator obligation worth naming
+rather than an obstacle.
 
-Two designs would remove the friction rather than route around it, and neither
-is this demo's to choose:
+**5. A wallet has to help the reader make and manage those accounts.** **Not
+met, and this is the whole of what is missing.** Wallets show the ATA.
+Auxiliary token accounts for the same mint are second-class in nearly every
+interface: no ordinary path creates one, funding it is a transfer the reader
+has to understand, each costs about 0.002 SOL in rent (recoverable when it is
+closed), and balance is per account rather than per wallet — so the reader
+budgets per site, in a place their wallet will not show them.
+
+**So the summary is a narrow one, and it is not a refusal.** The constraint is
+per token *account*, not per wallet. The program already supports concurrent
+metering across sites and already bounds each site's reach correctly while
+doing it. What stands in the way is an interface question — creating, funding
+and displaying a second token account for a mint — and that is a gap someone
+can close in a wallet, with no program change and no new account type. Anyone
+evaluating sol-pay should hear it in that order, because "one site at a time"
+is the wrong conclusion and it is the easy one to reach.
+
+#### Two designs that would remove requirement 5 entirely
+
+Neither is this demo's to choose. They are recorded so the next person to meet
+the question does not start from scratch.
 
 - **A per-payer delegate PDA.** If the delegate were seeded `[b"delegate",
   payer]` rather than being the per-site contract PDA, one approval on the
-  reader's ATA would cover every site on that deployment, with each site's
-  exposure still bounded on chain by its own `Contract.limit`. The trade is that
-  the allowance becomes a shared pool: a site that draws hard leaves less for
-  the others, and a reader's total exposure is the allowance rather than the sum
-  of limits they agreed to.
+  reader's ATA would cover every site on that deployment and no second token
+  account would be needed at all. Requirement 3 is what it costs: the allowance
+  becomes a shared pool, so a site that draws hard leaves less for the others,
+  and the reader's total exposure is the allowance rather than the sum of the
+  limits they agreed to one at a time.
 - **Per-site escrow**, which `wasm-client/README.md` already names: the reader
   tops up an account the site draws from. It removes the delegate question
-  entirely and gives up the property the whole design is built on, that the
+  entirely and gives up the property the whole design is built on — that the
   money stays in the reader's wallet until it is spent.
 
-**What the demo does.** It uses the ATA, so within the demo a reader has one
-contract, which is all one site needs. What it owes the reader is not to spend
-their signature on a transaction that cannot succeed: the payer's token account
-is already decoded on the `set_meter` screen for the balance display, so its
-`delegate` field is in hand. It either names this site's contract PDA, names
+#### What the demo does
+
+The demo uses the ATA, so within it a reader has one contract, which is all one
+site needs. What it owes the reader is the check that requirement 5's absence
+makes necessary: not to spend a signature on a transaction that cannot succeed.
+
+It already holds what it needs in order to tell. The payer's token account is
+decoded on the `set_meter` screen for the balance display, so its `delegate`
+field is in hand, and that field either names this site's contract PDA, names
 something else, or is empty. When it names something else, the screen says so
 and explains the choice — close the other contract, or use a different token
-account — instead of asking for an approval that will fail as
-`DelegateMismatch` after the reader has paid a fee.
+account — instead of asking for an approval that will fail as `DelegateMismatch`
+after the reader has paid a fee.
 
 That is preflight in the general sense the library means it: check what the
 program will check, before the payer pays to be told.
@@ -953,8 +995,9 @@ program will check, before the payer pays to be told.
 ## 9. The inspector
 
 A panel, present on every screen, collapsed by default and one click from any
-page. It is the artifact that turns a demo into a reference, and claim 7 in §2
-is its job.
+page. It is the artifact that turns a demo into a reference, and its job is
+§2's claim 7 — *every number on the screen came from an account, not from the
+server's memory*.
 
 Four things to show. **Amended 2026-09-08:** the panel renders them as up to
 seven headings, because the first two split by provenance rather than by topic
@@ -1239,13 +1282,28 @@ Twelve rather than eight so that a reader who works through the publication
 reaches the ten-view settle by reading, and meets §7.4's control as an
 accelerant rather than as the only way to see a transfer happen.
 
-**The material is the sol-pay development sessions themselves**, edited. Each
-piece is one decision and the argument that produced it — why the bump slug was
-removed, why the library ships no sign-in, why `approve` must come first, why
+**The material is the development sessions themselves**, edited — sol-pay's and
+this demonstrator's both. An earlier draft of this section said sol-pay's only,
+which was the plan written before there was a demonstrator to draw on. In
+practice the pieces have come from both sides, and several of the sharpest are
+from building the site rather than the library.
+
+**What decides whether a session becomes a piece is not which repository it came
+from; it is whether an implementor needs it.** The test is whether someone
+setting out to meter their own content would be worse off not knowing it. That
+admits why `approve` must come first, why the library ships no sign-in, why
 `limit_floor` is one function rather than two, why `Shortfall` is a struct and
-not a verdict. The conclusions are already in `wasm-client/SPEC.md` in three
-terse sentences each; the sessions are where the reasoning lives, including the
-positions that were argued and abandoned.
+not a verdict — and equally why a busy timeout has to be set before the
+statement that takes a lock, or why a page that spends a round trip on a panel
+nobody opened is a defect and not a preference. The conclusions are already in
+`wasm-client/SPEC.md` and in this document, in three terse sentences each; the
+sessions are where the reasoning lives, including the positions that were
+argued and abandoned.
+
+**The AI-collaboration angle stays where the second constraint below puts it**
+— exhibited, never argued. A piece *about* the tooling is a different
+publication and belongs elsewhere; one that makes it the subject has stopped
+being about metering.
 
 Three editorial constraints, because the difference between this being good and
 being unreadable is entirely in the editing:
@@ -1296,10 +1354,10 @@ Public, reachable without signing in, and linked from the footer of every page.
 
 **Move three has a caveat, and the caveat is what makes the page credible.**
 
-A wallet address is pseudonymous, not anonymous. Addresses are linked to people
-every day — by KYC at an exchange on- or off-ramp, by address reuse across
-services, by chain analysis, by timing. None of that is something the site
-does, and the page says so.
+A wallet address is pseudonymous, not anonymous. Addresses are linked to
+people every day — by identity checks (KYC) at an exchange on- or off-ramp, by
+address reuse across services, by chain analysis, by timing. None of that is
+something the site does, and the page says so.
 
 But the site is not a neutral bystander either, and this is the part the brief
 did not have. `wasm-client/SPEC.md` §4.3: contracts are readable by anyone, so
@@ -1439,12 +1497,25 @@ That reasoning is the sort of thing that has to be published to count. An
 undisclosed exception to an erasure promise is not an exception, it is the
 promise being false.
 
-**4. The thing nobody can delete is the ledger, and closing writes to it.**
-`close_contract` emits `Closed { contract, forgiven }`. The reader's instruction
-to be forgotten is itself recorded, publicly and permanently, by the act of
-giving it. That is not an argument against closing — it is the sharpest
-available illustration of §10.2's caveat, and it belongs on the close
-confirmation screen *before* the click, where it can still inform a decision.
+**4. The ledger is the thing nobody can delete, and closing adds to it rather
+than starting it.** `close_contract` emits `Closed { contract, forgiven }`, so
+the reader's instruction to be forgotten is itself recorded, publicly and
+permanently, by the act of giving it.
+
+**Be exact about what that does and does not mean**, because an earlier draft of
+this point overstated it and presented the close event as the sharp edge. It is
+not. The indelible record was made when the reader **opened** the contract:
+`approve_and_open` is on chain, and every `Metered` event since has been too.
+That is §10.2's caveat, already stated there — the contract account is a public,
+permanent record that this address paid this site. Closing neither creates that
+exposure nor erases it. What it does is add the last entry, which is the
+reader's own final act saying the relationship is over.
+
+So this is not a cost of leaving, and the close confirmation should not read as
+though it were. The screen says what closing does — the delegate is revoked, the
+site's record is purged, the chain keeps what it already had and gains one more
+line — and leaves the ledger's permanence where §10.2 put it, in front of the
+reader at the point where they decide to *open* a contract.
 
 **5. Aggregates are allowed. Three conditions make them aggregates.** How many
 times a page was bought is a fact about the page, not about anybody, and a
@@ -1664,7 +1735,8 @@ demonstration. Choosing it would be optimising the thing that is not the point.
   for free — and therefore *masks the defect §7.2 exists to prevent*. The
   two-browsers-one-wallet test would pass there and fail under PHP-FPM. If PHP
   wins, that test runs with `PHP_CLI_SERVER_WORKERS` set, or against a real
-  SAPI, or it is testing nothing.
+  server API (SAPI, PHP's name for the interface between the interpreter and
+  whatever is serving requests), or it is testing nothing.
 - **And one that would bite the code rather than the test suite** (written
   2026-09-11, after `RequestRead` landed). The front controller memoises in a
   `static` inside a closure — `$store` for the SQLite handle, `$reads` for this
@@ -1712,7 +1784,8 @@ Laravel middleware, a Symfony kernel subscriber and a WordPress
 `SolPay\Core` is already framework-agnostic, so the middleware is a thin
 adapter over it plus the one obligation `wasm-client/SPEC.md` §4.1 names —
 mapping viewer to wallet address. Templates are plain PHP rather than Twig,
-which keeps §10.3 trivially satisfied.
+which keeps §10.3's rule — the page loads nothing from a domain this site does
+not control — trivially satisfied.
 
 **A lightweight CMS was considered and rejected.** The one job it would do —
 markdown to HTML with a page tree — §12.7 already assigns to build time, for
@@ -1901,6 +1974,17 @@ specification has already agreed to pay:
    numbers on the screen came from an account rather than from the server's
    memory. This is the price of claim 7, and it is bought deliberately.
 
+**None of the six is the inspector's**, which is worth saying because the
+opposite is the natural guess. §9's panel is rendered on a charging view from
+the read this request already made and the `MeterResult` it already produced, so
+it costs nothing; its own call, `getTransaction`, is deliberately off this path
+and fires only when a reader opens the panel on a page that did not charge. A
+production deployment that shipped no inspector at all would still make six
+calls here. The one it could drop is item 6 — and that is claim 7's price, not
+the panel's: dropping it means either showing the reader figures from before the
+charge, or computing the new ones in the server's memory, which is the practice
+§2's claim 7 exists to refuse.
+
 The reason all of this matters more than the count suggests is the endpoint's
 own behaviour, described below: latency here varies by an order of magnitude
 hour to hour. A call a page does not need is not felt as one call of overhead —
@@ -2082,7 +2166,7 @@ conditions are these:
 A demo where the faucet is generous never reaches this table. That is why §4.3
 is stingy.
 
-## 14. Questions this draft leaves open
+## 14. Questions this document leaves open
 
 The design questions raised in the first draft are closed. The site is
 **Newsprint** (§1, renamed from Penny Press on 2026-09-05, with the naming

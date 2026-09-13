@@ -16,22 +16,36 @@ participant "RPC" as R
 participant "pay_on_chain" as P #pink
 participant "SPL Token" as T #pink
 
-== GET: never meters, never reads the chain to decide ==
+== GET: never meters, never charges ==
 
 V -> S : GET /a/{slug}
 activate S
 
-S -> S : session cookie -> wallet address
-break no session
-  S -[#00A0A0]-> V : sign_in
+S -> S : session cookie -> paying wallet?
+
+break no wallet stored
+  S -> R : getMultipleAccounts(site, treasury, mint)
+  R --> S : account data
+  S -[#00A0A0]-> V : lede + meter panel
+  note right of V
+    Identifying happens here, on the
+    article. There is no sign-in page;
+    see SPEC section 5.
+  end note
 end
 
-S -> S : live view grant for this article?
-break grant is live
+break live view grant for this article
+  S -> R : getMultipleAccounts(site, treasury, mint, contract, payer token account)
+  R --> S : account data
   S -[#00A0A0]-> V : metered_page (no charge)
 end
 
-S -[#00A0A0]-> V : shell: lede + "checking your meter…"
+S -[#00A0A0]-> V : shell: lede + "checking your meter..."
+note right of V
+  No chain read on this response.
+  The POST's answer fills the
+  inspector; see SPEC section 9.
+end note
 deactivate S
 
 == POST: the page view ==
@@ -39,46 +53,75 @@ deactivate S
 V -> S : POST /a/{slug} (the shell's script at once; without one, a button)
 activate S
 
-S -> S : derive site PDA, contract PDA
-S -> R : getMultipleAccounts(site, contract, payer ATA)
+S -> S : derive site PDA, contract PDA, payer token account
+S -> R : getMultipleAccounts(site, treasury, mint, contract, payer token account)
 R --> S : account data
 S -> S : decode Site, Contract, TokenAccount
+
 break no contract account
   S -[#00A0A0]-> V : set_meter
 end
 
-S -> S : take the payer lock; live view grant?
-break grant is live (a repeated POST)
-  S -[#00A0A0]-> V : metered_page (no charge)
+group payer lock -- BEGIN IMMEDIATE on the payer's row (SPEC section 7.2)
+
+  break grant is live (a repeated POST)
+    S -[#00A0A0]-> V : metered_page (no charge)
+  end
+
+  S -> R : getMultipleAccounts(contract, payer token account)
+  R --> S : account data
+  note right of S
+    Read again, inside the lock. A request
+    that queued behind another decides from
+    what that one left, not from what it
+    saw before it waited.
+  end note
+
+  S -> S : preflight can_meter(contract, site, 1)
+  break blocked: LimitReached
+    S -[#00A0A0]-> V : manage_meter
+  end
+
+  S -> S : build meter_and_settle
+  S -> R : getLatestBlockhash
+  R --> S : blockhash
+  S -> S : sign as site authority
+
+  S -> R : sendTransaction
+  R -> P : meter_and_settle(page_views = 1)
+  activate P
+  P -> P : used += page_price
+  P -> P : require used <= limit
+  alt unpaid >= collection_threshold
+    P -> T : transfer_checked(unpaid, decimals)
+    T --> P : ok
+    P -> P : paid = used
+  end
+  P --> R : Metered event
+  deactivate P
+  R --> S : signature
+
+  S -> R : getSignatureStatuses (poll until confirmed)
+  R --> S : confirmation
+
+  break transaction failed
+    S -> S : cause(raising program, code); discard logs
+    S -[#00A0A0]-> V : re-authorize, top up, or manage_meter
+  end
+
+  S -> S : record view grant; count the purchase
 end
 
-S -> S : preflight can_meter(contract, site, 1)
-break blocked: LimitReached
-  S -[#00A0A0]-> V : manage_meter
-end
+S -> R : getMultipleAccounts(site, treasury, mint, contract, payer token account)
+R --> S : account data
+note right of S
+  The charge moved used, paid and the
+  residue, so the page reads them again.
+  Claim 7 in SPEC section 2: every number
+  on the screen came from an account, not
+  from the server's memory.
+end note
 
-S -> S : build meter_and_settle
-S -> S : sign as site authority
-S -> R : sendTransaction
-R -> P : meter_and_settle(page_views = 1)
-activate P
-P -> P : used += page_price
-P -> P : require used <= limit
-alt unpaid >= collection_threshold
-  P -> T : transfer_checked(unpaid, decimals)
-  T --> P : ok
-  P -> P : paid = used
-end
-P --> R : Metered event
-deactivate P
-R --> S : signature, confirmation
-
-break transaction failed
-  S -> S : cause(raising program, code); discard logs
-  S -[#00A0A0]-> V : re-authorize, top up, or manage_meter
-end
-
-S -> S : record view grant
 S -[#00A0A0]-> V : metered_page + inspector (swapped into the shell)
 deactivate S
 
@@ -90,6 +133,7 @@ Every break is a screen, not an error page.
 A GET never meters: the charge is the POST (SPEC section 7.1).
 The site authority signs meter_and_settle. The payer is not present.
 An ambiguous confirmation is served, not refused; see SPEC section 7.3.
+Six RPC calls on a charging view, and SPEC section 12.4 says why each is there.
 endlegend
 
 @enduml
