@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Newsprint\Store;
 
 use PDO;
+use PDOException;
 
 /**
  * The one SQLite file, and its schema (SPEC §12.5).
@@ -42,11 +43,10 @@ final class Database
         //
         // The order is the point. SQLite's default busy timeout is zero, so
         // every statement issued before this line fails outright the moment
-        // another connection holds the write lock — including the pragma
-        // below, which takes a lock of its own to set the journal mode. This
-        // stood the other way round until 2026-09-12, when
-        // `Metering\OneMeterAtATimeTest` caught it: four requests opening the
-        // database together, and one dying with `database is locked` at
+        // another connection holds the write lock. This stood the other way
+        // round until 2026-09-12, when `Metering\OneMeterAtATimeTest` caught
+        // it: four requests opening the database together, and one dying with
+        // `database is locked` at
         // `PRAGMA journal_mode` before it ever reached the queue it was
         // supposed to join. Not a test artefact — the metering path holds its
         // transaction across an RPC round trip, so the window in which a
@@ -54,9 +54,43 @@ final class Database
         // exactly §7.3's confirmation window wide, and the reader sees a 500
         // instead of their article.
         $pdo->exec('PRAGMA busy_timeout = 30000');
+
         // Readers do not block the writer, which matters because the metering
         // path holds a write transaction across an RPC round trip (§7.3).
-        $pdo->exec('PRAGMA journal_mode = WAL');
+        //
+        // **The busy timeout above does not cover this statement.** That is the
+        // correction to what the paragraph above claimed until 2026-09-13:
+        // putting the timeout first was necessary, and it is not sufficient.
+        // Converting a database to WAL needs an exclusive lock, and SQLite does
+        // not consult the busy handler to get it — it answers `database is
+        // locked` at once. Measured on 3.45.1: one connection with
+        // `busy_timeout = 30000` against another holding a write transaction
+        // failed the conversion in 1 ms, while an ordinary INSERT on that same
+        // connection waited 2.5 s and succeeded. So the wait is written out
+        // here instead, to the same 30 seconds.
+        //
+        // It can only ever loop on a database that is not yet WAL, which is a
+        // database nobody has finished opening: once the mode is set this is a
+        // header read that cannot contend. First run is therefore the whole
+        // window, and `Metering\OneMeterAtATimeTest` sits in it on every run,
+        // because its `setUp` hands four processes a path with no file at the
+        // end of it. That is CI run 94055745969 — six of eight matrix legs red,
+        // every one of them on the line below.
+        $deadline = microtime(true) + 30.0;
+        while (true) {
+            try {
+                $pdo->exec('PRAGMA journal_mode = WAL');
+                break;
+            } catch (PDOException $e) {
+                // 5 is SQLITE_BUSY. Anything else is not a queue to join.
+                if (($e->errorInfo[1] ?? null) !== 5 || microtime(true) > $deadline) {
+                    throw $e;
+                }
+
+                usleep(1_000);
+            }
+        }
+
         $pdo->exec('PRAGMA foreign_keys = ON');
         $pdo->exec('PRAGMA synchronous = NORMAL');
 
