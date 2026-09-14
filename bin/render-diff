@@ -1,0 +1,461 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Did that change the page?
+ *
+ * The suite answers a narrower question than it looks like it does. It asserts
+ * what somebody thought to assert, so a refactor can move a sentence, drop an
+ * attribute, nest a paragraph inside a list item, and leave every test green —
+ * because no test was watching that part. Reviewing the diff does not close it
+ * either: a template diff shows what the *source* did, and the source is not
+ * what a reader sees.
+ *
+ * So this renders every branch of every template twice — once from this
+ * working tree, once from a git ref — and compares the output. Identical means
+ * the refactor was a refactor. Anything else is named, branch by branch, which
+ * is also how to use it on purpose: point it at a change you meant to make and
+ * it says exactly which screens moved and which did not.
+ *
+ *   bin/render-diff            this tree against HEAD
+ *   bin/render-diff master     this tree against a ref
+ *   bin/render-diff --list     the fixtures, by name
+ *
+ * Exit 0 when nothing moved, 1 when something did, 2 on an error. **Exit 1 is
+ * information, not a failure** — the same convention `bin/upstream-drift`
+ * uses. A deliberate change is supposed to move something.
+ *
+ * **What is compared, and what is not.** Whitespace between and around tags is
+ * normalised away, and so is entity spelling: `&#039;` and `&quot;` and a bare
+ * `'` compare equal, because a renderer that changes how it escapes a quote
+ * has not changed the page. What is left is the markup and the words. That
+ * tolerance is deliberate — commonmark writes a paragraph on one line where a
+ * template indents it, and without this the first run is four hundred lines of
+ * indentation and nobody reads the second.
+ *
+ * **How it reaches the other tree.** `git archive <ref>` into a temporary
+ * directory — a read, so it runs against a repository in any state — and then
+ * the two renders happen in two processes, each with that tree's `src/` in
+ * front of the autoloader. Third-party code is taken from this tree's
+ * `vendor/` in both, because it is the same code: if `composer.lock` differs
+ * between the two, this says so and stops rather than quietly attributing a
+ * library's change to a template.
+ *
+ * **What it cannot do.** The fixtures below construct value objects — a
+ * `Piece`, a `MeterResult`, a panel array — so a change to one of *those*
+ * shapes breaks the render rather than being compared. That is the honest
+ * failure: the tool is for changes that leave the data alone, which is what a
+ * copy, markup or layout refactor is. When it dies constructing a fixture, the
+ * answer is that this was not that kind of change.
+ */
+
+const USAGE = <<<'TXT'
+    bin/render-diff [<ref>]     compare this working tree against <ref> (default HEAD)
+    bin/render-diff --list      name the fixtures
+    TXT;
+
+$root = dirname(__DIR__);
+
+// The `--render` mode is this script talking to itself, once per tree. It is
+// not in the usage because nobody should need it: the point of two processes
+// is that each has exactly one `Newsprint\` on its autoloader, so a fixture is
+// always built from the same tree whose templates render it.
+if (($argv[1] ?? null) === '--render') {
+    render($root, (string) $argv[2], (string) $argv[3]);
+    exit(0);
+}
+
+if (in_array($argv[1] ?? '', ['-h', '--help'], true)) {
+    echo USAGE, "\n";
+    exit(0);
+}
+
+if (($argv[1] ?? null) === '--list') {
+    require $root.'/vendor/autoload.php';
+    foreach (array_keys(fixtures($root)) as $name) {
+        echo '  ', $name, "\n";
+    }
+    exit(0);
+}
+
+$ref = $argv[1] ?? 'HEAD';
+exit(compare($root, $ref));
+
+/**
+ * Render every fixture of one tree into one directory.
+ *
+ * `$here` is where this script lives and where `vendor/` is taken from;
+ * `$tree` is the tree whose `src/` and `templates/` are under test. Diagnostics
+ * are promoted to exceptions and then caught per fixture, so a template that
+ * reads a key it was not given is a difference rather than a silent empty
+ * string — and a fixture that throws in one tree and not the other shows up as
+ * the difference it is.
+ */
+function render(string $here, string $tree, string $out): void
+{
+    require $here.'/vendor/autoload.php';
+
+    // In front of composer's, so `Newsprint\` resolves to the tree under test
+    // while `SolPay\` and everything else stays this tree's. The two are the
+    // same code — `compare()` refuses to run when the locks disagree.
+    spl_autoload_register(static function (string $class) use ($tree): void {
+        if (!str_starts_with($class, 'Newsprint\\')) {
+            return;
+        }
+        $file = $tree.'/src/'.str_replace('\\', '/', substr($class, strlen('Newsprint\\'))).'.php';
+        if (is_file($file)) {
+            require $file;
+        }
+    }, true, true);
+
+    @mkdir($out, 0777, true);
+
+    $view = new Newsprint\Support\View($tree.'/templates');
+
+    foreach (fixtures($tree) as $name => [$template, $vars]) {
+        set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+            throw new ErrorException($message.' in '.basename($file).' line '.$line, 0, $severity, $file, $line);
+        });
+
+        try {
+            $html = $view->render($template, $vars);
+        } catch (Throwable $e) {
+            $html = '*** '.$e::class.': '.$e->getMessage();
+        } finally {
+            restore_error_handler();
+        }
+
+        file_put_contents($out.'/'.$name.'.html', $html);
+    }
+}
+
+/** Archive the ref, render both, report. */
+function compare(string $root, string $ref): int
+{
+    $tmp = sys_get_temp_dir().'/render-diff-'.getmypid();
+    $base = $tmp.'/tree';
+    @mkdir($base, 0777, true);
+
+    // A read, deliberately: this runs against a repository in any state, and
+    // takes no lock — see `GIT_OPTIONAL_LOCKS`.
+    $archive = sprintf(
+        'GIT_OPTIONAL_LOCKS=0 git -C %s archive %s | tar x -C %s',
+        escapeshellarg($root),
+        escapeshellarg($ref),
+        escapeshellarg($base),
+    );
+    exec($archive, $ignored, $status);
+    if ($status !== 0) {
+        fwrite(STDERR, "could not archive {$ref}\n");
+
+        return 2;
+    }
+
+    // Third-party code is taken from this tree for both renders. That is only
+    // honest while it is the same third-party code.
+    if (md5_file($root.'/composer.lock') !== md5_file($base.'/composer.lock')) {
+        fwrite(STDERR, "composer.lock differs between this tree and {$ref}.\n");
+        fwrite(STDERR, "Both renders would use this tree's vendor/, so a library's change\n");
+        fwrite(STDERR, "would be reported as a template's. Compare against a ref with the\n");
+        fwrite(STDERR, "same lock, or install the other tree's dependencies and diff by hand.\n");
+
+        return 2;
+    }
+
+    $self = escapeshellarg(__FILE__);
+    foreach ([['before', $base], ['after', $root]] as [$which, $tree]) {
+        exec(sprintf('php %s --render %s %s', $self, escapeshellarg($tree), escapeshellarg($tmp.'/'.$which)), $ignored, $status);
+        if ($status !== 0) {
+            fwrite(STDERR, "the {$which} render failed\n");
+
+            return 2;
+        }
+    }
+
+    return report($tmp.'/before', $tmp.'/after', $ref);
+}
+
+/**
+ * What is the same, what moved, and where.
+ *
+ * The first divergence with its context is what a reader wants: a changed
+ * screen is usually one changed sentence, and a full diff of normalised markup
+ * buries it.
+ */
+function report(string $before, string $after, string $ref): int
+{
+    $changed = [];
+    $names = array_map(
+        static fn (string $f): string => basename($f, '.html'),
+        glob($before.'/*.html') ?: [],
+    );
+
+    foreach ($names as $name) {
+        $a = normalise((string) file_get_contents($before.'/'.$name.'.html'));
+        $b = normalise((string) file_get_contents($after.'/'.$name.'.html'));
+
+        if ($a === $b) {
+            continue;
+        }
+
+        $changed[] = $name;
+        $at = 0;
+        $limit = min(strlen($a), strlen($b));
+        while ($at < $limit && $a[$at] === $b[$at]) {
+            ++$at;
+        }
+        $from = max(0, $at - 60);
+
+        printf("\n  %s\n", $name);
+        printf("    − %s\n", trim(substr($a, $from, 170)));
+        printf("    + %s\n", trim(substr($b, $from, 170)));
+    }
+
+    printf(
+        "\n%d fixtures against %s: %d changed, %d identical\n",
+        count($names),
+        $ref,
+        count($changed),
+        count($names) - count($changed),
+    );
+
+    return $changed === [] ? 0 : 1;
+}
+
+/**
+ * Markup and words, with the two things that are not either of them removed.
+ *
+ * Whitespace around a tag is the renderer's business — commonmark writes a
+ * paragraph on one line where a template indents it — and entity spelling is
+ * the escaper's: `&#039;`, `&quot;` and the characters themselves say the same
+ * thing to a reader. Whitespace *inside* text is collapsed rather than
+ * dropped, because two words running together is a change.
+ */
+function normalise(string $html): string
+{
+    $s = html_entity_decode($html, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $s = (string) preg_replace('/\s+/u', ' ', $s);
+    $s = (string) preg_replace('/\s*(<[^>]*>)\s*/u', '$1', $s);
+
+    return trim($s);
+}
+
+/**
+ * Every branch worth rendering, named.
+ *
+ * The names are what the report prints, so they say the state rather than the
+ * template: `meter-failed-deadend` is a screen a reader can be in.
+ *
+ * **A branch with no fixture is a branch nothing here can tell you about**, so
+ * the rule when adding one is the rule `TemplateRenderTest` already states —
+ * populate the awkward case, not the convenient one. A panel rendered with
+ * every optional value null has not been rendered.
+ *
+ * @return array<string, array{0: string, 1: array<string, mixed>}>
+ */
+function fixtures(string $tree): array
+{
+    $site = ['symbol' => 'DEMO', 'page_price_demo' => '0.01', 'decimals' => 6];
+
+    $SITE = '7X4hDbm44UQYnmXshwSdCyAMhh3bJe2X5u1z2m1dSCVt';
+    $MINT = 'MintI1111111111111111111111111111111111111';
+    $PAYER = 'BFT5EZLV7eWhwX4jjRP7JJDuJYoCQRmvmzuDUBbvSMqR';
+    $CONTRACT = 'Fgm6costwpmn4d1CTqdM5su8jBptdwnW134cNoFixgqs';
+    $TOKEN = '3KDoatBW3VwL5tyKLnCrWreKSsAXEhymyCUpei6eLd7v';
+    $SIG = 'FKb3eeBwq5fXi4M6NhLY5tkstxRi2N6VoKtPpkG23ASSxyz';
+
+    $P = Newsprint\Content\Piece::class;
+    $piece = new $P('the-delegate', 'The delegate', 'A lede that is public, and a body that is not.', 6, true, 'published', '2026-09-02', '2026-09-09', '');
+    $draft = new $P('two-orderings', 'Two orderings', 'One valid ordering, not the only one.', 4, true, 'draft', '2026-09-07', null, '');
+    $older = new $P('first-transaction', 'The first transaction', 'What it cost.', 5, true, 'published', '2026-08-30', null, '');
+    $page = new $P('privacy', 'What this site holds about you', 'The whole list.', 9, false, 'published', '2026-09-01', '2026-09-12', '');
+
+    $config = Newsprint\Support\Config::load($tree);
+    $program = $config->program();
+
+    $panel = static fn (array $o = []): array => $o + [
+        'wallet' => $PAYER, 'stage' => 'metered', 'symbol' => 'DEMO', 'decimals' => 6,
+        'balance' => '0.05', 'limit_floor' => '0.5', 'views_remaining' => 8, 'blocked' => null,
+        'contract' => ['address' => $CONTRACT, 'limit' => '0.5', 'used' => '0.42', 'paid' => '0.28', 'unpaid' => '0.14'],
+        'faucet' => ['demo' => '0.6', 'sol' => '0.05', 'available' => true],
+        'provisioned' => true, 'chain' => 'solana:devnet',
+        'program' => $program->id, 'token_program' => $program->tokenProgram,
+        'result' => null, 'page_price' => '0.01', 'step_views' => 7, 'advanced' => null, 'solvency' => null,
+    ];
+
+    $shortfall = static fn (int $bal, int $allow, bool $delegate = true): SolPay\Core\Shortfall
+        => SolPay\Core\Shortfall::diagnose(
+            new SolPay\Core\TokenAccount($MINT, $PAYER, 210000 - $bal, $delegate ? $CONTRACT : null, 210000 - $allow),
+            210000,
+        );
+
+    $solvency = static function (int $bal, int $allow, bool $delegate = true) use ($shortfall): array {
+        $s = $shortfall($bal, $allow, $delegate);
+
+        return [
+            'would_move' => '0.21',
+            'balance_short' => $s->balanceShort, 'balance_short_demo' => '0.08',
+            'allowance_short' => $s->allowanceShort, 'allowance_short_demo' => '0.05',
+            'delegate_present' => $s->delegatePresent, 'clear' => $s->isClear(),
+        ];
+    };
+
+    $O = Newsprint\Metering\MeterOutcome::class;
+    $R = Newsprint\Metering\MeterResult::class;
+    $advance = static fn (object $o, bool $settled = false, ?string $sig = null): array
+        => ['outcome' => $o, 'views' => 7, 'signature' => $sig, 'settled' => $settled];
+
+    $metered = $R::metered($SIG, 10000, true, 1, [new SolPay\Core\Instruction(
+        $program->id,
+        [new SolPay\Core\AccountMeta($SITE, true, true), new SolPay\Core\AccountMeta($PAYER, false, false)],
+        (string) hex2bin('1e8e96a17c2e1d7e'),
+    )]);
+
+    $state = static fn (int $price = 10000, ?int $decimals = 6): Newsprint\Chain\SiteState => new Newsprint\Chain\SiteState(
+        $SITE,
+        new SolPay\Core\Site(
+            authority: '163aJWGmry7Q2gWjtxmTbdC7NGFc7FecSN1gfpNUgRt',
+            mint: $MINT, treasury: 'TrSy11111111111111111111111111111111111111',
+            pagePrice: $price, collectionThreshold: 100000, minLimit: 500000, bump: 254,
+        ),
+        null,
+        $decimals,
+    );
+    $payer = static fn (bool $contract = true, bool $funds = true): Newsprint\Chain\PayerState => new Newsprint\Chain\PayerState(
+        $PAYER, $CONTRACT, $TOKEN,
+        $contract ? new SolPay\Core\Contract($SITE, $PAYER, 500000, 420000, 280000, 255) : null,
+        $funds ? new SolPay\Core\TokenAccount($MINT, $PAYER, 210000, $CONTRACT, 180000) : null,
+        $state()->site, 6,
+    );
+
+    $inspector = new Newsprint\Support\Inspector($config);
+    $sections = static fn (...$a): array => $inspector->sections(...$a);
+
+    $status = static fn (array $o = []): array => $o + [
+        'provisioned' => false, 'authority' => $SITE, 'faucet' => $MINT,
+        'balance' => 320000000, 'needed' => 1000000000,
+        'program' => $program->id, 'program_deployed' => true, 'funded' => true,
+    ];
+    $steps = [Newsprint\Setup\Step::done('Mint', 'Created.', $SIG, $MINT)];
+
+    $f = [];
+
+    // The index, the shell, and the pages with no state of their own.
+    $f['index-full'] = ['index', ['articles' => [$piece, $draft, $older], 'site' => $site, 'provisioned' => true]];
+    $f['index-unprovisioned'] = ['index', ['articles' => [$piece], 'site' => $site, 'provisioned' => false]];
+    $f['index-empty'] = ['index', ['articles' => [], 'site' => $site, 'provisioned' => true]];
+    $f['layout-home'] = ['layout', ['title' => 'Newsprint', 'content' => '<p>x</p>', 'inspector' => null]];
+    $f['layout-piece'] = ['layout', ['title' => 'The delegate', 'content' => '<p>x</p>', 'inspector' => null]];
+    $f['not-found'] = ['not-found', []];
+    $f['not-built'] = ['not-built', []];
+    $f['page'] = ['page', ['piece' => $page, 'body' => '<p>body</p>']];
+
+    // A piece's furniture: the dates that show, the ones that do not, and the
+    // links at either end of the sequence.
+    $f['dates-both'] = ['piece-dates', ['piece' => $piece, 'lead' => '· ']];
+    $f['dates-created-only'] = ['piece-dates', ['piece' => $older, 'lead' => '']];
+    $f['dates-draft'] = ['piece-dates', ['piece' => $draft, 'lead' => '· ']];
+    $f['nav-both'] = ['piece-nav', ['previous' => $older, 'next' => $draft]];
+    $f['nav-one'] = ['piece-nav', ['previous' => $older, 'next' => null]];
+    $f['nav-none'] = ['piece-nav', ['previous' => null, 'next' => null]];
+
+    // The article, paid for and not, and the shell it waits behind.
+    $f['article-paid'] = ['article', ['piece' => $piece, 'body' => '<p>body</p>', 'site' => $site, 'meter' => $panel(['result' => $R::granted()]), 'previous' => $older, 'next' => $draft]];
+    $f['article-draft'] = ['article', ['piece' => $draft, 'body' => '<p>body</p>', 'site' => $site, 'meter' => $panel(['result' => $R::granted()]), 'previous' => null, 'next' => null]];
+    $f['article-gate'] = ['article', ['piece' => $piece, 'body' => null, 'site' => $site, 'meter' => $panel(['stage' => 'set-meter']), 'previous' => $older, 'next' => null]];
+    $f['pending'] = ['article-pending', ['piece' => $piece, 'longWaitMs' => 2500]];
+    $f['pending-draft'] = ['article-pending', ['piece' => $draft, 'longWaitMs' => 2500]];
+
+    // The meter, every stage §6 has.
+    $m = static fn (array $o = []): array => ['meter', ['meter' => $panel($o), 'site' => $site]];
+    $f['meter-unprovisioned'] = $m(['provisioned' => false, 'wallet' => null, 'contract' => null]);
+    $f['meter-unreadable'] = $m(['stage' => 'unreadable', 'contract' => null]);
+    $f['meter-unreadable-anon'] = $m(['stage' => 'unreadable', 'wallet' => null, 'contract' => null]);
+    $f['meter-anonymous'] = $m(['stage' => 'anonymous', 'wallet' => null, 'contract' => null]);
+    $f['meter-unfunded'] = $m(['stage' => 'unfunded', 'contract' => null]);
+    $f['meter-unfunded-spent'] = $m(['stage' => 'unfunded', 'contract' => null, 'faucet' => ['demo' => '0.6', 'sol' => '0.05', 'available' => false]]);
+    $f['meter-set-meter'] = $m(['stage' => 'set-meter', 'contract' => null]);
+    $f['meter-failed-balance'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', SolPay\Core\Cause::of($program, $program->tokenProgram, 1), $shortfall(80000, 0), null)]);
+    $f['meter-failed-deadend'] = $m(['stage' => 'failed', 'faucet' => ['demo' => '0.6', 'sol' => '0.05', 'available' => false], 'result' => $R::failed('refused', null, $shortfall(80000, 0), null)]);
+    $f['meter-failed-allowance'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', null, $shortfall(0, 90000), null)]);
+    $f['meter-failed-delegate'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', null, $shortfall(0, 0, false), null)]);
+    $f['meter-failed-both'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', null, $shortfall(80000, 90000), null)]);
+    $f['meter-limit'] = $m(['stage' => 'limit']);
+    $f['meter-running'] = $m();
+    $f['meter-running-anon'] = $m(['wallet' => null]);
+
+    // The strip under a paid article: what the charge did, what an advance
+    // did, and the warning before the next one.
+    $strip = static fn (array $o = []) => ['meter-strip', ['result' => $panel($o)['result'], 'meter' => $panel($o), 'piece' => $draft]];
+    $f['strip-granted'] = $strip(['result' => $R::granted()]);
+    $f['strip-granted-nocontract'] = $strip(['result' => $R::granted(), 'contract' => null]);
+    $f['strip-unconfirmed'] = $strip(['result' => $R::unconfirmed($SIG, 10000, false)]);
+    $f['strip-metered-settles'] = $strip(['result' => $R::metered($SIG, 10000, true)]);
+    $f['strip-metered-nosettle'] = $strip(['result' => $R::metered($SIG, 10000, false)]);
+    $f['strip-adv-failed-balance'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000, 0), 'advanced' => $advance($O::Failed)]);
+    $f['strip-adv-failed-allowance'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 50000), 'advanced' => $advance($O::Failed)]);
+    $f['strip-adv-failed-revoked'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 0, false), 'advanced' => $advance($O::Failed)]);
+    $f['strip-adv-failed-revoked-zeroed'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 50000, false), 'advanced' => $advance($O::Failed)]);
+    $f['strip-adv-failed-clear'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 0), 'advanced' => $advance($O::Failed)]);
+    $f['strip-adv-blocked'] = $strip(['result' => $R::granted(), 'advanced' => $advance($O::Blocked)]);
+    $f['strip-adv-unreadable'] = $strip(['result' => $R::granted(), 'advanced' => $advance($O::Unreadable)]);
+    $f['strip-adv-settled'] = $strip(['result' => $R::granted(), 'advanced' => $advance($O::Metered, true, $SIG)]);
+    $f['strip-adv-unsettled'] = $strip(['result' => $R::granted(), 'advanced' => $advance($O::Metered, false, null)]);
+    $f['strip-headsup-balance'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000, 0)]);
+    $f['strip-headsup-delegate'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 0, false)]);
+    $f['strip-headsup-allowance'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 50000)]);
+
+    // The repair of 2026-09-14: an advance that said nothing about solvency
+    // still warns, and one that did is not asked to say it twice.
+    $f['strip-adv-settled-short'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000, 0), 'advanced' => $advance($O::Metered, true, $SIG)]);
+    $f['strip-adv-blocked-short'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000, 0), 'advanced' => $advance($O::Blocked)]);
+    $f['strip-adv-unread-short'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000, 0), 'advanced' => $advance($O::Unreadable)]);
+
+    // manage_meter, its four stages, and the sign-out control inside it.
+    $manage = static fn (array $o = []): array => ['manage-meter', $o + [
+        'stage' => 'open', 'site' => $site, 'wallet' => $PAYER, 'chain' => 'solana:devnet',
+        'program' => $program->id, 'token_program' => $program->tokenProgram, 'symbol' => 'DEMO',
+        'contract' => ['address' => $CONTRACT, 'limit' => '0.5', 'used' => '0.42', 'paid' => '0.28', 'unpaid' => '0.14'],
+        'views_remaining' => 8, 'blocked' => null, 'limit_floor' => '0.64', 'balance' => '0.05',
+        'token_account' => $TOKEN, 'delegate' => $CONTRACT, 'approved' => '0.36', 'live_grants' => 3,
+    ]];
+    $f['manage-anonymous'] = ['manage-meter', ['stage' => 'anonymous', 'site' => $site]];
+    $f['manage-unreadable'] = ['manage-meter', ['stage' => 'unreadable', 'site' => $site]];
+    $f['manage-no-contract'] = ['manage-meter', ['stage' => 'no-contract', 'site' => $site, 'wallet' => $PAYER]];
+    $f['manage-open'] = $manage();
+    $f['manage-no-delegate'] = $manage(['delegate' => null, 'approved' => '0']);
+    $f['manage-blocked'] = $manage(['blocked' => 'LimitReached']);
+    $f['manage-no-views'] = $manage(['views_remaining' => null]);
+    $f['manage-no-grants'] = $manage(['live_grants' => 0]);
+    $f['forget-open'] = ['forget-wallet', ['has_contract' => true, 'contract' => ['unpaid' => '0.14']]];
+    $f['forget-none'] = ['forget-wallet', ['has_contract' => false, 'contract' => null]];
+    $f['forget-unknown'] = ['forget-wallet', ['has_contract' => null, 'contract' => null]];
+
+    // First run, and the page it redirects to.
+    $f['setup-error'] = ['setup', ['status' => $status(), 'error' => 'connection refused', 'site' => $site, 'setup' => []]];
+    $f['setup-provisioned'] = ['setup', ['status' => $status(['provisioned' => true]), 'error' => null, 'site' => $site, 'setup' => []]];
+    $f['setup-ready'] = ['setup', ['status' => $status(), 'error' => null, 'site' => $site, 'setup' => []]];
+    $f['setup-unfunded'] = ['setup', ['status' => $status(['funded' => false, 'balance' => 0]), 'error' => null, 'site' => $site, 'setup' => []]];
+    $f['setup-undeployed'] = ['setup', ['status' => $status(['program_deployed' => false]), 'error' => null, 'site' => $site, 'setup' => []]];
+    $f['setup-ran-done'] = ['setup-ran', ['provisioned' => true, 'steps' => $steps]];
+    $f['setup-ran-stopped'] = ['setup-ran', ['provisioned' => false, 'steps' => $steps]];
+
+    // §9's panel, assembled by `Inspector` and rendered by its templates — so
+    // these cover the class as well as the markup, which is the half a
+    // template-only fixture cannot reach.
+    $f['panel-deferred'] = ['inspector', ['sections' => null]];
+    $f['panel-site-only'] = ['inspector', ['sections' => $sections($state())]];
+    $f['panel-error'] = ['inspector-sections', ['sections' => $sections(null, 'getMultipleAccounts: HTTP 429')]];
+    $f['panel-unprovisioned'] = ['inspector-sections', ['sections' => $sections()]];
+    $f['panel-drift'] = ['inspector-sections', ['sections' => $sections($state(20000))]];
+    $f['panel-reader'] = ['inspector-sections', ['sections' => $sections($state(), null, $payer())]];
+    $f['panel-reader-nofunds'] = ['inspector-sections', ['sections' => $sections($state(), null, $payer(true, false))]];
+    $f['panel-no-contract'] = ['inspector-sections', ['sections' => $sections($state(), null, $payer(false))]];
+    $f['panel-metered'] = ['inspector-sections', ['sections' => $sections($state(), null, $payer(), $metered)]];
+    $f['panel-browser-built'] = ['inspector-sections', ['sections' => $sections($state(), null, $payer(), $R::metered($SIG, 10000, true))]];
+    $f['panel-no-decimals'] = ['inspector-sections', ['sections' => $sections($state(10000, null), null, $payer())]];
+
+    return $f;
+}

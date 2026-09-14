@@ -39,6 +39,7 @@ parameters:
         # them. They are named one by one, which is also a list worth having to
         # keep up to date.
         - bin/build-content
+        - bin/render-diff
         - bin/dev-router.php
         - bin/devnet-canary
         - bin/devnet-smoke
