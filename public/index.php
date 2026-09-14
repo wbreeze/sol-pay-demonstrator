@@ -1165,21 +1165,29 @@ $app->post('/faucet', function (Request $request, Response $response) use ($json
     return $json($response, $result, $result['granted'] ? 200 : 409);
 });
 
-/** §10.2: the site carries a page at the URL a privacy policy would occupy. */
-$app->get('/privacy', function (Request $request, Response $response) use ($view, $shell, $page, $contentDir): Response {
-    if (!Library::isBuilt($contentDir)) {
-        return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
-    }
-
-    $piece = Library::load($contentDir)->find('privacy');
-    if (!$piece instanceof Piece || $piece->metered) {
-        return $page($response, $shell('Not found', $view->render('not-found')), 404);
-    }
-
-    return $page($response, $shell($piece->title, $view->render('page', [
-        'piece' => $piece,
-        'body' => $piece->body(),
-    ])));
+/**
+ * §10.2: the site carries a page at the URL a privacy policy would occupy.
+ *
+ * It carries it by sending the reader to where every other piece is served
+ * (2026-09-14). Until `GET /a/{slug}` learned to serve an unmetered piece this
+ * route was the only way a public page could exist, so it did the whole job
+ * itself: its own `isBuilt` check, its own lookup, its own `page.php` render.
+ * That made **two implementations of one thing**, and they had already drifted
+ * — this one refused a piece that *was* metered, the article route refused one
+ * that was not, and neither knew about the other's branch.
+ *
+ * §10.2 asks that the URL carry the page, not that a second handler render it.
+ * A permanent redirect satisfies the promise and leaves one renderer.
+ *
+ * **The site's own links still point here**, from the footer of every page
+ * (§10.2 again), from the index, from the meter and from `manage_meter`. The
+ * promised URL is the one worth writing in the markup; a browser caches the
+ * 301 after the first hit. Pointing them at `/a/privacy` instead would make
+ * this URL a thing only strangers ever reach, which is the opposite of what
+ * §10.2 is for.
+ */
+$app->get('/privacy', function (Request $request, Response $response): Response {
+    return $response->withHeader('Location', '/a/privacy')->withStatus(301);
 });
 
 /**

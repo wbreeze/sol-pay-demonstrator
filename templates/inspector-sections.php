@@ -14,6 +14,16 @@
  */
 use Newsprint\Support\View;
 ?>
+<?php /* The panel's only prose, and it is here rather than in `inspector.php`
+         so that both callers carry it — see that file for the argument. §9
+         requires this panel to say once that the short names are its own
+         invention; everything else it used to say is in the piece linked at
+         the end of the sentence. */ ?>
+        <p class="inspector-preamble">
+            Short names like <code>SPDApep</code> are this site's invention and
+            mean nothing to a wallet or an explorer —
+            <a href="/a/reading-the-inspector">how to read the inspector</a>.
+        </p>
 <?php foreach ($sections as $section): ?>
 <?php if (isset($section['names'])): ?>
 <?= $view->render('inspector-names', ['section' => $section]) ?>

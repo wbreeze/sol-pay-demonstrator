@@ -68,15 +68,16 @@ use Newsprint\Support\View;
        a wallet or an explorer — and that obligation cannot be discharged by a
        page the reader has not opened. Everything else can.
 
-       The link is an ordinary article link. It is a **metered** article, so a
-       reader without a contract meets the lede and the meter rather than the
-       explanation. */
+       **It lives in `inspector-sections.php`, not here.** That partial exists
+       so two callers render the same panel — this template, and the fragment
+       `GET /inspector/panel` returns when a reader opens a deferred one. The
+       preamble was here, so a deferred page never showed it at all: on
+       `/privacy`, on the article shell, on this piece's own page, a reader who
+       opened the panel got the sections and no line. That was survivable while
+       the panel explained itself six more times below. It is not survivable
+       now, and §9's obligation is not discharged by a sentence most readers
+       never reach. */
 ?>
-        <p class="inspector-preamble">
-            Short names like <code>SPDApep</code> are this site's invention and
-            mean nothing to a wallet or an explorer —
-            <a href="/a/reading-the-inspector">how to read the inspector</a>.
-        </p>
 <?= $view->render('inspector-sections', ['sections' => $sections]) ?>
 <?php endif ?>
     </div>
