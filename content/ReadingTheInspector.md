@@ -3,7 +3,7 @@ title: How to read the inspector
 slug: reading-the-inspector
 created: 2026-09-14
 metered: false
-status: draft
+status: published
 lede: >
   The panel at the foot of every page has up to eight sections, and each one
   answers a different question about where a number came from. Here is what

@@ -2,15 +2,15 @@
 title: Privacy
 slug: privacy
 created: 2026-09-04
-revised: 2026-09-07
+revised: 2026-09-14
 metered: false
-status: draft
+status: published
 ---
 
 This is the page where a privacy policy would go. It isn't one. A privacy
 policy describes what a site collects about you in language broad enough to
 cover what it might collect later. This page just lists what this site holds.
-The list is short enough to print in full, so it is printed in full.
+The list is short enough to print in full; so, here it is in full.
 
 ## Everything this site holds about you
 
@@ -25,9 +25,10 @@ The list is short enough to print in full, so it is printed in full.
 That is the whole list. There is no row for your name, because you were never
 asked for it. No row for an email address, a phone number, a card, a billing
 address, or an account you have to delete later. No analytics. No advertising
-identifier. No third-party anything — this site loads no fonts, no scripts and
-no images from a domain it does not control, so no other company learns you
-were here.
+identifier.  No third-party anything — this site loads no fonts, no scripts and
+no images from a domain it does not control. The companies that supply those
+things, and read a request log for every page they appear on, learn nothing
+about you here.
 
 We also deliberately throw something away. Diagnosing a failed payment means
 reading a transaction's logs, and those logs carry your wallet address and your
@@ -41,7 +42,7 @@ Third row. This site keeps a short record of what you have read.
 We would rather it did not, and it is there for a reason we will defend: without
 it, refreshing a page would charge you for it again. It is a receipt, not a
 profile. It answers one question — *has this wallet already paid for this
-article?* — and it is never joined up across articles to work out what you like,
+article?* It is never joined up across articles to work out what you like,
 never leaves this server, feeds nothing, and is gone in thirty minutes.
 
 We do count how many times each article has been bought. That is a fact about
@@ -92,11 +93,12 @@ that before you click than discover it afterwards.
 
 Not because we are careful. Because of how you are paying.
 
-A site funded by advertising is not selling you articles. It is selling your
-attention, and attention sells for more when the buyer knows whose it is. So
-the data follows the business model: attention first, then behaviour, then
-identity. The tracking is not a moral failure on any publisher's part. It is
-what the job turns into when the only thing you can charge for is the reader.
+A site funded by advertising is not selling you articles. It is attracting and
+selling your attention. Your attention sells for more when the buyer knows
+whose it is. So the data follows the business model: attention first, then
+behaviour, then identity.  The tracking is not a moral failure on any
+publisher's part. It is what the job turns into when the only thing you can
+charge for is the reader.
 
 When you pay directly, that job goes away. There is a product to sell that
 isn't you, and the file on you stops earning its keep.
@@ -116,7 +118,7 @@ subscription — which, across the industry, is about ninety-nine of every
 hundred people who arrive.
 
 The trade is explicit and it is not free. You pay money instead. That is the
-whole proposition, and a site that pretends otherwise is selling you something
+whole proposition. A site that pretends otherwise is selling you something
 twice.
 
 ## Your wallet is not your name. It is also not anonymous.
@@ -140,8 +142,8 @@ Anyone who knows this site's address and yours can read it — your limit, how
 much you have used, how much you have paid — and they can read it years from
 now, because nothing on a public ledger is ever taken down. We did not choose
 that as a feature and we cannot switch it off; it is what putting a spend meter
-on a public ledger means. But it is a record that exists because you used this
-site, and pointing at the technology would be a way of not telling you.
+on a public ledger means. It is a record that exists because you used this
+site. Pointing at the technology would be a way of not telling you.
 
 So: this site holds almost nothing about you, and in exchange it writes one
 permanent public line saying that your wallet paid this site. That is the
@@ -155,7 +157,7 @@ nobody can.
 
 ## If you are building something with this
 
-Do not copy this page as a privacy policy, and do not read it as saying you
+Do not copy this page as a privacy policy. Do not read it as saying you
 won't need one. This is a devnet demonstration with no users, no real money and
 nothing to lose, which is why it can afford to be this brief.
 
@@ -168,3 +170,4 @@ What you can take from this page is the shape of it: say what you hold, say why
 you hold it, say what you cannot protect people from, and be the one who tells
 them about the permanent public record rather than the one who let them find
 it.
+
