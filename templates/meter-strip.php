@@ -145,7 +145,7 @@ $reported = $advanced !== null && $advanced['outcome'] === MeterOutcome::Failed;
 <?php if ($result->signature !== null): ?>
     <p class="fine">
         <a href="https://explorer.solana.com/tx/<?= View::e($result->signature) ?>?cluster=devnet"
-           rel="noreferrer noopener" target="_blank">This transaction on the explorer</a>
+           rel="noreferrer noopener" target="_blank">This transaction on chain</a>
     </p>
 <?php endif ?>
 

@@ -386,7 +386,7 @@ final class Inspector
             'rows' => $rows,
             'link' => [
                 'href' => 'https://explorer.solana.com/tx/'.rawurlencode($signature).'?cluster=devnet',
-                'text' => 'This transaction on the Solana explorer',
+                'text' => 'This transaction on chain',
             ],
             'event' => $signature,
             'note' => 'This request\'s transaction, and only this one — §10.4 keeps no list of what you have '
