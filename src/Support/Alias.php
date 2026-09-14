@@ -64,6 +64,51 @@ final class Alias
     public const DATA = 'DATA';
 
     /**
+     * What each prefix names, in words (2026-09-14).
+     *
+     * These used to live only in SPEC §9's table and in the panel's preamble,
+     * which meant a reader learned what `SPDA` stood for once, at the top, and
+     * then had to hold eleven of them in their head while reading the rows. So
+     * the meaning moved onto the row: it opens the line under the address and
+     * the derivation follows it, and the table that taught the vocabulary is
+     * gone from the article because every row now teaches its own.
+     *
+     * **Sentence-cased, and that is not decoration.** The line is now a
+     * sentence about the value above it rather than a fragment in a cell, and
+     * a lowercase opening would read as the tail of something missing.
+     *
+     * Keyed by the prefix constants below so {@see meaning()} is total over
+     * them — `AliasTest` asserts that, because a prefix added without a
+     * meaning would be a notice from an undefined index rather than a gap
+     * anybody could see.
+     */
+    private const MEANINGS = [
+        self::PROGRAM => 'The metering program',
+        self::SITE => "This site's account",
+        self::CONTRACT => 'Your contract',
+        self::MINT => 'The token mint',
+        self::TREASURY => 'The site treasury',
+        self::PAYER => 'Your wallet',
+        self::PAYER_TOKEN_ACCOUNT => 'Your token account',
+        self::TOKEN_PROGRAM => 'The token program',
+        self::AUTHORITY => 'The site authority',
+        self::UNNAMED => 'An address this panel cannot place',
+        self::DATA => "An instruction's bytes",
+    ];
+
+    /** Every prefix this class defines, which is what `MEANINGS` must cover. */
+    public const PREFIXES = [
+        self::PROGRAM, self::SITE, self::CONTRACT, self::MINT, self::TREASURY,
+        self::PAYER, self::PAYER_TOKEN_ACCOUNT, self::TOKEN_PROGRAM,
+        self::AUTHORITY, self::UNNAMED, self::DATA,
+    ];
+
+    public static function meaning(string $role): string
+    {
+        return self::MEANINGS[$role];
+    }
+
+    /**
      * Sixty-four syllables, so one byte of the hash chooses one with no
      * modulo bias. Pronounceable, short, and meaningless — a syllable that
      * looked like a word would invite someone to read significance into it.

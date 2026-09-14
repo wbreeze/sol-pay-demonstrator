@@ -118,7 +118,7 @@ final class Meter
      *
      * The preflight is not a substitute for the program's own check — the
      * program refuses the call regardless — it is what turns a refusal into a
-     * screen the reader can act on instead of a failed transaction and a fee.
+     * screen the reader can act on instead of an error they cannot.
      */
     private function meter(string $wallet, SiteState $state, int $pageViews): MeterResult
     {
@@ -140,8 +140,22 @@ final class Meter
         $blocked = Preflight::canMeter($payer->contract, $state->site, $pageViews);
         if ($blocked !== null) {
             // Nothing is sent. §8.2's `LimitReached` reaches the reader as
-            // `manage_meter` rather than as a failed transaction they paid a
-            // fee for.
+            // `manage_meter` rather than as a failed transaction.
+            //
+            // **What that saves is a round trip, and only sometimes a fee**
+            // (corrected 2026-09-14). `Rpc::sendTransaction` does not pass
+            // `skipPreflight`, so the endpoint simulates first and a call this
+            // program would refuse is normally rejected there — never
+            // included, and therefore free. The fee is charged when the
+            // transaction *lands* and then fails, which needs the state to
+            // move between that simulation and inclusion: a second tab, a
+            // settle arriving, the limit consumed in between. `withPayerLock`
+            // narrows that window for one wallet on one deployment and cannot
+            // close it.
+            //
+            // And the fee is **this site's**, not the reader's: the authority
+            // is the fee payer on every metering call. The reader pays only
+            // for the three transactions their own wallet signs.
             //
             // The payer is carried for the same reason as above, with one
             // gain beyond the round trip: the limit screen now states the

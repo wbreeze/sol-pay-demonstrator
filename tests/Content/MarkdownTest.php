@@ -24,13 +24,18 @@ use PHPUnit\Framework\TestCase;
  * failure, and a test that ran the build and checked it succeeded would have
  * been green beside the bug.
  *
- * Two halves, and neither is worth anything without the other. The first puts
- * a fixture body carrying every syntax through the real converter and says
- * what each one must have become. The second reads `content/` and fails if a
- * piece uses a syntax the fixture does not — because a fixture listing the
- * syntaxes somebody thought of in September is the same trap one step along,
- * and the next missing extension (footnotes, strikethrough, a task list) will
- * fail exactly as quietly as this one did.
+ * Three parts, and none is worth much without the others. The first puts a
+ * fixture body carrying every supported syntax through the real converter and
+ * says what each one must have become. The second reads `content/` and fails
+ * if a piece uses a syntax the fixture does not. The third names the syntaxes
+ * this dialect cannot render and fails if a piece uses one of those.
+ *
+ * **The third part was missing until 2026-09-14 and the gap was the same shape
+ * as the original defect.** Checking the fixture against the content only asks
+ * about syntaxes already on the list, so a syntax on neither list was
+ * invisible — which is precisely what a missing extension is. A piece gained a
+ * markdown link and a bullet list that afternoon, and this file stayed green;
+ * both happen to render, and nothing here knew it.
  */
 final class MarkdownTest extends TestCase
 {
@@ -91,6 +96,21 @@ final class MarkdownTest extends TestCase
                 'sample' => "A call to `Preflight::charge`.\n",
                 'expect' => ['<code>Preflight::charge</code>'],
             ],
+            'a link' => [
+                'detect' => '/(?<!!)\[[^\]]+\]\([^)]+\)/',
+                'sample' => "The [sol-pay](https://github.com/wbreeze/sol-pay) client.\n",
+                'expect' => ['<a href="https://github.com/wbreeze/sol-pay">sol-pay</a>'],
+            ],
+            'a bullet list' => [
+                'detect' => '/^[-*] (?!\[[ xX]\])/m',
+                'sample' => "- one\n- two\n",
+                'expect' => ['<ul>', '<li>one</li>'],
+            ],
+            'an ordered list' => [
+                'detect' => '/^\d+\. /m',
+                'sample' => "1. first\n2. second\n",
+                'expect' => ['<ol>', '<li>first</li>'],
+            ],
             // A piece carries its illustrations as pairs of images, one per
             // colour scheme, and `site.css` hides the one the scheme is not —
             // so the `src` has to survive intact or the rule matches nothing.
@@ -98,6 +118,55 @@ final class MarkdownTest extends TestCase
                 'detect' => '/!\[[^\]]*\]\([^)]+\)/',
                 'sample' => "![The panel, closed.](/assets/img/inspector-closed-light.png)\n",
                 'expect' => ['<img src="/assets/img/inspector-closed-light.png" alt="The panel, closed." />'],
+            ],
+        ];
+    }
+
+    /**
+     * Syntaxes this dialect does **not** render, and what a piece using one
+     * would get instead.
+     *
+     * Added 2026-09-14, because the first version of this test could not have
+     * caught the defect that prompted it. It asked, for each syntax in the
+     * list, whether the fixture covered what the content used — so a syntax
+     * that was in *neither* was invisible, which is exactly what a missing
+     * extension looks like. The proof arrived the same day: a piece gained a
+     * markdown link and a bullet list, and this file stayed green. Both happen
+     * to render, and nothing here knew that either.
+     *
+     * So the list has a second half: syntaxes with a detector and no sample,
+     * whose appearance in `content/` is a failure rather than a gap. Adding
+     * the extension that renders one — and moving its row up into
+     * {@see syntaxes()} — is the fix when that day comes.
+     *
+     * @return array<string, array{detect: string, gets: string}>
+     */
+    private static function unsupported(): array
+    {
+        return [
+            'strikethrough' => [
+                'detect' => '/~~[^~\n]+~~/',
+                'gets' => 'the tildes, printed',
+            ],
+            'a footnote' => [
+                'detect' => '/\[\^[^\]]+\]/',
+                'gets' => 'the reference and the definition, both as literal text',
+            ],
+            'a task list' => [
+                'detect' => '/^[-*] \[[ xX]\] /m',
+                'gets' => 'a list item opening with a literal bracket',
+            ],
+            'an autolink' => [
+                'detect' => '/<https?:\/\//',
+                'gets' => 'nothing — it is raw HTML, and raw HTML is stripped',
+            ],
+            // Not an oversight and not fixable by an extension: `html_input:
+            // 'strip'` is how §10.3 is enforced rather than merely stated. The
+            // cost is that a body reaching for `<figure>` loses it without a
+            // word, which is worth failing loudly over.
+            'raw HTML' => [
+                'detect' => '/^<[a-zA-Z]/m',
+                'gets' => 'nothing; it is stripped on purpose, so §10.3 cannot be broken by a body',
             ],
         ];
     }
@@ -199,5 +268,21 @@ final class MarkdownTest extends TestCase
         // regex broken by an edit, a content directory that moved — every loop
         // above would skip and this test would pass having checked nothing.
         self::assertGreaterThan(3, $covered, 'the detectors matched almost nothing; they are probably broken');
+
+        // And the half the first version of this test was missing: a syntax
+        // in neither list is invisible, so the syntaxes the dialect cannot
+        // render are named too, and using one is a failure rather than a gap.
+        foreach (self::unsupported() as $name => $syntax) {
+            $users = array_keys(array_filter(
+                $bodies,
+                static fn (string $body): bool => preg_match($syntax['detect'], $body) === 1,
+            ));
+
+            self::assertSame(
+                [],
+                $users,
+                "{$name} is used by ".implode(', ', $users).", and this build renders {$syntax['gets']}",
+            );
+        }
     }
 }

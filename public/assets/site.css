@@ -98,6 +98,39 @@ a:hover { text-decoration-thickness: 2px; }
 .body table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .body th, .body td { text-align: left; padding: 0.4rem 0.5rem 0.4rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
 
+/* A screenshot inside a piece (2026-09-14).
+ *
+ * This site has two palettes, so a single plate is wrong in one of them — and
+ * `bin/build-content` strips raw HTML from a body (§10.3, made
+ * unrepresentable rather than merely forbidden), which leaves the markdown no
+ * `<picture>` to choose with. So a figure is written as two images whose names
+ * end `-light.png` and `-dark.png`, and the scheme hides the one it is not.
+ *
+ * **Both are fetched**, which is the price of doing it here instead of in the
+ * build. The alternative is `bin/build-content` pairing them into a
+ * `<picture>` — one fetch, and one more thing that has to keep working. Worth
+ * revisiting if a piece ever carries more plates than this one does.
+ *
+ * Bordered, because a screenshot of this site, on this site, is otherwise a
+ * region of the page that looks like the page.
+ */
+.body img {
+    display: block;
+    max-width: 100%;
+    margin: 1.5rem 0;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+}
+.body img[src$="-dark.png"] { display: none; }
+
+/* Beside the rule it inverts rather than up with the palette, which is the
+   only other place this file asks about the scheme: the two lines are one
+   decision and reading either alone tells you nothing. */
+@media (prefers-color-scheme: dark) {
+    .body img[src$="-dark.png"] { display: block; }
+    .body img[src$="-light.png"] { display: none; }
+}
+
 pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 code { font-size: 0.85em; background: var(--paper-sunk); padding: 0.1em 0.3em; border-radius: 3px; }
 pre { background: var(--paper-sunk); padding: 0.9rem 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.8rem; line-height: 1.5; }
@@ -219,7 +252,10 @@ pre code { background: none; padding: 0; font-size: inherit; }
 .inspector table.mirrored td:not(.mirrors) { width: 1%; }
 
 .inspector .section-link { margin: 0.5rem 0 0; font-size: 0.8rem; }
-.inspector .note { max-width: var(--measure); color: var(--ink-soft); font-size: 0.8rem; margin: 0.5rem 0 0; }
+/* `.inspector .note` was deleted with the notes it styled (2026-09-14). A
+   style rule for markup nothing emits is the quietest kind of dead code — it
+   reads as evidence the feature works, which is how a table extension went
+   missing for a fortnight. So the rule goes when its producer does. */
 
 /* footer */
 .footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule); font-size: 0.85rem; color: var(--ink-soft); }

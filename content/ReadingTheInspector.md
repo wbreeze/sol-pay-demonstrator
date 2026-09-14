@@ -2,13 +2,13 @@
 title: How to read the inspector
 slug: reading-the-inspector
 created: 2026-09-14
-metered: true
+metered: false
 status: draft
 lede: >
   The panel at the foot of every page has up to eight sections, and each one
   answers a different question about where a number came from. Here is what
   each of them says, and what this site had to do to be able to say it.
-reading_time: 13
+reading_time: 9
 ---
 
 Every page of this demonstrator ends with an inspector.
@@ -26,15 +26,19 @@ this site demonstrates.
 
 The inspector displays the most-changing data above the more static data.
 
-- Preflight: changes on every request. It is server state.
-- Transaction: changes on every request. The transaction message that landed
-  on chain.
-- You, on chain: changes on every request. The on-chain content that
-  links the reader to the meter.
+- The values, in full: the key to every short name below. Above the gradient,
+  changed or not.
+- Preflight: changes on every request. The site's own arithmetic over the
+  accounts read for this request.
+- The last transaction: present only on a request that metered. The
+  instruction as the sol-pay library built it, not as the chain returned it.
+- You, on chain: read on every request that has a wallet. Changes when the
+  reader is charged. The on-chain content that links the reader to the meter.
 - The treasury: changes when a settle lands. The on-chain account of the
   site's income from readership.
 - Configuration drift: shown if configuration diverges from the site account.
-- Site account: displays the recorded, first-run setup.
+- Site account: read from the chain on this request. First-run setup wrote
+  it, and nothing writes it again.
 - Deployment: never changes.
 
 The system assembles the panel in reverse, outward from the deployment —
@@ -49,8 +53,8 @@ value the panel shows gets a short name — a role prefix and a nonsense
 syllable.  This table is where the short name is introduced beside the thing it
 stands for.
 
-![A table of ten rows. Each row: a short name like SPDAyap, the full base58 address with a copy button after it, and the derivation on the line beneath.](/assets/img/inspector-names-light.png)
-![A table of ten rows. Each row: a short name like SPDAyap, the full base58 address with a copy button after it, and the derivation on the line beneath.](/assets/img/inspector-names-dark.png)
+![A table of ten rows. Each row: a short name like SPDAyap, the full base58 address with a copy button after it, and a line beneath naming what the value is and then the derivation.](/assets/img/inspector-names-light.png)
+![A table of ten rows. Each row: a short name like SPDAyap, the full base58 address with a copy button after it, and a line beneath naming what the value is and then the derivation.](/assets/img/inspector-names-dark.png)
 
 The short names are this site's invention and mean nothing to a wallet or an
 explorer.  **The full base58 is always one click away and always what gets
@@ -67,9 +71,9 @@ derived.
 Some of these addresses are derived by this site's own program: the site
 account from `["site", AUTH…]` and your contract from `["contract", SPDA…,
 PAYR…]`, each with the bump that made it land off the curve. Two more are
-derived by Solana's associated-token program, that this site did not write
-and does not own— the treasury and your token account. Five were never
-derived at all, for three different reasons: two are keypairs first-run setup
+derived by Solana's associated-token program, which this site did not write
+and does not own — the treasury and your token account. Five were never
+derived at all, for four different reasons: two are keypairs first-run setup
 generated, one is your own wallet, one is an address a program was deployed
 to, and one is a constant every Solana cluster shares.
 
@@ -161,13 +165,14 @@ wallet to read for.
 ![Your wallet and token account as short names, then balance, delegate, approved, and the contract's limit, used, paid and unpaid — each amount in DEMO and in base units.](/assets/img/inspector-you-light.png)
 ![Your wallet and token account as short names, then balance, delegate, approved, and the contract's limit, used, paid and unpaid — each amount in DEMO and in base units.](/assets/img/inspector-you-dark.png)
 
-Authorising a limit names this site's contract account as a delegate on the
+Authorizing a limit names this site's contract account as a delegate on the
 reader's token account and sets how much it may draw.  Closing clears both.
 **The delegate line is what authorizing gave this site and what closing takes
 back.** It lives on the reader token account, not in the contract. Most
 wallets never show it. It is here, read back from the account on every
-request. The address beside it is the one to paste into an explorer to
-view the delegate.
+request. The delegation is a field on the token account, so the address to
+open in an explorer is the token account's — `PATA` in the values table — and
+not the delegate's.
 
 This represents the entire content the reader gives this site and the entire
 content of what the reader takes back.
@@ -206,7 +211,7 @@ will be a source file that disagrees with the running site.
 
 When the two disagree, this section appears and says so, in both numbers. It
 sits directly above the account it is disagreeing with, so the claim can be
-checked one paragraph later.
+checked one section later.
 
 ## Site account, decoded
 
@@ -232,10 +237,10 @@ on.
 
 ## Deployment
 
-Four witches. They never change.
+Four things. They never change.
 
-![Metering program and token program as short names, then cluster devnet and the RPC endpoint, with a note about who calls it.](/assets/img/inspector-deployment-light.png)
-![Metering program and token program as short names, then cluster devnet and the RPC endpoint, with a note about who calls it.](/assets/img/inspector-deployment-dark.png)
+![Metering program and token program as short names, then cluster devnet and the RPC endpoint.](/assets/img/inspector-deployment-light.png)
+![Metering program and token program as short names, then cluster devnet and the RPC endpoint.](/assets/img/inspector-deployment-dark.png)
 
 - which program does the metering
 - which token program it uses
@@ -260,8 +265,9 @@ sentence and a link instead of onto sections.
 
 ## The cold call
 
-Here is something this implementation measured as well as reasoned.  The
-"event" row of "The last transaction" section requires a `getTransaction` call.
+Here is something this implementation measured as well as reasoned. Filling
+the inspector costs one `getMultipleAccounts` call to read the accounts it
+displays.
 
 The inspection panel is rendered on every page, so every page — the privacy
 page included — blocked on an account read to fill a panel that is collapsed by
@@ -271,8 +277,8 @@ load is two milliseconds.  The rule that came out of this is not *defer the
 panel*. It is **defer the read nothing else needs**.
 
 Where a request has already read the chain for its own
-reasons-— the article's POST, where the metering decision cannot be made
-without reading —-the panel renders inline with the answer already in hand. It
+reasons — the article's POST, where the metering decision cannot be made
+without reading — the panel renders inline with the answer already in hand. It
 costs nothing extra, because the read was required work either way.
 
 Rendering the server read result of the POST keeps *The last transaction*
@@ -280,7 +286,7 @@ possible. It needs a result that exists only on the request that produced it.
 The result of the POST would not survive a deferred fetch. Under this rule it
 never has to.
 
-**The link in that paragraph is not decoration.** Without JavaScript it *is*
+**The link in the deferred panel's paragraph is not decoration.** Without JavaScript it *is*
 the panel: it goes to a page that renders the same sections server-side, from
 the same partial, so the fragment and the page cannot drift apart. Nothing
 about the inspector depends on a script to stay reachable.

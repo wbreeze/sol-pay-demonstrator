@@ -17,7 +17,7 @@
  * `$sections` is null when this request read nothing from the chain, and the
  * panel is therefore deferred to first open. See the branch below.
  *
- * @var array<int, array{heading: string, rows: array<int, array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool, derivation: ?string}, 2?: string}>, note?: string}>|null $sections
+ * @var array<int, array{heading: string, rows: array<int, array{0: string, 1: string|array{address: string, alias: ?string, explorer: bool, derivation: ?string}, 2?: string}>}>|null $sections
  * @var \Newsprint\Support\View $view
  */
 use Newsprint\Support\View;
@@ -49,26 +49,33 @@ use Newsprint\Support\View;
             <a href="/inspector/panel">read them now</a>.
         </p>
 <?php else: ?>
+<?php
+    /* One line, and a link (2026-09-14).
+       -----------------------------------
+       Two preamble paragraphs stood here, and a `note` stood under every
+       section below: what a short name is, the three kinds of provenance, why
+       the endpoint is called by the server, what the delegate line means, why
+       "last" means this request's. All of it true, all of it in the way of the
+       numbers a reader opened the panel to read.
+
+       It is now one article, written for the purpose, and every sentence that
+       was here is in it at more length than a panel could carry. A panel that
+       explains itself twelve times over is a panel nobody scrolls to the end
+       of.
+
+       **The invention clause stays, and stays here.** §9 requires this panel
+       to say once that the short names are this site's own and mean nothing to
+       a wallet or an explorer — and that obligation cannot be discharged by a
+       page the reader has not opened. Everything else can.
+
+       The link is an ordinary article link. It is a **metered** article, so a
+       reader without a contract meets the lede and the meter rather than the
+       explanation. */
+?>
         <p class="inspector-preamble">
-            Short names like <code>SPDApep</code> are this site's own invention,
-            derived from the address so they never change. They mean nothing to
-            a wallet or an explorer. Every one of them is defined in the first
-            table below, next to the address it stands for — click a short name
-            anywhere on this page to go to its row — and it is the full address
-            that the copy button there gives you, never the short name. An
-            account this panel cannot place is named <code>ACCT…</code> rather
-            than for a role it does not know, and an instruction's bytes get a
-            <code>DATA…</code> name on the same terms.
-        </p>
-        <p class="inspector-preamble">
-            Beside each address in that table is the derivation that produced
-            it: the seeds it was computed from, written with the short names so
-            you can match each one to its row, and the program that did the
-            computing. Not every address has one. Two of them are computed by
-            Solana's associated-token program rather than by this site's, and
-            several were never derived at all — a keypair setup generated, your
-            own wallet, a deployed program, an address every Solana cluster
-            shares. Those say so instead.
+            Short names like <code>SPDApep</code> are this site's invention and
+            mean nothing to a wallet or an explorer —
+            <a href="/a/reading-the-inspector">how to read the inspector</a>.
         </p>
 <?= $view->render('inspector-sections', ['sections' => $sections]) ?>
 <?php endif ?>

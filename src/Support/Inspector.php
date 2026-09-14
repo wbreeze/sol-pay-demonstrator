@@ -46,7 +46,7 @@ final class Inspector
      * fetches when it is opened rather than on the request that made it. See
      * {@see lastTransaction()} for why that read is deferred.
      *
-     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, note?: string, link?: array{href: string, text: string}, event?: string}>
+     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string}, event?: string}>
      */
     public function sections(?SiteState $state = null, ?string $error = null, ?PayerState $payer = null, ?MeterResult $result = null): array
     {
@@ -115,7 +115,7 @@ final class Inspector
     }
 
     /**
-     * The short names used below, defined once, at the top (2026-09-12).
+     * Every long value, in full, defined once, at the top (2026-09-12).
      *
      * Every address used to carry its own base58 and its own copy button at
      * every sighting. A charging view showed **21 addresses of 9 distinct
@@ -135,7 +135,7 @@ final class Inspector
      *
      * Order of first appearance, which is the order a reader met them in.
      *
-     * @param list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, note?: string, link?: array{href: string, text: string}, event?: string}> $sections
+     * @param list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string}, event?: string}> $sections
      *
      * @return ?array{heading: string, names: list<array{value: string, alias: string, explorer: bool, note: ?string}>}
      */
@@ -158,11 +158,18 @@ final class Inspector
             return null;
         }
 
-        return ['heading' => 'What the short names mean', 'names' => array_values($names)];
+        // Renamed 2026-09-14. *What the short names mean* was the right title
+        // for a table that only expanded abbreviations; since the meanings
+        // moved onto the rows it states what each value **is**, in its
+        // unabbreviated form, which is the job the heading now names. *The
+        // address table* was the other candidate and was declined for one row:
+        // the instruction's bytes are not an address, and they are the row the
+        // panel deliberately made look like all the others.
+        return ['heading' => 'The values, in full', 'names' => array_values($names)];
     }
 
     /**
-     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, note?: string, link?: array{href: string, text: string}, event?: string}>
+     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string}, event?: string}>
      */
     private function build(?SiteState $state = null, ?string $error = null, ?PayerState $payer = null, ?MeterResult $result = null): array
     {
@@ -182,17 +189,44 @@ final class Inspector
                 ['cluster', 'devnet'],
                 ['endpoint', $this->config->rpcUrl()],
             ],
-            'note' => 'The endpoint is called by this server, never by your browser. An RPC provider that saw '
-                .'your browser would learn your IP address beside a wallet address; seeing this server, it '
-                .'learns that one server asked about some accounts.',
         ]];
 
+        /*
+         * The two alarm states keep a sentence, and it is in the row rather
+         * than under the section (2026-09-14).
+         *
+         * Every other explanatory paragraph left this panel that afternoon and
+         * went into `reading-the-inspector`, which the line at the top links
+         * to. These two did not, and the reason is who is reading. The notes
+         * elsewhere were background — why a figure is shown, what it means,
+         * an argument about the design — met while things are working, and
+         * they can wait for an article. These answer a question a reader has
+         * in the second they read the words *read failed*: is this site
+         * broken, and did it break me? Sending them off to a long piece to
+         * find out that nothing is wrong inverts the cost of the answer.
+         *
+         * It is also where the panel is least able to speak for itself. In
+         * both states there are no reader accounts and no prices from the
+         * chain, so the panel is four rows and a table with two addresses in
+         * it — least self-explanatory exactly where it used to explain most.
+         *
+         * **Restored as the row's own claim, not as the `note` that was
+         * deleted.** Bringing the section-level key back would mean the
+         * template branch and the stylesheet rule for eleven notes in order to
+         * reinstate two. A third cell declared `'claims' => 'under'` is the
+         * anatomy this panel already has, renders the same `.beneath` line the
+         * addresses use, and reads as part of the report rather than as
+         * commentary on it.
+         */
         if ($error !== null) {
             $sections[] = [
                 'heading' => 'This site, on chain',
-                'rows' => [['read failed', $error]],
-                'note' => 'The page is still served. Nothing on this site depends on the chain being reachable '
-                    .'until a charge has to be made.',
+                'claims' => 'under',
+                'rows' => [[
+                    'read failed',
+                    $error,
+                    'The page is still served; nothing here depends on the chain until a charge has to be made.',
+                ]],
             ];
 
             return $sections;
@@ -201,8 +235,12 @@ final class Inspector
         if ($state === null) {
             $sections[] = [
                 'heading' => 'This site, on chain',
-                'rows' => [['status', 'not provisioned']],
-                'note' => 'First-run setup has not created the mint, the treasury or the site account yet (§12.0).',
+                'claims' => 'under',
+                'rows' => [[
+                    'status',
+                    'not provisioned',
+                    'First-run setup has not created the mint, the treasury or the site account yet.',
+                ]],
             ];
             $sections[] = $this->configuredPrices($params);
 
@@ -233,8 +271,6 @@ final class Inspector
                 ['bump', (string) $site->bump],
                 ['mint decimals', $state->mintDecimals === null ? 'unread' : (string) $state->mintDecimals],
             ],
-            'note' => 'Read from the account on this request, in the field order of wasm-client/SPEC.md §6.2. '
-                .'Amounts appear twice on purpose: a six-decimal scaling error is invisible until the two forms sit side by side.',
         ];
 
         if ($state->treasury !== null) {
@@ -248,7 +284,6 @@ final class Inspector
                         ? 'none'
                         : $this->address($state->treasury->delegate, $known)],
                 ],
-                'note' => 'What readers have paid, so far, on this deployment.',
             ];
         }
 
@@ -270,8 +305,6 @@ final class Inspector
             $sections[] = [
                 'heading' => 'Configuration drift',
                 'rows' => $drift,
-                'note' => 'The chain is what charges. Editing config/site.php after setup changes nothing on '
-                    .'chain — initialize_site runs once.',
             ];
         }
 
@@ -324,7 +357,7 @@ final class Inspector
      *
      * @param array<string, array{alias: string, derivation: ?string}> $known every address this request can name
      *
-     * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, note?: string, link?: array{href: string, text: string}, event?: string}
+     * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string}, event?: string}
      */
     private function lastTransaction(MeterResult $result, array $known): array
     {
@@ -376,7 +409,10 @@ final class Inspector
                     'value' => strlen($data) > 16 ? substr($data, 0, 16).' '.substr($data, 16) : $data,
                     'alias' => Alias::for(Alias::DATA, $instruction->data),
                     'explorer' => false,
-                    'note' => sprintf('%d bytes: 8-byte discriminator, then borsh', strlen($instruction->data)),
+                    // One colon per line: the meaning's. The old wording put a
+                    // second one inside the derivation and the row read as two
+                    // sentences fighting over which was the subject.
+                    'note' => self::says(Alias::DATA, sprintf('%d bytes, an 8-byte discriminator then borsh', strlen($instruction->data))),
                 ],
             ];
         }
@@ -389,11 +425,6 @@ final class Inspector
                 'text' => 'This transaction on chain',
             ],
             'event' => $signature,
-            'note' => 'This request\'s transaction, and only this one — §10.4 keeps no list of what you have '
-                .'metered, so there is nothing here to look back through. The first eight data bytes are the '
-                .'Anchor discriminator, sha256("global:meter_and_settle") truncated; the rest is borsh. The '
-                .'account order and the signer and writable flags are the builder\'s, unedited, which is what '
-                .'makes this a check on the library rather than a description of it.',
         ];
     }
 
@@ -445,12 +476,36 @@ final class Inspector
             // "unplaced" answers it without leaving the address undefined.
             'alias' => $known[$address]['alias'] ?? Alias::for(Alias::UNNAMED, $address),
             'explorer' => $onChain,
-            // What the table says about it: the derivation where there is one,
-            // where it came from where there is not, and null for an address
-            // this panel cannot place — which is the honest answer and reads
-            // differently from "derived from nothing".
-            'note' => $known[$address]['derivation'] ?? null,
+            // What the table says about it: what it is, and then where it came
+            // from where there is anything to say. An address with no role in
+            // the map used to get null here, and the silence was meant to read
+            // as "there is nothing to say" — but it read as an omission, which
+            // is the same complaint that put provenance in this table at all.
+            // It now says what it is: an address this panel cannot place.
+            'note' => $known[$address]['derivation'] ?? self::says(Alias::UNNAMED, null),
         ];
+    }
+
+    /**
+     * The line under a value: what it is, then where it came from.
+     *
+     * Added 2026-09-14, and it replaced a table. The prefixes were explained
+     * once — in SPEC §9, in the panel's preamble, in a table at the top of the
+     * article about the panel — and a reader met them eleven at a time and
+     * then had to carry them down the rows. Written here they arrive one at a
+     * time, next to the address they are about, which is where the question
+     * *what is this* actually gets asked.
+     *
+     * The colon is doing real work: the first clause is a claim about the
+     * value, the second is a claim about how the value came to exist, and they
+     * are answerable separately. Where there is no second clause the line is
+     * just the first, rather than a meaning followed by a dangling colon.
+     */
+    private static function says(string $role, ?string $derivation): string
+    {
+        return $derivation === null
+            ? Alias::meaning($role)
+            : Alias::meaning($role).': '.$derivation;
     }
 
     /**
@@ -489,37 +544,42 @@ final class Inspector
     {
         $program = $this->config->program();
 
-        $aliases = [
-            $program->id => Alias::for(Alias::PROGRAM, $program->id),
-            $program->tokenProgram => Alias::for(Alias::TOKEN_PROGRAM, $program->tokenProgram),
+        // Keyed by role rather than by finished alias (2026-09-14): the row's
+        // line needs the role's meaning as well as its syllable, and one map
+        // that answers both cannot disagree with itself.
+        $roles = [
+            $program->id => Alias::PROGRAM,
+            $program->tokenProgram => Alias::TOKEN_PROGRAM,
         ];
 
         if ($state !== null) {
-            $aliases[$state->address] = Alias::for(Alias::SITE, $state->address);
-            $aliases[$state->site->mint] = Alias::for(Alias::MINT, $state->site->mint);
-            $aliases[$state->site->treasury] = Alias::for(Alias::TREASURY, $state->site->treasury);
+            $roles[$state->address] = Alias::SITE;
+            $roles[$state->site->mint] = Alias::MINT;
+            $roles[$state->site->treasury] = Alias::TREASURY;
             // Three sections show this one: the site account's authority, the
             // treasury token account's owner, and the signer on the metering
             // call. Named once here, it is the same short name in all of them
             // — and if the treasury turns out to be owned by the site PDA
             // rather than the authority, that row draws SPDA instead, which is
             // also right and needs no change here.
-            $aliases[$state->site->authority] = Alias::for(Alias::AUTHORITY, $state->site->authority);
+            $roles[$state->site->authority] = Alias::AUTHORITY;
         }
 
         if ($payer !== null) {
-            $aliases[$payer->wallet] = Alias::for(Alias::PAYER, $payer->wallet);
-            $aliases[$payer->tokenAccount] = Alias::for(Alias::PAYER_TOKEN_ACCOUNT, $payer->tokenAccount);
-            $aliases[$payer->contractAddress] = Alias::for(Alias::CONTRACT, $payer->contractAddress);
+            $roles[$payer->wallet] = Alias::PAYER;
+            $roles[$payer->tokenAccount] = Alias::PAYER_TOKEN_ACCOUNT;
+            $roles[$payer->contractAddress] = Alias::CONTRACT;
         }
 
         // Seeds are written with the short names above rather than with
         // 44-character base58, so a reader can match every seed to the row it
         // names without comparing strings by eye — which is the whole argument
-        // for having aliases at all (§9). The aliases therefore have to exist
-        // before the sentences that quote them, which is why this is two
-        // passes over the same addresses rather than one.
-        $of = static fn (string $address): string => $aliases[$address] ?? $address;
+        // for having aliases at all (§9). Every role therefore has to be
+        // placed before the sentences that quote its alias, which is why this
+        // is two passes over the same addresses rather than one.
+        $of = static fn (string $address): string => isset($roles[$address])
+            ? Alias::for($roles[$address], $address)
+            : $address;
 
         $ata = static fn (string $owner, string $tokenProgram, string $mint): string => sprintf(
             '[%s, %s, %s] + bump, by the associated-token program',
@@ -573,8 +633,11 @@ final class Inspector
         }
 
         $known = [];
-        foreach ($aliases as $address => $alias) {
-            $known[$address] = ['alias' => $alias, 'derivation' => $derivations[$address] ?? null];
+        foreach ($roles as $address => $role) {
+            $known[$address] = [
+                'alias' => Alias::for($role, $address),
+                'derivation' => self::says($role, $derivations[$address] ?? null),
+            ];
         }
 
         return $known;
@@ -593,9 +656,19 @@ final class Inspector
      * above and do the arithmetic themselves.
      *
      * These are predictions, not decisions. Every one of them is what the site
-     * asked *before* spending a fee to find out; the program checks the same
-     * things again and its answer is the one that charges. Where the two
-     * disagree, the program is right and this is a bug.
+     * worked out here rather than by sending the transaction to find out; the
+     * program checks the same things again and its answer is the one that
+     * charges. Where the two disagree, the program is right and this is a bug.
+     *
+     * **What asking here saves is a round trip, and only sometimes a fee**
+     * (corrected 2026-09-14, and the note below was corrected with it). The
+     * endpoint simulates before it forwards, so a call the program would
+     * refuse is usually rejected there and never included — free, and about a
+     * second. A fee is charged when the transaction lands and *then* fails,
+     * which needs the state to move between that simulation and inclusion.
+     * `Meter` carries the argument in full. It is also the site's fee and not
+     * the reader's, which the note says because a reader has no way to know
+     * it.
      *
      * `charge(1)` rather than `charge(n)` because §9 says so and because one
      * view is the unit the price is quoted in. §7.4's seven-view advance
@@ -603,7 +676,7 @@ final class Inspector
      *
      * @param callable(int): string $amount both unit forms, at the mint's own decimals
      *
-     * @return array{heading: string, rows: list<array{0: string, 1: string, 2?: string}>, claims: string, note?: string}
+     * @return array{heading: string, rows: list<array{0: string, 1: string, 2?: string}>, claims: string}
      */
     private function preflight(SiteState $state, PayerState $payer, callable $amount): array
     {
@@ -673,11 +746,6 @@ final class Inspector
             // two words read as a suffix, a sentence reads as a caption.
             'claims' => 'under',
             'rows' => $rows,
-            'note' => 'Asked before a fee was spent finding out, from the same account fields shown above. The '
-                .'program checks all of it again and its answer is the one that charges — these are predictions, '
-                .'and where they disagree with the program the program is right. required_allowance is quoted '
-                .'against limit_floor, which is the smallest limit you could authorize right now; authorize more '
-                .'and the approval has to cover that instead.',
         ];
     }
 
@@ -698,7 +766,7 @@ final class Inspector
      * @param callable(int): string $amount both unit forms, at the mint's own decimals
      * @param array<string, array{alias: string, derivation: ?string}> $known every address this request can name, for {@see address()}
      *
-     * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, note?: string}
+     * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>}
      */
     private function reader(PayerState $payer, callable $amount, array $known): array
     {
@@ -750,10 +818,6 @@ final class Inspector
         return [
             'heading' => 'You, on chain',
             'rows' => $rows,
-            'note' => 'The delegate line is what authorizing gave this site and what closing takes back. '
-                .'It lives on your token account, not in the contract, and most wallets never show it — so it '
-                .'is here, read back from the account on every request, and the address beside it is the one to '
-                .'paste into an explorer if you would rather not take this page\'s word for it.',
         ];
     }
 

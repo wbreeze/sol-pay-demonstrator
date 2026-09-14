@@ -351,6 +351,9 @@ function fixtures(string $tree): array
     $f['not-found'] = ['not-found', []];
     $f['not-built'] = ['not-built', []];
     $f['page'] = ['page', ['piece' => $page, 'body' => '<p>body</p>']];
+    // A public piece that wrote a lede — the inspector's own explainer — where
+    // the privacy page above has none. Both branches of `page.php`'s deck.
+    $f['page-with-lede'] = ['page', ['piece' => new $P('reading-the-inspector', 'How to read the inspector', 'Eight sections, and where each number came from.', 9, false, 'draft', '2026-09-14', null, ''), 'body' => '<p>body</p>']];
 
     // A piece's furniture: the dates that show, the ones that do not, and the
     // links at either end of the sequence.

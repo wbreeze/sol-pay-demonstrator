@@ -9,7 +9,7 @@
  * drifts from the inline version, and a reader who sees a different panel
  * depending on which page they opened it from.
  *
- * @var array<int, array{heading: string, rows?: array<int, array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, names?: array<int, array{value: string, alias: string, explorer: bool, note: ?string}>, note?: string}> $sections
+ * @var array<int, array{heading: string, rows?: array<int, array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, names?: array<int, array{value: string, alias: string, explorer: bool, note: ?string}>}> $sections
  * @var \Newsprint\Support\View $view
  */
 use Newsprint\Support\View;
@@ -93,9 +93,6 @@ use Newsprint\Support\View;
                 <a href="<?= View::e($section['link']['href']) ?>"
                    rel="noreferrer noopener" target="_blank"><?= View::e($section['link']['text']) ?></a>
             </p>
-<?php endif ?>
-<?php if (isset($section['note'])): ?>
-            <p class="note"><?= View::e($section['note']) ?></p>
 <?php endif ?>
         </section>
 <?php endforeach ?>

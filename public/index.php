@@ -479,8 +479,37 @@ $app->get('/a/{slug}', function (Request $request, Response $response, array $ar
 
     $library = Library::load($contentDir);
     $piece = $library->find((string) $args['slug']);
-    if (!$piece instanceof Piece || !$piece->metered) {
+    if (!$piece instanceof Piece) {
         return $page($response, $shell('Not found', $view->render('not-found')), 404);
+    }
+
+    /**
+     * An unmetered piece is served whole, here, at the ordinary slug
+     * (2026-09-14).
+     *
+     * Until now the only public page was `/privacy`, on a route of its own
+     * that §10.2 pins to that URL, and a piece marked `metered: false`
+     * anywhere else was a 404 — front matter that quietly produced nothing.
+     *
+     * What needed it was the inspector. The panel now carries one line and a
+     * link to the piece that explains it, and a link on every page of the site
+     * to an article that charges to be read is a documentation page behind a
+     * paywall. Reference matter about how to check the site's claims cannot be
+     * one of the things the site sells.
+     *
+     * No `$reads`, so the panel on this page is deferred exactly as it is on
+     * `/privacy`: a page that asks nothing of the chain should not spend an
+     * account read filling a panel most readers never open (§9, 2026-09-09).
+     *
+     * `Library::articles()` is deliberately untouched, so an unmetered piece
+     * is not on the index and not in the previous/next sequence. The index
+     * lists what is for sale; this one is reached from the panel it describes.
+     */
+    if (!$piece->metered) {
+        return $page($response, $shell($piece->title, $view->render('page', [
+            'piece' => $piece,
+            'body' => $piece->body(),
+        ])));
     }
 
     $address = $wallet($request);
@@ -533,6 +562,8 @@ $articlePost = $app->post('/a/{slug}', function (Request $request, Response $res
 
     $library = Library::load($contentDir);
     $piece = $library->find((string) $args['slug']);
+    // The GET serves an unmetered piece whole; there is nothing here to
+    // charge for, so this stays a refusal rather than gaining a second branch.
     if (!$piece instanceof Piece || !$piece->metered) {
         return $page($response, $shell('Not found', $view->render('not-found')), 404);
     }

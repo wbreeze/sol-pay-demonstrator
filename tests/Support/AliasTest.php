@@ -46,6 +46,33 @@ final class AliasTest extends TestCase
         );
     }
 
+    /**
+     * Every prefix means something, and the meaning is what the panel writes
+     * under the address now that the table explaining them is gone.
+     *
+     * The failure this is for is silent: a prefix added without a meaning
+     * makes `Alias::meaning()` read a key that is not there, which PHP reports
+     * as a warning on a line nobody is watching and then renders as an empty
+     * opening to a sentence.
+     */
+    public function testEveryPrefixHasAMeaning(): void
+    {
+        foreach (Alias::PREFIXES as $prefix) {
+            self::assertNotSame('', Alias::meaning($prefix), $prefix);
+        }
+
+        // And the list has to be the list. `PREFIXES` is what the loop above
+        // walks and what the panel's test walks, so a twelfth prefix declared
+        // and left out of it would be covered by neither — which is the same
+        // silence one level up.
+        $declared = array_values(array_filter(
+            (new \ReflectionClass(Alias::class))->getConstants(),
+            static fn (mixed $value): bool => is_string($value),
+        ));
+
+        self::assertSame($declared, Alias::PREFIXES, 'PREFIXES is not the prefixes this class declares');
+    }
+
     public function testItIsAPrefixAndAThreeLetterSyllable(): void
     {
         $alias = Alias::for(Alias::CONTRACT, self::PAYER);

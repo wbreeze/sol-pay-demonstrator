@@ -174,7 +174,11 @@ final class InspectorTest extends TestCase
 
         $site = $this->derivation($sections, 'Site account, decoded', 'site account');
         self::assertNotNull($site, 'a PDA has seeds and they belong on the row');
-        self::assertStringStartsWith('["site", ', $site, 'the literal seed first, as the program writes it');
+        self::assertStringStartsWith(
+            Alias::meaning(Alias::SITE).': ["site", ',
+            $site,
+            'what it is, then the literal seed first as the program writes it',
+        );
         self::assertStringContainsString('by '.$this->programAlias(), $site);
 
         $treasury = $this->derivation($sections, 'Site account, decoded', 'treasury');
@@ -245,6 +249,12 @@ final class InspectorTest extends TestCase
      * page that could not be looked up. The prefix is what keeps it honest —
      * `ACCT` claims nothing about the account, where `SPDA` on an address this
      * panel could not place would be a guess wearing a fact's clothes.
+     *
+     * **And its line is no longer empty** (2026-09-14). It used to be null,
+     * deliberately, to read as "there is nothing to say" — and it read as an
+     * omission instead, which is the complaint that put provenance in this
+     * table in the first place. It now says what it is and stops, because
+     * there is no derivation to follow the colon.
      */
     public function testAnAddressThePanelCannotPlaceIsNamedWithoutClaimingARole(): void
     {
@@ -254,7 +264,12 @@ final class InspectorTest extends TestCase
 
         self::assertArrayHasKey($stranger, $names);
         self::assertStringStartsWith(Alias::UNNAMED, $names[$stranger]['alias']);
-        self::assertNull($names[$stranger]['note'], 'nothing is known about it, and the table says so by saying nothing');
+        self::assertSame(
+            Alias::meaning(Alias::UNNAMED),
+            $names[$stranger]['note'],
+            'the line says what it is; there is nothing to derive, so nothing follows it',
+        );
+        self::assertStringNotContainsString(':', (string) $names[$stranger]['note'], 'a colon with nothing after it');
 
         foreach ([Alias::SITE, Alias::AUTHORITY, Alias::MINT, Alias::PAYER] as $role) {
             self::assertStringStartsNotWith($role, $names[$stranger]['alias']);
@@ -274,6 +289,83 @@ final class InspectorTest extends TestCase
         self::assertCount(1, $data);
         self::assertFalse($data[0]['explorer'], 'there is nothing at an explorer to show for it');
         self::assertStringContainsString('borsh', (string) $data[0]['note']);
+    }
+
+    /**
+     * Every line under a value opens with what the value *is* (2026-09-14).
+     *
+     * This is what let the prefix table go. A reader used to learn the eleven
+     * prefixes at the top — in the preamble, in SPEC §9, in a table in the
+     * article — and then carry them down the rows; now each row says its own,
+     * once, next to the address it is about.
+     *
+     * Asserted over the whole table rather than on a row or two, because the
+     * failure worth catching is a value that gets into the panel by a path
+     * that does not go through {@see says()} — which is exactly how the
+     * instruction bytes nearly escaped, being the one entry that is not an
+     * address.
+     */
+    public function testEveryLineUnderAValueOpensWithWhatTheValueIs(): void
+    {
+        $names = $this->names($this->inspector()->sections($this->state(), null, $this->payer(), $this->metered()));
+        self::assertGreaterThan(6, count($names), 'a table this small is not the crowded case');
+
+        foreach ($names as $value => $name) {
+            $prefix = substr($name['alias'], 0, -3);
+            self::assertContains($prefix, Alias::PREFIXES, $name['alias']);
+            self::assertStringStartsWith(
+                Alias::meaning($prefix),
+                (string) $name['note'],
+                substr($value, 0, 8).' says nothing about what it is',
+            );
+        }
+    }
+
+    /**
+     * The two alarm states still say what they mean (2026-09-14).
+     *
+     * Both, in one test, because they are the same decision and because
+     * neither is a state anybody looks at on purpose: a panel that has lost
+     * its reassurance is a panel nobody notices has lost it. When every other
+     * explanatory paragraph moved into the article, these two stayed — a
+     * reader meeting *read failed* is deciding whether to trust the page they
+     * are on, and the answer is one sentence they already had.
+     *
+     * Asserted as a **claim on the row**, which is what the restoration
+     * chose over bringing back the section-level note: the sentence has to be
+     * in the row's third cell and the section has to ask for it *under* the
+     * value, or the template renders it in a column beside `not provisioned`
+     * and the panel grows a second anatomy for two rows.
+     */
+    public function testTheAlarmStatesKeepTheirSentence(): void
+    {
+        $failed = $this->section($this->inspector()->sections(null, 'getMultipleAccounts: HTTP 429'), 'This site, on chain');
+        self::assertSame('under', $failed['claims'] ?? null, 'a sentence beside the value is a caption in a column');
+        self::assertSame('read failed', $failed['rows'][0][0]);
+        self::assertStringContainsString('still served', $failed['rows'][0][2] ?? '');
+
+        $unprovisioned = $this->section($this->inspector()->sections(), 'This site, on chain');
+        self::assertSame('under', $unprovisioned['claims'] ?? null);
+        self::assertSame('not provisioned', $unprovisioned['rows'][0][1]);
+        self::assertStringContainsString('First-run setup', $unprovisioned['rows'][0][2] ?? '');
+
+        // And the claim is the row's, not the section's: the `note` key and
+        // the template branch that rendered it are gone, and a section putting
+        // one back would render nothing at all.
+        self::assertArrayNotHasKey('note', $failed);
+        self::assertArrayNotHasKey('note', $unprovisioned);
+    }
+
+    /** @param list<array<string, mixed>> $sections @return array<string, mixed> */
+    private function section(array $sections, string $heading): array
+    {
+        foreach ($sections as $section) {
+            if ($section['heading'] === $heading) {
+                return $section;
+            }
+        }
+
+        self::fail("no section headed {$heading}");
     }
 
     /** A reader with a contract, so the crowded panel is the one under test. */
@@ -333,7 +425,7 @@ final class InspectorTest extends TestCase
         $sections = $this->inspector()->sections($state, null, $this->payer(), $this->metered());
 
         self::assertSame([
-            'What the short names mean',
+            'The values, in full',
             'Preflight, for this request',
             'The last transaction',
             'You, on chain',

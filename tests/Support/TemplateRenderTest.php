@@ -654,6 +654,35 @@ final class TemplateRenderTest extends TestCase
     }
 
     /**
+     * A public page carries its lede, and only when it has one (2026-09-14).
+     *
+     * Both branches, because a rule with two branches and one test is a rule
+     * with one branch. `privacy.md` has no lede — the build requires one only
+     * of a metered piece — and a page rendering an empty deck there would put
+     * a rule and a gap above the body for nothing. A piece that *has* written
+     * one has written a standfirst, and the free/paid distinction is no reason
+     * to drop it.
+     */
+    public function testAPublicPageCarriesItsLedeWhenItHasOne(): void
+    {
+        $withLede = new \Newsprint\Content\Piece(
+            'reading-the-inspector', 'How to read the inspector',
+            'The panel at the foot of every page has up to eight sections.',
+            9, false, 'draft', '2026-09-14', null, '',
+        );
+        $rendered = $this->renderStrictly('page', ['piece' => $withLede, 'body' => '<p>Body.</p>']);
+        self::assertStringContainsString('class="lede deck"', $rendered);
+        self::assertStringContainsString('up to eight sections.', $rendered);
+
+        $none = new \Newsprint\Content\Piece('privacy', 'Privacy', '', 4, false, 'draft', '2026-09-04', null, '');
+        self::assertStringNotContainsString(
+            'deck',
+            $this->renderStrictly('page', ['piece' => $none, 'body' => '<p>The list.</p>']),
+            'an empty deck is a rule and a gap above the body for nothing',
+        );
+    }
+
+    /**
      * A piece is titled once.
      *
      * The title was rendered twice on every paid article: once by
@@ -845,7 +874,7 @@ final class TemplateRenderTest extends TestCase
         $value = ['value' => $address, 'alias' => 'SPDAmux', 'explorer' => true, 'note' => '["site", AUTHfen] + bump'];
 
         $html = $this->renderStrictly('inspector-sections', ['sections' => [
-            ['heading' => 'What the short names mean', 'names' => [$value]],
+            ['heading' => 'The values, in full', 'names' => [$value]],
             ['heading' => 'Site account, decoded', 'rows' => [['site account', $value], ['bump', '254']]],
             ['heading' => 'The last transaction', 'rows' => [['ix 1 · account 1', $value, 'writable']]],
         ]]);
