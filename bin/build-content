@@ -20,11 +20,8 @@ declare(strict_types=1);
  * Usage:  bin/build-content [--quiet]
  */
 
-use League\CommonMark\Extension\FrontMatter\FrontMatterExtension;
 use League\CommonMark\Extension\FrontMatter\Output\RenderedContentWithFrontMatter;
-use League\CommonMark\Environment\Environment;
-use League\CommonMark\Extension\CommonMark\CommonMarkCoreExtension;
-use League\CommonMark\MarkdownConverter;
+use Newsprint\Content\Markdown;
 
 require __DIR__.'/../vendor/autoload.php';
 
@@ -51,17 +48,8 @@ if (!is_dir($target) && !mkdir($target, 0o755, true) && !is_dir($target)) {
     exit(1);
 }
 
-$environment = new Environment([
-    // The site's own markdown, so raw HTML in it would be the site's own
-    // choice rather than a reader's — but §10.3 makes an embedded script or a
-    // remote image a broken promise rather than a style question, and the
-    // cheapest way to keep that promise is to make it unrepresentable.
-    'html_input' => 'strip',
-    'allow_unsafe_links' => false,
-]);
-$environment->addExtension(new CommonMarkCoreExtension());
-$environment->addExtension(new FrontMatterExtension());
-$converter = new MarkdownConverter($environment);
+// The dialect, and the argument for where it lives, are in `Content\Markdown`.
+$converter = Markdown::converter();
 
 $manifest = [];
 $skipped = [];
