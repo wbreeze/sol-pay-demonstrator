@@ -210,11 +210,93 @@ final class TemplateRenderTest extends TestCase
             }
         }
 
-        // And the pre-emptive warning, which only renders when nothing has
-        // been advanced yet.
+        // And the pre-emptive warning. `Heads up` alone could not say which of
+        // its three branches had rendered — all three open that way — so the
+        // assertion names the branch.
         $meter = $this->panel(['result' => MeterResult::granted(), 'solvency' => $this->solvency(80000, 0)]);
         $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
-        self::assertStringContainsString('Heads up', $html);
+        self::assertStringContainsString('Heads up: the next advance would try to move', $html);
+    }
+
+    /**
+     * The warning survives the click that makes it true.
+     *
+     * `can_meter` is a limit check, so the only thing that knows a balance is
+     * short is the solvency read this page already does — and the advance that
+     * spends the balance down is exactly the one after which the next click is
+     * certain to fail. The gate used to be "has anything been advanced", which
+     * silenced the warning for the rest of the visit on the first success: the
+     * one case it exists for was the one case that did not get it.
+     *
+     * Both halves are asserted, because a gate that never suppresses is as
+     * wrong as one that always does. A *failed* advance has already named the
+     * same shortfall in the same terms, and must not say it twice.
+     *
+     * **On the negative assertion.** `assertStringNotContainsString` on a
+     * phrase can start passing by looking for a string nothing could contain,
+     * which is not a test. It is sound here only because the positive
+     * assertions above it look for the same phrase: reword the warning and
+     * they go red together, which is the signal to update both.
+     */
+    public function testTheHeadsUpIsSuppressedOnlyWhenTheAdvanceAlreadySaidIt(): void
+    {
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
+        $warning = 'Heads up: the next advance would try to move';
+
+        $strip = function (MeterOutcome $outcome, bool $settled) use ($piece): string {
+            $meter = $this->panel([
+                'result' => MeterResult::granted(),
+                'solvency' => $this->solvency(80000, 0),
+                'advanced' => ['outcome' => $outcome, 'views' => 7, 'signature' => null, 'settled' => $settled],
+            ]);
+
+            return $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
+        };
+
+        // Every outcome that said nothing about solvency still warns — the
+        // settle that went through included, which is the repair.
+        self::assertStringContainsString($warning, $strip(MeterOutcome::Metered, true), 'a settle that left the reader short');
+        self::assertStringContainsString($warning, $strip(MeterOutcome::Metered, false), 'an advance that moved nothing');
+        self::assertStringContainsString($warning, $strip(MeterOutcome::Blocked, false), 'a limit refusal is a different problem');
+        self::assertStringContainsString($warning, $strip(MeterOutcome::Unreadable, false), 'nothing was sent, so nothing was learned');
+
+        // And the one that did say it does not repeat itself.
+        $failed = $strip(MeterOutcome::Failed, false);
+        self::assertStringNotContainsString($warning, $failed, 'the failure report already named this');
+        self::assertStringContainsString('Your balance is short by', $failed, 'and it is still the failure report that names it');
+    }
+
+    /**
+     * A revoked delegate is the third thing that can stop a settle, and the
+     * advance's report had branches for two.
+     *
+     * SPL clears the delegate the moment the approved amount is spent to zero,
+     * so a revoked account usually reports a short allowance as well — and
+     * "the amount you approved no longer covers it" is the wrong account of an
+     * approval that is *gone*. Checked after the allowance it would have been
+     * wrong; checked after and reached only when the allowance happened to be
+     * intact, it was silent. So it is checked before, and both shapes are
+     * asserted: the revoke that left a delegated amount standing, and the
+     * ordinary one that did not.
+     */
+    public function testAFailedAdvanceNamesARevokedDelegateRatherThanTheAllowance(): void
+    {
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
+
+        foreach ([
+            'a stale delegated amount' => $this->solvency(0, 0, false),
+            'the usual zeroed one' => $this->solvency(0, 50000, false),
+        ] as $label => $solvency) {
+            $meter = $this->panel([
+                'result' => MeterResult::granted(),
+                'solvency' => $solvency,
+                'advanced' => ['outcome' => MeterOutcome::Failed, 'views' => 7, 'signature' => null, 'settled' => false],
+            ]);
+            $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
+
+            self::assertStringContainsString('no longer a delegate on your token account, so the', $html, $label);
+            self::assertStringNotContainsString('The amount you approved no longer covers it', $html, $label.': the approval is gone, not short');
+        }
     }
 
     /**
@@ -673,6 +755,25 @@ final class TemplateRenderTest extends TestCase
         self::assertStringContainsString('<time datetime="2026-09-07">7 September 2026</time>', $article);
         self::assertStringNotContainsString('revised', $article);
         self::assertStringNotContainsString('draft', $article);
+
+        // **The badge, asserted positively, and that is the point of these
+        // three lines.** `assertStringNotContainsString('draft', ...)` above
+        // can start passing by looking for a string nothing could contain —
+        // reword the badge and it goes quietly green while testing nothing.
+        // It is sound only while something asserts the same word appears when
+        // it should, and until now nothing did. ('revised' was already
+        // anchored, by the assertion on the page above.)
+        $unpublished = new \Newsprint\Content\Piece('two-orderings', 'Two orderings', 'L', 4, true, 'draft', '2026-09-07', null, '');
+        $badge = $this->renderStrictly('article', [
+            'piece' => $unpublished,
+            'body' => '<p>Body.</p>',
+            'site' => ['symbol' => 'DEMO', 'page_price_demo' => '0.01'],
+            'meter' => $this->panel(['result' => MeterResult::granted()]),
+            'previous' => null,
+            'next' => null,
+        ]);
+
+        self::assertStringContainsString('<span class="draft">draft</span>', $badge);
     }
 
     /**
