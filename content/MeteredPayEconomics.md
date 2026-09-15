@@ -1,23 +1,43 @@
-# "Per-view revenue equals or beats targeted advertising"
+---
+title: What a dime has to do
+slug: pay-per-view
+created: 2026-09-04
+revised: 2026-09-15
+metered: true
+status: published
+lede: >
+  At a penny, pay-per-view cannot come near what advertising earns. At about a
+  dime it can, without tracking anyone, if one page view in five is paid for.
+  A trial of sol-pay should claim exactly that. The trial should then measure
+  what nobody has measured yet: how many readers pay at that price.
+reading_time: 9
+---
 
-Surfaced 2026-09-02, testing a claim before putting it on a public page.
-Filed against sol-pay because it is the business case for the whole design,
-not for the demonstrator.
+*By Douglas Lovell with Claude Opus 5 (Anthropic)*
 
-**Short version: at 1¢ the claim is not defensible. A narrower claim is, and it
-is still a good one. The price is the problem, not the model.**
+The case for paying per article usually starts with a penny. The penny is not
+really a price. It stands for a charge too small to notice: no decision, no
+friction, nothing to weigh.
 
-## The comparison, publisher-net
+A penny cannot pay for a newsroom, as the arithmetic below shows. The better
+question is how low a price has to be to feel like nothing — *sure, I'll toss
+you a dime* — and whether enough readers pay at that price to come near what
+advertising earns. Near is enough. A site that tracks nobody gives its readers
+something that advertising cannot, even though no revenue figure shows it. A
+trial of sol-pay should be built around that question. The trial should also
+claim no more than it can measure.
 
-Ad revenue per *page view* for news, not per impression — a page carries
-several slots, and conflating the two is where this argument usually goes
-wrong.
+## What advertising earns on a page view
 
-| comparator | $/page view | 1¢ metered is |
-| --- | --- | --- |
-| open-market programmatic, marginal news inventory | $0.0072 | **1.4× — holds** |
-| blended incl. direct-sold, US metro daily | $0.0214 | 0.47× — fails by half |
-| premium direct-sold | ~$0.04 | 0.25× — fails badly |
+Ad revenue here is counted per *page view*, not per impression. A page carries
+several ad slots. Mixing up the two units is where arguments like this one
+usually go wrong.
+
+| comparator | $ per page view |
+| --- | --- |
+| open-market programmatic, marginal news inventory | $0.0072 |
+| blended, including direct-sold, US metro daily | $0.0214 |
+| premium direct-sold | ~$0.04 |
 
 Sources: Lenfest Institute unit-economics study (Oct 2019) — $21.44 total RPM
 and $7.16 programmatic RPM for a US metro daily, with an industry range of
@@ -25,59 +45,72 @@ $20–25 total and $6–10 "at the margins"; Operative/STAQ benchmarks via Digid
 (Feb 2023) — open-marketplace CPM $1.21 against programmatic-guaranteed $10.00,
 an 8× spread.
 
-**Weak-data warning.** The best public news-specific RPM figures are from 2019
-and January 2023. Nothing credible for 2025–26 was found. Anything built on
-these should be re-checked against a publisher's own numbers before it is used
-to make a decision.
+**The data is old.** The best public news-specific figures are from 2019 and
+January 2023. As of September 2026, nothing credible for 2025–26 has turned
+up. A publisher running a trial should replace these figures with its own.
 
-## The break-even that kills it
+## Almost no visitor arrives unknown
 
-Advertising monetizes essentially every page view. Metering monetizes only the
-views someone pays for. So for a page priced at *m* against ad revenue *A*, the
-required payment rate is `p = A / m`:
+A low price is usually defended like this. Most visitors never subscribe. The
+publisher knows nothing about them. Their page views sell at the open-market
+rate, the lowest in the table, so a small price beats that rate.
 
-- against programmatic $0.0072 → **p = 72%**
-- against blended $0.0214 → **p = 214%**, arithmetically impossible at 1¢
+The defence confuses two kinds of knowing. "Open market" describes how an ad
+slot is sold: an auction that any buyer can bid in. The phrase says nothing
+about whether the reader is known. Each bidder prices the slot on whatever
+profile the bidder holds, and the publisher never sees that profile.
 
-Add a traffic loss *d* and it is `p = A / (m·(1−d))`. At the 51% visit drop
-Chiou & Tucker measured on Gannett paywalls (2010), the programmatic case needs
-**143%**. Also impossible.
+Few visitors arrive without one, and the share who do may be heading toward
+zero. Bot defences press from the other side. One of us refuses tracking. He
+is regularly asked to prove he is human. That is a subject for another piece.
 
-Now the observed rates. Median publisher converts **0.6%** of visitors to
-subscribers, top quartile 1.4% (INMA via Press Gazette, Jul 2024). Piano's 2024
-benchmarks: about **1%** of visitors are known users, 66% are one-off. Reuters
-Institute DNR 2025: **18% of adults across 20 richer countries** pay for online
-news at all, 20% in the US, and subscription levels "now look to have hit a
-ceiling."
+Two companies do most of the knowing. They put what they know to opposite uses.
 
-**72% is roughly 120× the median publisher's conversion rate.** Per-view
-payment should convert better than subscription — the commitment is far smaller
-— but not by two orders of magnitude.
+**Google's tracking makes a publisher's ad slots pay better.** Google's
+tracking feeds the auctions that sell those slots. Chrome kept third-party
+cookies in 2025. Google has since shut down Privacy Sandbox, the replacement it
+had been building.
 
-## What the price would have to be
+**Meta's tracking makes Meta's own slots pay better.** Meta no longer sells ads
+on other publishers' web pages. What Meta's code learns on a news site raises
+the price of ads on Facebook and Instagram. Publishers carry Meta's code anyway,
+to measure and target the campaigns they buy there for traffic and
+subscribers.
 
-At an opt-in rate of 20% of page views — as optimistic as the entire share of
-US adults who pay for any news:
+A publisher carrying these trackers does not hold the profiles. The publisher
+helps to produce them. Every page view feeds a profile that the tracking
+company sells elsewhere, including to the sites competing for the same
+reader's time.
 
-- vs programmatic $0.0072 → **$0.036 per article**
-- vs blended $0.0214 → **$0.107 per article**
+It would be naive to think those profiles are harmless. In December 2024 the US
+Federal Trade Commission charged a data broker, Mobilewalla, with collecting
+more than 500 million advertising identifiers paired with precise locations,
+some of them gathered from the auctions that sell ad slots. According to the
+FTC, Mobilewalla built audiences of women who had visited pregnancy centres.
+Mobilewalla also analysed the people who attended protests after George
+Floyd's death. The harm deserves its own piece. This piece rests on a narrower
+point: a site paid directly has no reason to feed a profile at all.
 
-**3.6¢ to 11¢.** Which is exactly where the market went on its own: Blendle
-charged 19–39¢ for newspaper pieces, Cornwall Reports 20p, Maidenhead
-Advertiser 40p for a day pass, The New European 10p. Every real venture priced
-**10× to 80× above 1¢**, and the arithmetic above says they were right to.
+A payment through sol-pay does leave a record of its own. Paying writes one
+permanent public line saying that a wallet paid the site. The line records how
+much the wallet spent there. The line does not list what the wallet read.
+[What this site holds](/privacy) covers the rest.
 
-That convergence is evidence *for* metering as a model and *against* 1¢ as the
-price.
+So the price has to meet the blended figure. Readers who will never subscribe
+are about 99 of every 100 visitors. Their page views are priced on profiles
+like everyone else's. Nothing in the sources says those page views earn only
+the open-market rate.
 
-## The targeting premium is not the argument to lean on
+## What tracking is worth
 
-The tempting claim is that behavioural targeting adds almost nothing to
+A site that stops tracking gives something up. The question is how much.
+
+The tempting claim is that behavioural targeting is worth almost nothing to
 publishers — Marotta, Abhishek & Acquisti (WEIS 2019) found a **4% premium,
 $0.00008 per impression**. Do not build on it. It is one publisher's data from
-one week in May 2016, its own headline figure does not reconcile with its
-reported potential-outcome means (4% vs 9.2%), and the weight of later evidence
-is against it:
+one week in May 2016. Its headline 4% does not match the paper's own averages:
+the revenue an impression earns with a cookie and without one differs there by
+9.2%. And the weight of later evidence is against it:
 
 - Google RCT (2019, top-500 GAM publishers): −52% average, **news −62%**.
   Partial equilibrium, so overstated.
@@ -89,31 +122,84 @@ is against it:
 - **Gu, Johnson & Kobayashi (PNAS 2026)** — the largest and best identified,
   200M+ impressions across 5,000+ publishers: removing third-party cookies cut
   publisher revenue **29.1%**; Privacy Sandbox recovered 4.2% of the loss.
+  Chrome has since kept third-party cookies. Google has shut Privacy Sandbox
+  down. The cut the study measured is one that Chrome chose not to make.
 
 **Honest number: tracking is worth roughly 15–30% of publisher programmatic
 revenue.** Not 4%, not 52%. A privacy argument that claims publishers lose
 nothing by giving up tracking is making a claim the evidence does not support.
 
-## The argument that does hold
+So what does a site give up when it stops tracking? Take it in steps.
 
-**The intermediaries, not the targeting.** ISBA/PwC's two Programmatic Supply
-Chain Transparency studies (data Jan–Mar 2020 and Sep–Oct 2022) both found that
-**51% of advertiser spend reaches the publisher**. Between them the
-unattributable "unknown delta" fell from ~15% to 3% — transparency improved and
-the take rate did not move at all.
+1. An average page view earns **$0.0214** from advertising — the blended
+   figure.
+2. Of that, **$0.0072** comes from programmatic ads, sold at auction.
+3. Tracking is worth 15% to 30% of programmatic revenue. A site that stops
+   tracking loses that share of the $0.0072: between **$0.0011** and
+   **$0.0022** per page view.
+4. The studies above measured programmatic ads only. This adjustment leaves the
+   rest of the blended figure alone.
+5. So a page view on a site that does not track earns about **$0.0192 to
+   $0.0203** from advertising: $0.0214, less the loss.
 
-So **1¢ paid directly corresponds to about 2¢ of gross advertiser spend.** The
-publisher-side comparison in the table above is already net, so do not apply
-this twice — but as a statement about where the money goes it is solid, and it
-is the most defensible thing in this document.
+| per page view | with tracking | without tracking |
+| --- | --- | --- |
+| programmatic | $0.0072 | $0.0050 – $0.0061 |
+| everything else | $0.0142 | $0.0142 |
+| blended | $0.0214 | $0.0192 – $0.0203 |
 
-**And the reader who was never going to subscribe.** Subscriptions have hit a
-ceiling at ~18–20% of adults and 0.6% of a given publisher's visitors. Metering
-is not competing with the subscription; it is addressing the 99% who bounce off
-it. Against *that* population the ad comparator is the marginal one — open
-exchange, well under a cent — which is the tier the claim survives against.
+Nothing here changes the price of an article. Losing tracking lowers the ad
+revenue that a paid page view has to replace. The lower figure is the one a
+price has to meet.
 
-## The thing sol-pay actually fixes, and the thing it does not
+## The price and the share
+
+Advertising earns on almost every page view. A price earns only on the page
+views someone pays for. Call the price per article *p*, the ad revenue per
+page view *A*, and the share of page views paid for *s*. To match the ad
+revenue, the share has to be `s = A / p`. Against ad revenue without tracking,
+$0.0192 to $0.0203:
+
+| price per article | page views paid for |
+| --- | --- |
+| 1¢ | 192% – 203%, impossible |
+| 5¢ | 38% – 41% |
+| 10¢ | 19% – 20% |
+| 15¢ | 13% – 14% |
+| 25¢ | 8% |
+
+The penny is out of reach at any share. The dime needs one page view in five.
+
+A price also turns away readers who will not pay at all. With a traffic loss
+*d*, the share becomes `s = A / (p·(1−d))`. Chiou & Tucker measured a 51% drop
+in visits when Gannett put up paywalls in 2010. A dime with a loss that large
+needs about 40% of the remaining page views paid for. A trial has to measure
+the loss as well as the share.
+
+Now the observed rates. The median publisher converts **0.6%** of visitors to
+subscribers. The top quartile converts 1.4% (INMA via Press Gazette, Jul 2024).
+Piano's 2024 benchmarks put known users at about **1%** of visitors, with 66%
+one-off. Reuters Institute DNR 2025: **18% of adults across 20 richer
+countries** pay for online news at all, 20% in the US. Subscription levels "now
+look to have hit a ceiling."
+
+One page view in five is more than 30 times the median subscription rate. The
+two rates count different things — page views against visitors — so the
+comparison is rough. Per-view payment asks for a far smaller commitment than a
+subscription, and should convert better for that reason. Whether it converts
+thirty times better is the question a trial answers.
+
+## Where the market priced it
+
+Every venture that tried per-article payment priced at a dime or more. Blendle
+charged 19–39¢ for newspaper pieces. Cornwall Reports charged 20p, the
+Maidenhead Advertiser 40p for a day pass, The New European 10p. Those prices
+sit where the table above says a price has to sit.
+
+The convergence is evidence *for* per-view payment as a model. It is also
+evidence that a workable price starts at about a dime.
+
+## Why a dime might reach one view in five
 
 Blendle is the load-bearing precedent and its failure is usually
 mis-remembered as payment friction. It was not. Klöpping's own numbers:
@@ -143,29 +229,50 @@ answered rather than ignored — the answer being that Contributor asked readers
 to buy *out of* advertising on sites that kept running it, which is a different
 and worse proposition than a site that does not track at all.
 
-## Recommended positioning
+The one-time authorization is what a trial of sol-pay puts to the test. A
+reader who agrees to a limit once, and then reads without deciding again, is
+the reader who might pay for one page view in five.
 
-Do not say: *equals or beats targeted advertising.* It does not, at 1¢, against
-blended news ad revenue, and the required opt-in rate is ~100× anything
-observed.
+## Where the money goes
 
-Do say: **a direct payment of a cent or two per article exceeds what a
-publisher nets from open-market programmatic on marginal inventory, comes
-without the ~49% intermediary take, and addresses the ~99% of readers who will
-never subscribe — with a one-time authorization rather than the per-article
-decision that sank every previous attempt.**
+**Half of what advertisers spend never reaches the publisher.** ISBA/PwC's two
+Programmatic Supply Chain Transparency studies (data Jan–Mar 2020 and Sep–Oct
+2022) both found that **51% of advertiser spend reaches the publisher**.
+Between the two studies the unattributable "unknown delta" fell from ~15% to
+3%. Transparency improved. The take rate did not move at all.
 
-Both halves are sourced. The second is a better pitch anyway, because it does
-not require the publisher to believe something they can check and disprove in
-an afternoon.
+So a dime paid directly corresponds to about 20¢ of advertiser spend. The
+figures above are already what the publisher nets, so this does not improve
+the comparison. It does say where the money goes. A reader who pays directly
+pays the site, with no auction in between.
 
-## Consequence for pricing
+## How to position the trial
 
-If a real deployment prices at 1¢, the historical record and the arithmetic
-both say it is **5–10× too low**. Worth deciding deliberately, since
-`page_price` is a per-site parameter and nothing in the program constrains it.
-The demonstrator's 1¢ is a demo figure chosen so a visitor reaches the
-collection threshold in ten views, and is not a recommendation.
+**Claim this:** at about a dime an article, with one page view in five paid
+for, direct payment comes near what a news site earns from advertising. The
+site tracks nobody to earn it. A one-time authorization is what makes that
+share plausible, where every per-article attempt fell short.
+
+**Do not claim** that pay-per-view equals or beats targeted advertising. Do not
+claim that a small price beats what
+non-subscribers are worth, either. Those readers arrive profiled, and their
+page views are priced like everyone else's.
+
+**Measure** the three numbers the claim stands or falls on:
+
+- the share of page views paid for, at the trial's price;
+- the readers the price turns away, the *d* above;
+- how long paying readers read, against Blendle's 7 minutes and a
+  subscriber's 22.
+
+The price and the ad figures are sourced. The share is an assumption, stated as
+one. A publisher can check the ad figures against its own books in an
+afternoon. The share is what the trial is for.
+
+`page_price` is a per-site parameter in sol-pay, and nothing in the program
+constrains it. A trial can set a dime, or run two sites at two prices. This
+demonstrator charges 0.01 DEMO, a figure chosen so a visitor reaches the
+collection threshold in ten views. That figure is not a recommendation.
 
 ## Sources
 
@@ -174,7 +281,7 @@ collection threshold in ten views, and is not a recommendation.
 [Marotta, Abhishek & Acquisti (WEIS 2019)](https://weis2019.econinfosec.org/wp-content/uploads/sites/6/2019/05/WEIS_2019_paper_38.pdf) ·
 [Google cookie-disabling study](https://services.google.com/fh/files/misc/disabling_third-party_cookies_publisher_revenue.pdf) ·
 [Skiera et al., FTC PrivacyCon](https://www.ftc.gov/system/files/ftc_gov/pdf/3-Skiera-Economic-Impact-of-Opt-in-versus-Opt-out-Requirements-for-Personal-Data-Usage.pdf) ·
-[Gu, Johnson & Kobayashi (SSRN)](https://papers.ssrn.com/sol3/Delivery.cfm/5284526.pdf?abstractid=5284526&mirid=1) ·
+[Gu, Johnson & Kobayashi (SSRN)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5284526) ·
 [ISBA/PwC I](https://www.isba.org.uk/system/files/media/documents/2020-12/executive-summary-programmatic-supply-chain-transparency-study.pdf) ·
 [ISBA/PwC II](https://www.isba.org.uk/system/files/media/documents/2023-01/ISBA%20%20PwC%20programmatic%20supply%20chain%20study%20II%20(summary)-%2018%20January%202023.pdf) ·
 [INMA conversion via Press Gazette](https://pressgazette.co.uk/media-audience-and-business-data/newsbrand-subscriber-conversion-rates-biggest-reader-funded-newsbrands-ranked/) ·
@@ -183,4 +290,9 @@ collection threshold in ten views, and is not a recommendation.
 [Chiou & Tucker, paywalls](https://www.oxy.edu/sites/default/files/assets/Economics/Chiou/chiou_and_tucker_paywalls.pdf) ·
 [Blendle pivot, Nieman Lab](https://www.niemanlab.org/2019/06/micropayments-for-news-pioneer-blendle-is-pivoting-from-micropayments/) ·
 [Blendle exit, Nieman Lab](https://www.niemanlab.org/2023/08/the-poster-child-for-micropayments-for-news-is-getting-out-of-the-micropayments-business/) ·
-[UK micropayments, Press Gazette](https://pressgazette.co.uk/paywalls/micropayments-for-news/)
+[UK micropayments, Press Gazette](https://pressgazette.co.uk/paywalls/micropayments-for-news/) ·
+[Chrome keeps third-party cookies, Didomi](https://www.didomi.io/blog/google-chrome-third-party-cookies-april-2025) ·
+[Privacy Sandbox shut down, Adweek](https://www.adweek.com/media/googles-privacy-sandbox-is-officially-dead/) ·
+[Meta ends web supply in Audience Network, AdExchanger](https://www.adexchanger.com/platforms/facebook-is-killing-off-its-web-supply-in-audience-network-and-dont-be-surprised-if-it-all-shuts-down/) ·
+[Publishers buying Facebook traffic, eMarketer](https://www.emarketer.com/content/how-publishers-can-profit-from-buying-facebook-traffic) ·
+[FTC action against Mobilewalla](https://www.ftc.gov/news-events/news/press-releases/2024/12/ftc-takes-action-against-mobilewalla-collecting-selling-sensitive-location-data)
