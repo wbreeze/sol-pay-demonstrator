@@ -2,7 +2,7 @@
 title: Privacy
 slug: privacy
 created: 2026-09-04
-revised: 2026-09-14
+revised: 2026-09-15
 metered: false
 status: published
 ---
@@ -25,10 +25,11 @@ The list is short enough to print in full; so, here it is in full.
 That is the whole list. There is no row for your name, because you were never
 asked for it. No row for an email address, a phone number, a card, a billing
 address, or an account you have to delete later. No analytics. No advertising
-identifier.  No third-party anything — this site loads no fonts, no scripts and
-no images from a domain it does not control. The companies that supply those
-things, and read a request log for every page they appear on, learn nothing
-about you here.
+identifier. No third-party anything. When a page uses a font, a script or a
+picture from another company, your browser fetches it from that company. The
+fetch tells that company what page you are reading, and in which browser. This
+site fetches nothing from anyone else, so those companies learn nothing about
+you here.
 
 We also deliberately throw something away. Diagnosing a failed payment means
 reading a transaction's logs, and those logs carry your wallet address and your
@@ -96,9 +97,13 @@ Not because we are careful. Because of how you are paying.
 A site funded by advertising is not selling you articles. It is attracting and
 selling your attention. Your attention sells for more when the buyer knows
 whose it is. So the data follows the business model: attention first, then
-behaviour, then identity.  The tracking is not a moral failure on any
-publisher's part. It is what the job turns into when the only thing you can
-charge for is the reader.
+behaviour, then identity.
+
+The profiles come in layers. The ad market keeps one to price your attention.
+The publisher keeps its own, to choose what to show you next so that you stay
+longer. That profile serves other purposes too. It is the join this page
+refuses, a few paragraphs up. Every layer earns its keep the same way: when the
+only thing you can charge for is the reader, knowing the reader is the job.
 
 When you pay directly, that job goes away. There is a product to sell that
 isn't you, and the file on you stops earning its keep.
@@ -108,14 +113,19 @@ pound to reach you, industry audits of the programmatic supply chain have twice
 found that roughly **half of it never reaches the publisher** — it is absorbed
 by the intermediaries in between, the exchanges and platforms and verification
 layers you have never heard of and cannot opt out of. Paying a site directly
-skips all of them. Your penny arrives as a penny.
+skips all of them. Your payment arrives whole.
 
 We are not going to tell you this beats advertising outright. On a
 well-monetized page it does not, and anyone claiming otherwise is hoping you
-will not check. What it does beat is what most pages actually earn from the
-open ad market, and it reaches the reader who was never going to buy a
-subscription — which, across the industry, is about ninety-nine of every
-hundred people who arrive.
+will not check. Nor is the reader who never subscribes a cheap reader. Almost
+nobody arrives unknown to the ad market. That reader's attention is priced on a
+profile, like everyone else's.
+
+What a direct payment can do is come near. At about a dime an article, with
+about one page view in five paid for, it earns roughly what advertising does,
+and it tracks nobody to do it. Nobody has yet measured whether that many
+readers will pay. [What a dime has to do](/a/pay-per-view) works through the
+numbers.
 
 The trade is explicit and it is not free. You pay money instead. That is the
 whole proposition. A site that pretends otherwise is selling you something
