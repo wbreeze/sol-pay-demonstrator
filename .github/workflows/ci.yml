@@ -66,13 +66,27 @@ jobs:
         # through commonmark costs a second.
         run: bin/build-content --quiet
 
+      - name: the browser the prerender test drives
+        # `tests/Browser/PrerenderTest.php` starts Chrome as a plain process.
+        # The runner image ships Google Chrome; this step names the version
+        # in the log, and fails here rather than in the suite if the image
+        # ever stops shipping it.
+        run: google-chrome --version
+
       - name: phpunit
+        # `NEWSPRINT_REQUIRE_BROWSER` turns a missing Chrome from a skip into a
+        # failure. A skipped browser test here would be a green run that
+        # checked nothing, which is the failure `content-dates` guards against
+        # with `--require-git`.
+        #
         # The 8.5 leg names its deprecations; the others stay quiet. This leg
         # is at the top of the matrix precisely because it sees what the others
         # cannot, and a summary line reading `Deprecations: 1` does not say
         # which one — which is the whole of the information worth having.
         # `failOnDeprecation` is deliberately not set: a deprecation on the
         # version above the supported top is a thing to read, not a red build.
+        env:
+          NEWSPRINT_REQUIRE_BROWSER: '1'
         run: composer test ${{ matrix.php == '8.5' && '-- --display-deprecations' || '' }}
 
   analyse:
