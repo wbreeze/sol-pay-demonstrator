@@ -9,7 +9,7 @@
  * drifts from the inline version, and a reader who sees a different panel
  * depending on which page they opened it from.
  *
- * @var array<int, array{heading: string, rows?: array<int, array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, names?: array<int, array{value: string, alias: string, explorer: bool, note: ?string}>}> $sections
+ * @var array<int, array{heading: string, rows?: array<int, array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, names?: array<int, array{value: string, alias: string, explorer: bool, note: ?string}>, instructions?: string, carry?: string}> $sections
  * @var \Newsprint\Support\View $view
  */
 use Newsprint\Support\View;
@@ -66,7 +66,21 @@ use Newsprint\Support\View;
         ? $view->render('inspector-address', ['value' => $row[1]])
         : View::e($row[1]);
 ?>
-                <tr>
+<?php
+    /* The builders' rows are marked with the transaction they belong to, and
+       a follow-up's stand-in row is marked as the place they go
+       (2026-09-17). `assets/swap.js` moves the first into the second when a
+       page that sent a charge is replaced by the page that confirmed it —
+       the only request that ever held those instructions is the one that
+       built them. */
+    $mark = '';
+    if (isset($section['instructions']) && str_starts_with($row[0], 'ix ')) {
+        $mark = ' data-ix-of="'.View::e($section['instructions']).'"';
+    } elseif (isset($section['carry']) && $row[0] === 'instructions') {
+        $mark = ' data-ix-slot="'.View::e($section['carry']).'"';
+    }
+?>
+                <tr<?= $mark ?>>
                     <th scope="row"><?= View::e($row[0]) ?></th>
 <?php if ($under && ($claim = $third($row)) !== null): ?>
                     <td><?= $cell ?><span class="beneath"><?= View::e($claim) ?></span></td>

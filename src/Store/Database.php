@@ -139,6 +139,7 @@ final class Database
                 expires_at INTEGER NOT NULL,
                 signature  TEXT,
                 confirmed  INTEGER NOT NULL DEFAULT 1,
+                charge     TEXT NOT NULL DEFAULT 'confirmed',
                 PRIMARY KEY (wallet, article)
             );
             CREATE INDEX IF NOT EXISTS grants_expiry ON grants (expires_at);
@@ -186,6 +187,10 @@ final class Database
         SQL);
 
         self::addColumn($pdo, 'signin_nonces', 'input', "TEXT NOT NULL DEFAULT '{}'");
+        // §7.3, 2026-09-17: the article is served before its charge confirms,
+        // so a grant carries what became of the charge. `confirmed` stays and
+        // is written alongside it — true exactly when this says `confirmed`.
+        self::addColumn($pdo, 'grants', 'charge', "TEXT NOT NULL DEFAULT 'confirmed'");
     }
 
     /**

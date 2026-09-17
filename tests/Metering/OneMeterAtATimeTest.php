@@ -163,6 +163,27 @@ final class OneMeterAtATimeTest extends TestCase
         }
     }
 
+    /**
+     * **The article's charge is not waited for; the advance's is** (§7.3,
+     * 2026-09-17).
+     *
+     * The article is served as soon as the endpoint accepts its charge, and
+     * the grant says `Pending` until a later request finds out — which is
+     * also what gives the lock back before the confirmation window rather
+     * than after it. The advance still waits: its answer *is* the new figures,
+     * and there is nothing to serve ahead of them. Positional, like the check
+     * above, because the difference is one argument.
+     */
+    public function testTheArticleServesFirstAndTheAdvanceWaits(): void
+    {
+        $article = $this->methodBody('forArticle');
+        self::assertStringContainsString('$this->meter($wallet, $state, 1, false, ', $article);
+        self::assertStringContainsString('$result->chargeState', $article, 'the grant records what the result says of its charge');
+
+        $advance = $this->methodBody('advance');
+        self::assertStringContainsString('$this->meter($wallet, $state, $pageViews, true)', $advance);
+    }
+
     // ---- the harness -------------------------------------------------------
 
     /**

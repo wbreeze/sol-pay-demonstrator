@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Newsprint\Tests\Support;
 
+use Newsprint\Metering\ChargeState;
 use Newsprint\Metering\MeterOutcome;
 use Newsprint\Metering\MeterResult;
 use Newsprint\Support\View;
@@ -947,6 +948,159 @@ final class TemplateRenderTest extends TestCase
         ]]]);
 
         self::assertMatchesRegularExpression('/<td data-event-slot>/', $plain);
+    }
+
+    /**
+     * **While the charge is out, the strip shows no account figure** (§7.3,
+     * §2's claim 7, 2026-09-17).
+     *
+     * The article is served as soon as the endpoint accepts its charge, and a
+     * read taken then would return the accounts from before it. The panel
+     * handed to the template still carries those figures — this request did
+     * read them — so the test is that the strip declines to draw them, and
+     * the heads-up and the advance that are worked out from them. The same
+     * strip with the charge settled is rendered alongside, so the negative
+     * assertions are looking for phrases that do appear.
+     */
+    public function testAStripWhoseChargeIsOutShowsNoFigure(): void
+    {
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
+        $render = function (MeterResult $result) use ($piece): string {
+            $meter = $this->panel(['result' => $result, 'solvency' => $this->solvency(80000, 0)]);
+
+            return $this->renderStrictly('meter-strip', ['result' => $result, 'meter' => $meter, 'piece' => $piece]);
+        };
+
+        $settled = $render(MeterResult::granted());
+        foreach (['used 0.42', 'Heads up:', 'data-advance'] as $phrase) {
+            self::assertStringContainsString($phrase, $settled, 'the control shows '.$phrase);
+        }
+        self::assertStringNotContainsString('data-charge-pending', $settled);
+
+        foreach ([
+            'sent on this request' => [MeterResult::servedAhead('sigone', 10_000, false), 'Charging 0.01 DEMO for this article.'],
+            'a grant still out' => [MeterResult::granted(ChargeState::Pending, true), 'The network is still confirming its'],
+        ] as $label => [$result, $words]) {
+            $html = $render($result);
+
+            self::assertStringContainsString($words, $html, $label);
+            foreach (['used 0.42', 'Heads up:', 'data-advance>'] as $phrase) {
+                self::assertStringNotContainsString($phrase, $html, $label.': no '.$phrase);
+            }
+            self::assertStringContainsString('data-charge-pending="/a/two-orderings/confirm"', $html, $label.': where the page asks');
+            self::assertStringContainsString('<script type="module" src="/assets/charge.js"></script>', $html, $label);
+            self::assertMatchesRegularExpression('/<p class="fine" data-charge-failed hidden><\/p>/', $html, $label.': the failure line is empty and hidden');
+            self::assertMatchesRegularExpression('/<noscript>.*<a href="\/a\/two-orderings">.*<\/noscript>/s', $html, $label.': and without JavaScript, a link back to the GET, not a reload that resubmits');
+            self::assertStringContainsString('<a href="/meter">The meter</a>', $html, $label.': the way out, while the line that usually carries it is withheld');
+        }
+
+        self::assertFileExists(dirname(__DIR__, 2).'/public/assets/charge.js');
+    }
+
+    /**
+     * The follow-up's reports. A report that has waited the window out asks
+     * nothing further by itself, and says what the reader can do instead.
+     */
+    public function testTheFollowUpReportsSayWhatBecameOfTheCharge(): void
+    {
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
+        $render = function (MeterResult $result) use ($piece): string {
+            $meter = $this->panel(['result' => $result]);
+
+            return $this->renderStrictly('meter-strip', ['result' => $result, 'meter' => $meter, 'piece' => $piece]);
+        };
+
+        $settled = $render(MeterResult::confirmedLater('sigone', true));
+        self::assertStringContainsString('This one settled', $settled);
+        self::assertStringContainsString('used 0.42', $settled, 'figures are back, from a read after the answer');
+
+        $quiet = $render(MeterResult::confirmedLater('sigone', false));
+        self::assertStringContainsString('Nothing moved', $quiet);
+
+        // The event did not answer: neither sentence, rather than a guess.
+        $unread = $render(MeterResult::confirmedLater('sigone', null));
+        self::assertStringContainsString('Metered 0.01 DEMO for this article.', $unread);
+        self::assertStringNotContainsString('This one settled', $unread);
+        self::assertStringNotContainsString('Nothing moved', $unread);
+
+        $absorbed = $render(MeterResult::absorbed('sigone', null, 'transaction failed on chain'));
+        self::assertStringContainsString('The network turned this charge down', $absorbed);
+        self::assertStringContainsString('The article is', $absorbed);
+        self::assertStringContainsString('used 0.42', $absorbed);
+
+        $dropped = $render(MeterResult::unconfirmedLater('sigone', ChargeState::Unknown));
+        self::assertStringContainsString('never reached the network', $dropped);
+
+        $late = $render(MeterResult::unconfirmedLater('sigone', ChargeState::Pending));
+        self::assertStringContainsString('Reload later to see whether it landed', $late);
+        self::assertStringNotContainsString('used 0.42', $late, 'still no answer, so still no figures');
+
+        foreach ([$settled, $absorbed, $dropped, $late] as $html) {
+            self::assertStringNotContainsString('data-charge-pending', $html, 'a report does not ask again by itself');
+        }
+
+        // A grant whose charge was settled on an earlier visit says so once.
+        self::assertStringContainsString('turned its charge down', $render(MeterResult::granted(ChargeState::Refused)));
+        self::assertStringContainsString('asked the chain one', $render(MeterResult::granted(ChargeState::Confirmed, true)));
+        self::assertStringContainsString('The chain was not', $render(MeterResult::granted()));
+    }
+
+    /**
+     * `charge.js` looks for what the strip renders, and hands its POST to the
+     * same swap as the other two controls.
+     */
+    public function testChargeJsLooksForWhatTheStripRenders(): void
+    {
+        $root = dirname(__DIR__, 2);
+        $strip = (string) file_get_contents($root.'/templates/meter-strip.php');
+        $charge = (string) file_get_contents($root.'/public/assets/charge.js');
+
+        preg_match_all('/\[data-charge([a-z-]*)\]/', $charge, $sought);
+        self::assertNotSame([], $sought[1], 'a scanner that found nothing proves nothing');
+        foreach (array_unique($sought[1]) as $suffix) {
+            self::assertMatchesRegularExpression('/\sdata-charge'.preg_quote($suffix, '/').'[\s>=]/', $strip, 'data-charge'.$suffix);
+        }
+
+        self::assertStringContainsString('dataset.chargePending', $charge);
+        self::assertStringContainsString("import { swap } from './swap.js'", $charge);
+        // Delegated, for the reason `advance.js` is: the strip arrives inside
+        // a swap, and this module cannot run twice in one document.
+        self::assertStringContainsString("document.addEventListener('newsprint:swapped'", $charge);
+        self::assertStringContainsString('document.prerendering', $charge);
+    }
+
+    /**
+     * **The builders' instructions survive the follow-up** (§9, 2026-09-17).
+     *
+     * Only the request that built a transaction holds its instructions. The
+     * follow-up that confirms a charge renders a panel of its own, with a
+     * stand-in row where they would go; `swap.js` moves the sending page's
+     * rows into it. So the two ends are rendered here and matched: the rows
+     * marked with a signature, the slot marked with the same one, and the
+     * script reading both attributes.
+     */
+    public function testTheInstructionRowsAndTheirSlotAreMarkedForTheSwap(): void
+    {
+        $sent = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'The last transaction',
+            'rows' => [['signature', 'sigone'], ['ix 1 · program', 'PRGMfoo'], ['ix 1 · account 1', 'CPDAash', 'writable'], ['ix 1 · data', '0102']],
+            'instructions' => 'sigone',
+        ]]]);
+        self::assertSame(3, substr_count($sent, 'data-ix-of="sigone"'), 'every instruction row, and only those');
+        self::assertStringNotContainsString('data-ix-slot', $sent);
+
+        $later = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'The last transaction',
+            'rows' => [['signature', 'sigone'], ['instructions', 'built by the request that sent this charge', 'signature and event only']],
+            'carry' => 'sigone',
+        ]]]);
+        self::assertSame(1, substr_count($later, 'data-ix-slot="sigone"'));
+        self::assertStringNotContainsString('data-ix-of', $later);
+
+        $swap = (string) file_get_contents(dirname(__DIR__, 2).'/public/assets/swap.js');
+        self::assertStringContainsString('[data-ix-slot]', $swap);
+        self::assertStringContainsString('dataset.ixSlot', $swap);
+        self::assertStringContainsString('[data-ix-of=', $swap);
     }
 
     public function testAContractDecodesIntoThePanelWithoutGuessingAtItsShape(): void

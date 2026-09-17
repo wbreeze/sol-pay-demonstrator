@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Newsprint\Support;
 
+use Newsprint\Chain\ChargeFault;
 use Newsprint\Chain\PayerState;
 use Newsprint\Chain\SiteState;
+use Newsprint\Metering\MeterOutcome;
 use Newsprint\Metering\MeterResult;
 use SolPay\Core\Preflight;
 use SolPay\Core\Units;
@@ -191,6 +193,17 @@ final class Inspector
             ],
         ]];
 
+        // A test fault is on (`ChargeFault`). Said here, in the section that
+        // describes what this copy is running against, so that nothing seen
+        // with it on can be mistaken for the site's ordinary behaviour.
+        $fault = ChargeFault::fromEnvironment($this->config->rpcUrl());
+        if ($fault !== ChargeFault::None) {
+            $sections[0]['rows'][] = [
+                'test fault',
+                $fault->value.' — article charges skip the endpoint\'s check ('.ChargeFault::VARIABLE.')',
+            ];
+        }
+
         /*
          * The two alarm states keep a sentence, and it is in the row rather
          * than under the section (2026-09-14).
@@ -309,7 +322,7 @@ final class Inspector
         }
 
         if ($payer !== null) {
-            $sections[] = $this->reader($payer, $amount, $known);
+            $sections[] = $this->reader($payer, $amount, $known, $result?->awaiting() ?? false);
             $sections[] = $this->preflight($state, $payer, $amount);
         }
 
@@ -357,7 +370,7 @@ final class Inspector
      *
      * @param array<string, array{alias: string, derivation: ?string}> $known every address this request can name
      *
-     * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string}, event?: string}
+     * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string}, event?: string, instructions?: string, carry?: string}
      */
     private function lastTransaction(MeterResult $result, array $known): array
     {
@@ -366,10 +379,28 @@ final class Inspector
         $rows = [
             ['signature', $signature],
             ['outcome', $result->outcome->value.' — '.$result->detail],
-            ['page views', (string) $result->pageViews, $result->settles ? 'this call settles' : 'accrues only'],
+            ['page views', (string) $result->pageViews, match (true) {
+                // A failed transaction moved nothing and emitted no event, so
+                // there is nothing for the event row to settle either way.
+                $result->outcome === MeterOutcome::Absorbed => 'failed, so nothing moved',
+                $result->settles === true => 'this call settles',
+                $result->settles === false => 'accrues only',
+                default => 'the event says which',
+            }],
         ];
 
-        if ($result->instructions === []) {
+        if ($result->instructions === [] && $result->earlier) {
+            // Built and sent by the request whose page this one follows up.
+            // The rows that page showed are carried across by `swap.js` when
+            // they are still in the document (`carry` below); this row is
+            // what stands in their place when they are not — a reload, or a
+            // grant confirmed on a later visit.
+            $rows[] = [
+                'instructions',
+                'built by the request that sent this charge, and shown on its page; this site keeps no copy',
+                'signature and event only',
+            ];
+        } elseif ($result->instructions === []) {
             $rows[] = [
                 'instructions',
                 'built in your browser by the wasm client, so this server never held them',
@@ -425,6 +456,12 @@ final class Inspector
                 'text' => 'This transaction on chain',
             ],
             'event' => $signature,
+            // Which instruction rows belong to which transaction, so a follow-up
+            // can keep the ones its own request never held (2026-09-17). The
+            // builders' output is shown by the request that built it and by no
+            // other; a follow-up that replaced the panel would otherwise
+            // replace the evidence with a sentence about it.
+            ($result->earlier ? 'carry' : 'instructions') => $signature,
         ];
     }
 
@@ -768,9 +805,19 @@ final class Inspector
      *
      * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>}
      */
-    private function reader(PayerState $payer, callable $amount, array $known): array
+    private function reader(PayerState $payer, callable $amount, array $known, bool $beforeCharge = false): array
     {
-        $rows = [
+        $rows = [];
+
+        // The charge this page was served on has not confirmed (§7.3,
+        // 2026-09-17), so the figures below were read from accounts it may
+        // not have reached yet. Worded so that it stays true after the
+        // charge lands: this is when the reading was taken, not a status.
+        if ($beforeCharge) {
+            $rows[] = ['read', 'before the charge for this article confirmed — the figures may not include it'];
+        }
+
+        $rows = [...$rows,
             ['your wallet', $this->address($payer->wallet, $known)],
             [
                 'your token account',

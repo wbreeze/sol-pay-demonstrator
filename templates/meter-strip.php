@@ -11,6 +11,7 @@
  * @var \Newsprint\Content\Piece $piece
  * @var \Newsprint\Support\View $view
  */
+use Newsprint\Metering\ChargeState;
 use Newsprint\Metering\MeterOutcome;
 use Newsprint\Support\View;
 
@@ -31,6 +32,16 @@ $solvency = $meter['solvency'] ?? null;
  * said".
  */
 $reported = $advanced !== null && $advanced['outcome'] === MeterOutcome::Failed;
+
+/*
+ * The charge this article was served on has not confirmed (§7.3,
+ * 2026-09-17). Every account figure on this request was read before it could
+ * have landed, so the strip shows none of them — not the meter's line, not
+ * the heads-up worked out from them, and not the advance, whose warning is
+ * made of them. The page's follow-up brings them back with a read that
+ * comes after the answer.
+ */
+$awaiting = $result->awaiting();
 ?>
 <section class="meter-strip">
 <?php if ($advanced !== null): ?>
@@ -106,33 +117,87 @@ $reported = $advanced !== null && $advanced['outcome'] === MeterOutcome::Failed;
 <?php endif ?>
 <?php endif ?>
 
-<?php if ($result->outcome === MeterOutcome::Granted): ?>
+<?php if ($result->asksAgain()): ?>
+    <?php /* `assets/charge.js` sends the follow-up named here as soon as it
+             runs, and the answer replaces this page. The words claim only
+             what is true now: the charge went out and the network has not
+             answered. Without JavaScript, a reload asks on the way. */ ?>
+    <div class="pending" role="status" data-charge-pending="/a/<?= View::e(rawurlencode($piece->slug)) ?>/confirm">
+<?php if ($result->outcome === MeterOutcome::Sent): ?>
+        <p>
+            Charging <?= View::e((string) $meter['page_price']) ?> <?= $symbol ?> for this article.
+            The network is still confirming it; your meter will show here in a moment.
+        </p>
+<?php else: ?>
+        <p>
+            You hold this article. The network is still confirming its
+            charge; your meter will show here once it has.
+        </p>
+<?php endif ?>
+        <?php /* A link rather than "reload": the page may be the answer to a
+                 POST, and reloading that resubmits the form. The GET asks
+                 the chain once on the way. The meter is the way out while
+                 the figures are withheld — the line that usually carries its
+                 link is one of them. */ ?>
+        <noscript><p class="fine"><a href="/a/<?= View::e(rawurlencode($piece->slug)) ?>">Open the article again</a> to see it.</p></noscript>
+        <p class="fine"><a href="/meter">The meter</a></p>
+        <p class="fine" data-charge-failed hidden></p>
+    </div>
+    <script type="module" src="/assets/charge.js"></script>
+<?php elseif ($result->outcome === MeterOutcome::Granted): ?>
     <p>
+<?php if ($result->earlier): ?>
+        Served from a grant you already hold. The site asked the chain one
+        thing — whether the charge for it had landed — and charged nothing.
+<?php else: ?>
         Served from a grant you already hold. <strong>The chain was not
-        touched.</strong> One charge per article, not per request — a refresh,
+        touched.</strong>
+<?php endif ?>
+        One charge per article, not per request — a refresh,
         a back button and a prefetch are all this same page.
+<?php if ($result->chargeState === ChargeState::Refused): ?>
+        The network turned its charge down after the article reached you, so
+        it cost you nothing.
+<?php elseif ($result->chargeState === ChargeState::Unknown): ?>
+        Its charge never reached the network, so it cost you nothing.
+<?php endif ?>
+    </p>
+<?php elseif ($result->outcome === MeterOutcome::Absorbed): ?>
+    <?php /* §7.3's choice, told plainly: the reader keeps the article and the
+             site keeps the loss. The heads-up below names what was short,
+             when something was — it is worked out from a read taken after
+             the refusal. */ ?>
+    <p class="pending">
+        <strong>The network turned this charge down</strong> after the article
+        was already on its way to you, so nothing was charged. The article is
+        yours anyway — the site takes that loss rather than taking it back.
+    </p>
+<?php elseif ($result->outcome === MeterOutcome::Unconfirmed && $result->chargeState === ChargeState::Unknown): ?>
+    <p class="pending">
+        The charge for this article never reached the network, so nothing was
+        charged. The article is yours anyway.
     </p>
 <?php elseif ($result->outcome === MeterOutcome::Unconfirmed): ?>
     <p class="pending">
         Metered, but the confirmation did not arrive inside the window. You are
         reading it anyway and the site absorbed the risk — refusing would have
         risked charging you for nothing, which is the more expensive mistake
-        (§7.3).
+        (§7.3). Reload later to see whether it landed.
     </p>
 <?php else: ?>
     <p>
         Metered <?= View::e((string) $meter['page_price']) ?> <?= $symbol ?> for this article.
-<?php if ($result->settles): ?>
+<?php if ($result->settles === true): ?>
         <strong>This one settled</strong> — the unpaid balance crossed the
         collection threshold, so the transfer moved with it.
-<?php else: ?>
+<?php elseif ($result->settles === false): ?>
         Nothing moved: the unpaid balance is still under the collection
         threshold, which is the point of having one.
 <?php endif ?>
     </p>
 <?php endif ?>
 
-<?php if ($contract !== null): ?>
+<?php if ($contract !== null && !$awaiting): ?>
     <p class="fine">
         used <?= View::e((string) $contract['used']) ?>
         · settled <?= View::e((string) $contract['paid']) ?>
@@ -159,7 +224,7 @@ $reported = $advanced !== null && $advanced['outcome'] === MeterOutcome::Failed;
          the advance that spends the balance down and leaves the *next* one
          certain to fail. That is the case the warning exists for, and it was
          the one case that did not get it. See `$reported` at the top. */ ?>
-<?php if ($solvency !== null && !$solvency['clear'] && !$reported): ?>
+<?php if ($solvency !== null && !$solvency['clear'] && !$reported && !$awaiting): ?>
     <p class="pending">
 <?php if ($solvency['balance_short'] > 0): ?>
         Heads up: the next advance would try to move
@@ -180,7 +245,11 @@ $reported = $advanced !== null && $advanced['outcome'] === MeterOutcome::Failed;
 <?php endif ?>
 
     <?php /* §7.4. Labelled as a demo control, and it charges honestly: seven
-             views is seven views, and the transfer that results is real. */ ?>
+             views is seven views, and the transfer that results is real.
+             Not offered while the article's own charge is out: its warning
+             is made of figures this request could not read, and it waits
+             for the confirmation the page is already waiting for. */ ?>
+<?php if (!$awaiting): ?>
     <form method="post" action="/meter/advance" class="advance" data-advance>
         <input type="hidden" name="slug" value="<?= View::e($piece->slug) ?>">
         <button type="submit" class="secondary">Advance the meter <?= View::e((string) $meter['step_views']) ?> views</button>
@@ -204,5 +273,6 @@ $reported = $advanced !== null && $advanced['outcome'] === MeterOutcome::Failed;
                  JavaScript nothing has been sent. */ ?>
         <p class="pending" data-advance-failed role="status" hidden></p>
     </form>
+<?php endif ?>
     <script type="module" src="/assets/advance.js"></script>
 </section>

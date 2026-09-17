@@ -27,6 +27,17 @@ final class Outcome
         return new self(SubmitStatus::Unconfirmed, $signature, null, 'not confirmed inside the window');
     }
 
+    /**
+     * Accepted by the endpoint and not waited for. Acceptance is not nothing:
+     * `sendTransaction` simulates first (no `skipPreflight`), so a charge the
+     * program or SPL would refuse against the state the endpoint holds is
+     * already a `failed()` by the time this could be returned.
+     */
+    public static function sent(string $signature): self
+    {
+        return new self(SubmitStatus::Sent, $signature, null, 'sent; not waited for');
+    }
+
     public static function failed(?string $signature, ?Failure $failure): self
     {
         return new self(

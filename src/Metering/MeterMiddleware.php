@@ -126,12 +126,22 @@ final class MeterMiddleware implements MiddlewareInterface
             // A limit screen should state the arithmetic its refusal was made
             // from rather than a reading taken moments earlier.
             $reads->adopt($result->payer);
-        } elseif ($result->sent()) {
-            // A transaction went out. §2's claim 7 says the numbers on the
-            // screen came from an account, so the accounts are read again —
-            // this is the one re-read that is bought on purpose.
+        } elseif ($result->sent() && !$result->awaiting()) {
+            // A transaction went out and the chain has answered. §2's claim 7
+            // says the numbers on the screen came from an account, so the
+            // accounts are read again — this is the one re-read that is bought
+            // on purpose.
             $reads->invalidatePayer();
         }
+
+        // **And not while the charge is still out** (2026-09-17). An article
+        // charge is served as soon as the endpoint accepts it, and a read at
+        // `confirmed` taken now would return the accounts from before it —
+        // numbers from an account, and the wrong ones. So none are shown: the
+        // strip says the charge is on its way, the panel marks its reading as
+        // taken before the charge, and the page's follow-up brings the fresh
+        // read once there is one to take. The re-read is not skipped. It is
+        // moved to the request that can make it mean something.
 
         return $handler->handle($request->withAttribute(self::ATTRIBUTE, $result));
     }

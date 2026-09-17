@@ -9,7 +9,11 @@
  * outlives the swap**: the body, the meter strip and the panel all arrive
  * together, from one request, so there is no older state left beside them. An
  * in-place re-render that updated only part of the page was tried for the
- * advance on 2026-09-10 and dropped for exactly that reason.
+ * advance on 2026-09-10 and dropped for exactly that reason. (One exception,
+ * the builders' instruction rows, and it is argued at `carryInstructions`.)
+ *
+ * A third caller since 2026-09-17: `charge.js`, whose POST confirms a charge
+ * the article was already served on. Same answer, same swap.
  *
  * This module is the mechanics only. What to say while waiting, and what to do
  * when it fails, belong to the control that asked.
@@ -60,6 +64,27 @@ function activate(root) {
 }
 
 /**
+ * The one thing that does outlive a swap, and why (2026-09-17).
+ *
+ * §9 shows a transaction's instructions *as the builders produced them*, and
+ * only the request that built them ever holds them. An article's charge is now
+ * served before it confirms, and the page's follow-up
+ * (`POST /a/{slug}/confirm`) answers with a fresh panel — which cannot carry
+ * rows its own request never had. Its last-transaction section says so in a
+ * stand-in row marked `data-ix-slot`. If the rows the sending request rendered
+ * are still here, marked `data-ix-of` with the same signature, they take that
+ * row's place. They are the same evidence, from the same request as before;
+ * nothing is rebuilt, and nothing is kept anywhere but the page.
+ */
+function carryInstructions(from, to) {
+    for (const slot of to.querySelectorAll('[data-ix-slot]')) {
+        const rows = from.querySelectorAll(`[data-ix-of="${CSS.escape(slot.dataset.ixSlot)}"]`);
+        if (rows.length === 0) continue;
+        slot.replaceWith(...rows);
+    }
+}
+
+/**
  * Ask for a fragment, and replace the article and the inspector with it.
  *
  * Throws rather than reporting: the caller has a place to put the message and
@@ -87,6 +112,7 @@ export async function swap(action, body = undefined) {
 
     const here = document.querySelector('details.inspector .inspector-body');
     if (inspector && here) {
+        carryInstructions(here, inspector);
         here.replaceWith(inspector);
         // `assets/inspector.js` finds its rows when the panel is opened; this
         // tells it the panel's contents changed underneath it, in case the

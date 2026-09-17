@@ -452,4 +452,55 @@ final class InspectorTest extends TestCase
 
         self::assertSame('getMultipleAccounts: HTTP 429', $this->row($sections, 'This site, on chain', 'read failed'));
     }
+
+    /**
+     * Serve first, confirm afterward (§7.3, 2026-09-17), as the panel tells
+     * it. The request that sent the charge marks its reading of the reader's
+     * accounts as taken before the charge confirmed, and its instructions
+     * with the signature they belong to. The follow-up says its instructions
+     * were built elsewhere — not by a browser — and marks where they go.
+     */
+    public function testThePanelSaysWhenItsReadingPredatesTheCharge(): void
+    {
+        $sig = 'FKb3eeBwq5fXi4M6NhLY5tkstxRi2N6VoKtPpkG23ASSxyz';
+        $program = Config::load(dirname(__DIR__, 2))->program();
+        $ahead = MeterResult::servedAhead($sig, 10_000, false, [
+            new Instruction($program->id, [new AccountMeta(self::SITE, false, false)], (string) hex2bin('1e8e96a17c2e1d7e')),
+        ]);
+
+        $sent = $this->inspector()->sections($this->state(), null, $this->payer(), $ahead);
+        self::assertStringStartsWith('before the charge for this article confirmed', (string) $this->row($sent, 'You, on chain', 'read'));
+        self::assertSame($sig, $this->section($sent, 'The last transaction')['instructions'] ?? null);
+        self::assertStringStartsWith('sent — ', (string) $this->row($sent, 'The last transaction', 'outcome'));
+
+        // The same reader after the answer: no such row.
+        $after = $this->inspector()->sections($this->state(), null, $this->payer(), MeterResult::confirmedLater($sig, true));
+        self::assertNull($this->row($after, 'You, on chain', 'read'));
+
+        $later = $this->section($after, 'The last transaction');
+        self::assertSame($sig, $later['carry'] ?? null);
+        self::assertArrayNotHasKey('instructions', $later);
+        self::assertStringStartsWith('built by the request that sent this charge', (string) $this->row($after, 'The last transaction', 'instructions'));
+
+        // Unread settle: said as unread, not as "accrues only".
+        $unread = $this->inspector()->sections($this->state(), null, $this->payer(), MeterResult::confirmedLater($sig, null));
+        foreach ($this->section($unread, 'The last transaction')['rows'] as $row) {
+            if ($row[0] === 'page views') {
+                self::assertSame('the event says which', $row[2] ?? null);
+            }
+        }
+
+        // A charge that failed after serving says so, rather than pointing at
+        // an event a failed transaction never emitted.
+        $absorbed = $this->inspector()->sections($this->state(), null, $this->payer(), MeterResult::absorbed($sig, null, 'transaction failed on chain'));
+        foreach ($this->section($absorbed, 'The last transaction')['rows'] as $row) {
+            if ($row[0] === 'page views') {
+                self::assertSame('failed, so nothing moved', $row[2] ?? null);
+            }
+        }
+
+        // And a browser's transaction still says a browser built it.
+        $browser = $this->inspector()->sections($this->state(), null, $this->payer(), MeterResult::metered($sig, 0, false));
+        self::assertStringStartsWith('built in your browser', (string) $this->row($browser, 'The last transaction', 'instructions'));
+    }
 }

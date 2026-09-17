@@ -225,10 +225,10 @@ final class Provisioner
         }
 
         try {
-            $this->rpc->requestAirdrop($authority->address, $airdrop);
-            for ($i = 0; $i < 30 && $this->rpc->balance($authority->address) <= $balance; $i++) {
-                usleep(500_000);
-            }
+            // The endpoint answers before the airdrop lands. Ask whether it
+            // did on the same schedule as every other transaction, rather
+            // than watching the balance.
+            $this->submitter->confirm($this->rpc->requestAirdrop($authority->address, $airdrop));
             $balance = $this->rpc->balance($authority->address);
         } catch (RpcException) {
             // Deliberately swallowed: the balance check below is the real

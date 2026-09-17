@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Newsprint\Store;
 
+use Newsprint\Metering\ChargeState;
 use PDO;
 
 /**
@@ -143,11 +144,11 @@ final class Store
 
     // ---- §7.1 view grants ------------------------------------------------
 
-    /** @return array{expires_at: int, signature: ?string, confirmed: bool}|null */
+    /** @return array{granted_at: int, expires_at: int, signature: ?string, charge: ChargeState}|null */
     public function liveGrant(string $wallet, string $article): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT expires_at, signature, confirmed FROM grants
+            'SELECT granted_at, expires_at, signature, charge FROM grants
              WHERE wallet = ? AND article = ? AND expires_at > ?'
         );
         $stmt->execute([$wallet, $article, $this->now()]);
@@ -157,39 +158,78 @@ final class Store
         }
 
         return [
+            'granted_at' => (int) $row['granted_at'],
             'expires_at' => (int) $row['expires_at'],
             'signature' => $row['signature'] === null ? null : (string) $row['signature'],
-            'confirmed' => (bool) $row['confirmed'],
+            // An unrecognised word is read as the one state that asks the
+            // chain again, not as a verdict nobody wrote.
+            'charge' => ChargeState::tryFrom((string) $row['charge']) ?? ChargeState::Pending,
         ];
     }
 
     /**
      * Recorded before the body is rendered (§7.3), so a render failure still
-     * leaves the reader holding what they paid for. `confirmed` false is
-     * §7.3's ambiguous case: sent, not confirmed inside the window, served
-     * anyway and flagged in the inspector.
+     * leaves the reader holding what they paid for.
+     *
+     * Since 2026-09-17 an article charge is recorded `Pending`: the body is
+     * served once the endpoint has accepted the transaction, and a later
+     * request finds out whether it landed ({@see settleCharge()}).
      */
     public function recordGrant(
         string $wallet,
         string $article,
         int $ttlSeconds,
         ?string $signature = null,
-        bool $confirmed = true,
+        ChargeState $charge = ChargeState::Confirmed,
     ): void {
         $now = $this->now();
         $this->pdo->prepare(
-            'INSERT INTO grants (wallet, article, granted_at, expires_at, signature, confirmed)
-             VALUES (:w, :a, :g, :e, :s, :c)
+            'INSERT INTO grants (wallet, article, granted_at, expires_at, signature, confirmed, charge)
+             VALUES (:w, :a, :g, :e, :s, :c, :ch)
              ON CONFLICT (wallet, article) DO UPDATE SET
-                 granted_at = :g, expires_at = :e, signature = :s, confirmed = :c'
+                 granted_at = :g, expires_at = :e, signature = :s, confirmed = :c, charge = :ch'
         )->execute([
             ':w' => $wallet,
             ':a' => $article,
             ':g' => $now,
             ':e' => $now + $ttlSeconds,
             ':s' => $signature,
-            ':c' => $confirmed ? 1 : 0,
+            ':c' => $charge === ChargeState::Confirmed ? 1 : 0,
+            ':ch' => $charge->value,
         ]);
+    }
+
+    /**
+     * Write what became of a pending charge, once.
+     *
+     * Conditional on the row still being pending *for that signature*, so two
+     * requests that found out at the same moment cannot disagree in the table,
+     * and a grant renewed by a later charge is never overwritten by news about
+     * an older one. There is no lock around this and none is needed: the
+     * answer comes from the chain, and the second writer would write the same
+     * thing or nothing.
+     *
+     * True when this call wrote it.
+     */
+    public function settleCharge(string $wallet, string $article, string $signature, ChargeState $charge): bool
+    {
+        if ($charge === ChargeState::Pending) {
+            return false;
+        }
+
+        $stmt = $this->pdo->prepare(
+            "UPDATE grants SET charge = :ch, confirmed = :c
+             WHERE wallet = :w AND article = :a AND signature = :s AND charge = 'pending'"
+        );
+        $stmt->execute([
+            ':ch' => $charge->value,
+            ':c' => $charge === ChargeState::Confirmed ? 1 : 0,
+            ':w' => $wallet,
+            ':a' => $article,
+            ':s' => $signature,
+        ]);
+
+        return $stmt->rowCount() === 1;
     }
 
     /**

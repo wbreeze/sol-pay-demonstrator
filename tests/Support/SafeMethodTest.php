@@ -56,6 +56,42 @@ final class SafeMethodTest extends TestCase
     }
 
     /**
+     * **The GET may confirm, and confirming cannot charge** (2026-09-17).
+     *
+     * `GET /a/{slug}` asks once what became of a charge the article was
+     * served on, which is how a reader without JavaScript ever hears. It is
+     * handed `$followUpFactory` for that, and the check above lets it through
+     * because that is not `$meterFactory`. This is what makes letting it
+     * through honest: the classes behind it hold no keypair, build no
+     * instruction and send nothing — and the factory builds neither of the
+     * things that do.
+     */
+    public function testWhatAGetMayReachHoldsNothingThatCharges(): void
+    {
+        $root = dirname(__DIR__, 2);
+        foreach (['src/Metering/ChargeFollowUp.php', 'src/Metering/ChargeFinisher.php'] as $file) {
+            $source = (string) file_get_contents($root.'/'.$file);
+            foreach (['Keypair', 'Ix::', '->send(', 'new Meter(', 'withPayerLock'] as $forbidden) {
+                self::assertStringNotContainsString($forbidden, $source, "{$file} mentions {$forbidden}");
+            }
+        }
+
+        $index = (string) file_get_contents($root.'/public/index.php');
+        self::assertSame(1, preg_match('/\$followUpFactory = static function \(\)[^{]*\{(.*?)\n\};/s', $index, $body), 'the factory is where the check expects it');
+        self::assertStringNotContainsString('Meter(', $body[1]);
+        self::assertStringNotContainsString('$meterFactory', $body[1]);
+
+        // And the request that waits and writes is a POST.
+        self::assertStringContainsString("\$app->post('/a/{slug}/confirm'", $index);
+
+        // The article's own POST asks once too, for a grant still waiting on
+        // its charge: without JavaScript, a resubmitted form is the only
+        // request that reader's reload makes.
+        self::assertSame(1, preg_match("/\\\$articlePost = \\\$app->post\\([^\n]*\\\$followUpFactory/", $index), 'the article POST has the follow-up');
+        self::assertStringContainsString('$followUpFactory()->report($address, $piece->slug, false) ?? $result;', $index);
+    }
+
+    /**
      * @return array{0: int, 1: list<string>} how many metering routes were found, and which were not POSTs
      */
     private static function scan(string $source): array

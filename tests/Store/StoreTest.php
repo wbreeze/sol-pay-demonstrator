@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Newsprint\Tests\Store;
 
+use Newsprint\Metering\ChargeState;
 use Newsprint\Store\Database;
 use Newsprint\Store\Store;
 use PHPUnit\Framework\TestCase;
@@ -214,8 +215,47 @@ final class StoreTest extends TestCase
             self::assertSame('meter failed', $e->getMessage());
         }
 
-        // §7.3's order is meter, confirm, record, render — so a grant written
-        // beside a failed meter must not survive.
+        // §7.3's order is meter, record, render, confirm — and a grant
+        // written beside a meter that threw must not survive.
         self::assertNull($store->liveGrant('PAYRfig', 'article-one'));
+    }
+
+    /**
+     * A copy that already has a database gains the column the serve-first
+     * charge needs (2026-09-17), and the grants it already holds read as
+     * settled — they were written by the code that waited for confirmation.
+     */
+    public function testAnExistingGrantsTableGainsTheChargeColumn(): void
+    {
+        $pdo = new \PDO('sqlite::memory:', null, null, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+        $pdo->exec('CREATE TABLE grants (
+            wallet TEXT NOT NULL, article TEXT NOT NULL, granted_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL, signature TEXT, confirmed INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (wallet, article))');
+        $pdo->exec("INSERT INTO grants VALUES ('PAYRfig', 'article-one', {$this->now}, {$this->now} + 1800, 'sigold', 0)");
+
+        Database::migrate($pdo);
+        $store = new Store($pdo, fn (): int => $this->now);
+
+        self::assertSame(ChargeState::Confirmed, $store->liveGrant('PAYRfig', 'article-one')['charge'] ?? null);
+
+        $store->recordGrant('PAYRfig', 'article-two', 1_800, 'signew', ChargeState::Pending);
+        self::assertSame(ChargeState::Pending, $store->liveGrant('PAYRfig', 'article-two')['charge'] ?? null);
+    }
+
+    /** `confirmed` is still written, and agrees with the new column. */
+    public function testTheOldColumnAgreesWithTheNewOne(): void
+    {
+        $pdo = Database::open(':memory:');
+        $store = new Store($pdo, fn (): int => $this->now);
+        $store->recordGrant('PAYRfig', 'article-one', 1_800, 'sigone', ChargeState::Pending);
+        $store->recordGrant('PAYRfig', 'article-two', 1_800, 'sigtwo');
+
+        $row = static fn (string $article): array => $pdo->query("SELECT confirmed, charge FROM grants WHERE article = '{$article}'")->fetch();
+        self::assertSame(['confirmed' => 0, 'charge' => 'pending'], $row('article-one'));
+        self::assertSame(['confirmed' => 1, 'charge' => 'confirmed'], $row('article-two'));
+
+        $store->settleCharge('PAYRfig', 'article-one', 'sigone', ChargeState::Confirmed);
+        self::assertSame(['confirmed' => 1, 'charge' => 'confirmed'], $row('article-one'));
     }
 }

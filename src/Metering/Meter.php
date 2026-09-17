@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Newsprint\Metering;
 
+use Newsprint\Chain\ChargeFault;
 use Newsprint\Chain\Keypair;
 use Newsprint\Chain\PayerReader;
 use Newsprint\Chain\PayerState;
@@ -41,12 +42,16 @@ use SolPay\Core\Shortfall;
  *   the reader pays twice for a race they did not cause. The whole
  *   read-preflight-meter-confirm sequence runs inside a lock on the payer's
  *   row, so the second request finds the grant the first recorded.
- * - **§7.3 — meter, confirm, record, then render.** The grant is recorded
- *   before the body is, so a render failure still leaves the reader holding
- *   what they paid for.
- * - **§7.3 again — an unconfirmed transaction serves the article.** Refusing
- *   risks charging a reader for nothing; serving risks giving away one article
- *   at `page_price`. The errors are not symmetric and the site absorbs the
+ * - **§7.3 — meter, record, render, then confirm** (2026-09-17; until then
+ *   the confirmation came second). The grant is recorded before the body is,
+ *   so a render failure still leaves the reader holding what they paid for,
+ *   and the body is served as soon as the endpoint has accepted the charge.
+ *   Finding out whether it landed is {@see ChargeFollowUp}, on a later
+ *   request.
+ * - **§7.3 again — a charge that has not confirmed serves the article, and
+ *   so does one that turns out to have failed.** Refusing risks charging a
+ *   reader for nothing; serving risks giving away one article at
+ *   `page_price`. The errors are not symmetric and the site absorbs the
  *   cheaper one, deliberately and in writing.
  */
 final class Meter
@@ -81,20 +86,30 @@ final class Meter
             // Inside the lock, because a request that queued behind another
             // must see the grant that one recorded rather than the state it
             // read before waiting.
-            if ($this->store->liveGrant($wallet, $article) !== null) {
-                return MeterResult::granted();
+            $grant = $this->store->liveGrant($wallet, $article);
+            if ($grant !== null) {
+                // With what became of its charge, which may still be pending:
+                // a resubmitted form or a second tab can arrive before the
+                // chain has answered, and the page must not claim otherwise.
+                return MeterResult::granted($grant['charge']);
             }
 
-            $result = $this->meter($wallet, $state, 1);
+            // §7.3: not waited for. The endpoint simulates before it
+            // forwards, so the charges it would refuse are refused here, with
+            // nothing served and nothing recorded; the rest are served now.
+            // (Unless a devnet test fault is on — see `ChargeFault`.)
+            $result = $this->meter($wallet, $state, 1, false, ChargeFault::fromEnvironment($this->config->rpcUrl()));
 
             if ($result->serves()) {
-                // §7.3: before the render, not after.
+                // §7.3: before the render, not after — and `Pending` until a
+                // later request finds out. The lock is released on return, so
+                // it is no longer held for the confirmation window.
                 $this->store->recordGrant(
                     $wallet,
                     $article,
                     (int) $this->config->metering()['grant_ttl_s'],
                     $result->signature,
-                    $result->outcome !== MeterOutcome::Unconfirmed,
+                    $result->chargeState,
                 );
                 // §10.4 qualification 5: a fact about the article, incremented
                 // here and never derived from `grants`.
@@ -117,7 +132,7 @@ final class Meter
     {
         return $this->store->withPayerLock(
             $wallet,
-            fn (): MeterResult => $this->meter($wallet, $state, $pageViews),
+            fn (): MeterResult => $this->meter($wallet, $state, $pageViews, true),
         );
     }
 
@@ -128,7 +143,7 @@ final class Meter
      * program refuses the call regardless — it is what turns a refusal into a
      * screen the reader can act on instead of an error they cannot.
      */
-    private function meter(string $wallet, SiteState $state, int $pageViews): MeterResult
+    private function meter(string $wallet, SiteState $state, int $pageViews, bool $wait, ChargeFault $fault = ChargeFault::None): MeterResult
     {
         try {
             $payer = (new PayerReader($this->config, $this->rpc))->read($wallet, $state);
@@ -193,7 +208,12 @@ final class Meter
             ),
         ];
 
-        $outcome = $this->submitter->send($instructions, $authority);
+        $outcome = $this->submitter->send($instructions, $authority, wait: $wait, fault: $fault);
+
+        if ($outcome->status === SubmitStatus::Sent) {
+            // No payer, as below: the chain has moved, or is about to.
+            return MeterResult::servedAhead((string) $outcome->signature, $charge, $settles, $instructions);
+        }
 
         if ($outcome->status === SubmitStatus::Confirmed) {
             return MeterResult::metered((string) $outcome->signature, $charge, $settles, $pageViews, $instructions);

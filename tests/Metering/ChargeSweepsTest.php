@@ -7,6 +7,7 @@ namespace Newsprint\Tests\Metering;
 use Newsprint\Chain\Rpc;
 use Newsprint\Chain\SiteState;
 use Newsprint\Chain\Submitter;
+use Newsprint\Metering\ChargeState;
 use Newsprint\Metering\Meter;
 use Newsprint\Metering\MeterOutcome;
 use Newsprint\Store\Database;
@@ -40,14 +41,14 @@ final class ChargeSweepsTest extends TestCase
 
         // Another reader, a week ago: a session, a grant and a lock row.
         $store->createSession('PAYRcat', 3_600);
-        $store->recordGrant('PAYRcat', 'article-one', 1_800, 'sigcat', true);
+        $store->recordGrant('PAYRcat', 'article-one', 1_800, 'sigcat');
         $store->withPayerLock('PAYRcat', static fn (): null => null);
 
         $this->now += 7 * 86_400;
 
         // This reader, now: a live session and a live grant.
         $store->createSession('PAYRfig', 43_200);
-        $store->recordGrant('PAYRfig', 'article-two', 1_800, 'sigfig', true);
+        $store->recordGrant('PAYRfig', 'article-two', 1_800, 'sigfig');
 
         $result = $this->meter($store)->forArticle('PAYRfig', 'article-two', $this->state());
 
@@ -55,6 +56,24 @@ final class ChargeSweepsTest extends TestCase
         self::assertSame(['PAYRfig/article-two'], $this->column($pdo, "SELECT wallet || '/' || article FROM grants"));
         self::assertSame(['PAYRfig'], $this->column($pdo, 'SELECT wallet FROM sessions'));
         self::assertSame(['PAYRfig'], $this->column($pdo, 'SELECT wallet FROM payers'));
+    }
+
+    /**
+     * A second POST for an article whose charge is still out — a resubmitted
+     * form, a second tab — is served from the grant and says the charge is
+     * still out, rather than claiming a settled grant (2026-09-17). Still no
+     * chain: the RPC below is a closed port.
+     */
+    public function testAGrantWhoseChargeIsOutIsReportedAsStillOut(): void
+    {
+        $store = new Store(Database::open(':memory:'), fn (): int => $this->now);
+        $store->recordGrant('PAYRfig', 'article-two', 1_800, 'sigfig', ChargeState::Pending);
+
+        $result = $this->meter($store)->forArticle('PAYRfig', 'article-two', $this->state());
+
+        self::assertSame(MeterOutcome::Granted, $result->outcome);
+        self::assertTrue($result->awaiting());
+        self::assertTrue($result->asksAgain(), 'so the page asks, and without JavaScript the POST route asks');
     }
 
     private function meter(Store $store): Meter

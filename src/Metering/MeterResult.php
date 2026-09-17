@@ -31,7 +31,12 @@ final class MeterResult
         public readonly string $detail = '',
         /** What this call would charge, in base units. */
         public readonly int $charge = 0,
-        public readonly bool $settles = false,
+        /**
+         * Whether the call moved money. A prediction from the preflight on the
+         * request that sent it; read from the landed event on a request that
+         * reports it afterwards; null when that read did not answer.
+         */
+        public readonly ?bool $settles = false,
         public readonly int $pageViews = 1,
         /**
          * The instructions this call built, exactly as `SolPay\Core\Ix`
@@ -73,13 +78,68 @@ final class MeterResult
          * arithmetic.
          */
         public readonly ?PayerState $payer = null,
+        /**
+         * What became of the charge the article is served on — the grant's own
+         * record, or `Pending` on the request that has just sent it.
+         */
+        public readonly ChargeState $chargeState = ChargeState::Confirmed,
+        /**
+         * This request is reporting a transaction an earlier request sent.
+         * Its instructions were built there and are not here, and §9's panel
+         * says so rather than claiming a browser built them.
+         */
+        public readonly bool $earlier = false,
     ) {
     }
 
-    /** Served without touching the chain: a live grant already covers it (§7.1). */
-    public static function granted(): self
+    /**
+     * Served without touching the chain *to decide*: a live grant already
+     * covers it (§7.1). The grant's charge comes with it, because a grant can
+     * now be older than the answer about the charge that bought it.
+     * `$asked` says this request put one question to the chain about that
+     * charge — the only chain call a granted view can make.
+     */
+    public static function granted(ChargeState $charge = ChargeState::Confirmed, bool $asked = false): self
     {
-        return new self(MeterOutcome::Granted, detail: 'a live grant already covered this article');
+        return new self(MeterOutcome::Granted, detail: 'a live grant already covered this article', chargeState: $charge, earlier: $asked);
+    }
+
+    /**
+     * §7.3 since 2026-09-17: the endpoint accepted the charge and the article
+     * is served now. Nobody has asked the cluster yet; a later request does.
+     *
+     * @param list<Instruction> $instructions
+     */
+    public static function servedAhead(string $signature, int $charge, bool $settles, array $instructions = []): self
+    {
+        return new self(MeterOutcome::Sent, signature: $signature, detail: 'sent; the article was served before the chain confirmed', charge: $charge, settles: $settles, instructions: $instructions, chargeState: ChargeState::Pending);
+    }
+
+    /**
+     * An earlier request's charge, found to have landed.
+     *
+     * `$settles` is read from the landed event rather than carried from the
+     * request that predicted it — that request's answer is gone, and a value
+     * the browser sent back would be the reader's word for it.
+     */
+    public static function confirmedLater(string $signature, ?bool $settles, int $pageViews = 1): self
+    {
+        return new self(MeterOutcome::Metered, signature: $signature, detail: 'confirmed after the article was served', settles: $settles, pageViews: $pageViews, earlier: true);
+    }
+
+    /** An earlier request's charge, still without an answer — or never going to have one. */
+    public static function unconfirmedLater(string $signature, ChargeState $charge): self
+    {
+        return new self(MeterOutcome::Unconfirmed, signature: $signature, detail: $charge === ChargeState::Unknown ? 'never seen on chain; it can no longer land' : 'sent; not confirmed inside the window', settles: null, chargeState: $charge, earlier: true);
+    }
+
+    /**
+     * An earlier request's charge, found to have landed and failed. The
+     * article was already served, the grant stays, and nothing was charged.
+     */
+    public static function absorbed(string $signature, ?Cause $cause, string $detail): self
+    {
+        return new self(MeterOutcome::Absorbed, signature: $signature, cause: $cause, detail: $detail, settles: null, chargeState: ChargeState::Refused, earlier: true);
     }
 
     /** @param list<Instruction> $instructions */
@@ -95,7 +155,7 @@ final class MeterResult
     /** @param list<Instruction> $instructions */
     public static function unconfirmed(string $signature, int $charge, bool $settles, int $pageViews = 1, array $instructions = []): self
     {
-        return new self(MeterOutcome::Unconfirmed, signature: $signature, detail: 'sent; not confirmed inside the window', charge: $charge, settles: $settles, pageViews: $pageViews, instructions: $instructions);
+        return new self(MeterOutcome::Unconfirmed, signature: $signature, detail: 'sent; not confirmed inside the window', charge: $charge, settles: $settles, pageViews: $pageViews, instructions: $instructions, chargeState: ChargeState::Pending);
     }
 
     /** The preflight refused before anything was signed — `can_meter` said no. */
@@ -133,12 +193,34 @@ final class MeterResult
      */
     public function sent(): bool
     {
-        return in_array($this->outcome, [MeterOutcome::Metered, MeterOutcome::Unconfirmed, MeterOutcome::Failed], true);
+        return in_array($this->outcome, [MeterOutcome::Metered, MeterOutcome::Unconfirmed, MeterOutcome::Failed, MeterOutcome::Sent, MeterOutcome::Absorbed], true);
     }
 
     /** Is the reader entitled to the body? */
     public function serves(): bool
     {
-        return in_array($this->outcome, [MeterOutcome::Granted, MeterOutcome::Metered, MeterOutcome::Unconfirmed], true);
+        return in_array($this->outcome, [MeterOutcome::Granted, MeterOutcome::Metered, MeterOutcome::Unconfirmed, MeterOutcome::Sent, MeterOutcome::Absorbed], true);
+    }
+
+    /**
+     * Has the chain still not said whether the charge landed?
+     *
+     * While it has not, no account read describes the charge — a read at
+     * `confirmed` taken now would show the numbers from before it — so the
+     * screens show none of them (§2's claim 7, 2026-09-17).
+     */
+    public function awaiting(): bool
+    {
+        return $this->chargeState === ChargeState::Pending;
+    }
+
+    /**
+     * Should the page ask again by itself? Only where nothing has asked for a
+     * window yet: the charge this request sent, or a grant still pending. A
+     * report that already waited the window out is left for a reload.
+     */
+    public function asksAgain(): bool
+    {
+        return $this->awaiting() && in_array($this->outcome, [MeterOutcome::Sent, MeterOutcome::Granted], true);
     }
 }

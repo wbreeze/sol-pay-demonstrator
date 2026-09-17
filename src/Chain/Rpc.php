@@ -111,12 +111,20 @@ final class Rpc
     }
 
     /** @param string $wire raw transaction bytes from `Tx::wire` */
-    public function sendTransaction(string $wire): string
+    /**
+     * The endpoint simulates first unless `$skipPreflight`, and SPEC §7.3's
+     * serve-first charge depends on that: it is what refuses a charge the
+     * reader cannot cover before the article is served. Only
+     * {@see ChargeFault} ever turns it off, and only on devnet.
+     */
+    public function sendTransaction(string $wire, bool $skipPreflight = false): string
     {
-        return (string) $this->call('sendTransaction', [
-            base64_encode($wire),
-            ['encoding' => 'base64', 'preflightCommitment' => $this->commitment],
-        ]);
+        $options = ['encoding' => 'base64', 'preflightCommitment' => $this->commitment];
+        if ($skipPreflight) {
+            $options['skipPreflight'] = true;
+        }
+
+        return (string) $this->call('sendTransaction', [base64_encode($wire), $options]);
     }
 
     /**
@@ -163,14 +171,21 @@ final class Rpc
 
     /**
      * @param list<string> $signatures
+     * @param bool         $history    also search the ledger, not only the
+     *                                 recent status cache. The cache holds a
+     *                                 couple of minutes of slots, so a
+     *                                 question asked later than that about a
+     *                                 transaction that did land is answered
+     *                                 null without it — which reads exactly
+     *                                 like a transaction that never did.
      *
      * @return list<array{confirmationStatus: ?string, err: mixed}|null>
      */
-    public function signatureStatuses(array $signatures): array
+    public function signatureStatuses(array $signatures, bool $history = false): array
     {
         $value = $this->call('getSignatureStatuses', [
             array_values($signatures),
-            ['searchTransactionHistory' => false],
+            ['searchTransactionHistory' => $history],
         ])['value'];
 
         return array_map(
