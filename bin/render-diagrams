@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+#
+# Render the article diagrams in diagrams/ into public/assets/img/, twice
+# each: `<name>-light.png` and `<name>-dark.png`, the pair site.css expects.
+#
+#   bin/render-diagrams                    # every diagram
+#   bin/render-diagrams two-orderings-close  # one
+#
+# Needs Java and PlantUML. Set PLANTUML to the jar, or have a `plantuml`
+# command on PATH. The plates are committed, like metered-request.png, so a
+# reader of the repository needs neither. Re-render all of them after a change
+# to diagrams/style.iuml, and look at both schemes before committing.
+
+set -euo pipefail
+export LC_ALL=C
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+out="$root/public/assets/img"
+
+render() {
+    if [[ -n "${PLANTUML:-}" ]]; then
+        java -jar "$PLANTUML" "$@"
+    else
+        plantuml "$@"
+    fi
+}
+
+names=("$@")
+if [[ ${#names[@]} -eq 0 ]]; then
+    for f in "$root"/diagrams/*.plantuml; do
+        names+=("$(basename "$f" .plantuml)")
+    done
+fi
+
+for name in "${names[@]}"; do
+    src="$root/diagrams/$name.plantuml"
+    [[ -f "$src" ]] || { echo "no such diagram: $src" >&2; exit 2; }
+    for theme in light dark; do
+        # The theme is set on the line before `!include style.iuml`, because
+        # PlantUML refuses `%getenv` by default. -pipe reads the source on
+        # stdin, so the include resolves against the working directory;
+        # hence the cd.
+        (cd "$root/diagrams" \
+            && sed "s/^!include style.iuml\$/!\$theme = \"$theme\"\n&/" "$src" \
+            | render -tpng -pipe) > "$out/$name-$theme.png"
+        echo "$name-$theme.png"
+    done
+done

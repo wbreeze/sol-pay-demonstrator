@@ -1,0 +1,28 @@
+@startuml
+' Charging for a page view: the grant is recorded without waiting for the
+' chain to agree. Source for public/assets/img/two-orderings-charge-*.png.
+!include style.iuml
+$lifelines()
+
+B -> S : POST the article
+S -> D : lock this wallet; is there a grant?
+D --> S : no grant
+S -> C : send the charge\n(the server signs it)
+S -> C : poll the signature, up to 20 s
+
+alt confirmed
+  S -> D : record the grant
+  S --> B : the article
+else no answer in 20 s
+  S -> D : record the grant anyway
+  S --> B : the article, and a line saying\nthe confirmation did not arrive
+else landed and failed
+  S --> B : why the charge failed\n(nothing recorded)
+end
+
+note over S, D
+  The grant is written before the page is built.
+  If building the page fails, the next POST
+  finds the grant and charges nothing.
+end note
+@enduml

@@ -1,0 +1,20 @@
+@startuml
+' The tidy version of charging: wait for the chain, then write. On a slow
+' minute it refuses a reader whose charge then lands.
+' Source for public/assets/img/two-orderings-tidy-charge-*.png.
+!include style.iuml
+$lifelines()
+
+B -> S : POST the article
+S -> C : send the charge
+S -> C : poll the signature, up to 20 s
+... the chain is slow ...
+S --> B : $wrong("no article")
+hnote over C : $wrong("the charge lands")
+
+note over B, C
+  The reader has paid, and has nothing to show
+  for it. The refusal was already on the screen
+  when the charge landed.
+end note
+@enduml

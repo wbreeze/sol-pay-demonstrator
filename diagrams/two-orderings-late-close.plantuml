@@ -1,0 +1,30 @@
+@startuml
+' A close that lands after the server stopped waiting, and the note that
+' lets a later request finish the erasure.
+' Source for public/assets/img/two-orderings-late-close-*.png.
+!include style.iuml
+$lifelines()
+
+B -> S : POST the close's signature
+S -> C : poll the signature, up to 20 s
+S -> C : read the contract account
+C --> S : still there
+S -> D : note: a close is pending
+S --> B : reload in a moment
+hnote over C : the close\nlands at\nsecond 25
+
+== the reader reloads ==
+
+B -> S : GET the meter
+S -> D : whose session is this?
+D --> S : this wallet, with a pending close
+S -> C : read the contract account
+C --> S : gone
+S -> D : delete sessions, grants, lock row, note
+S --> B : no paying wallet stored
+
+note over S, D
+  Without the note, the reload cannot tell
+  a meter just closed from one never opened.
+end note
+@enduml

@@ -1,0 +1,20 @@
+@startuml
+' The tidy version of closing: write, then wait. On a slow minute the
+' receipt is false. Source for public/assets/img/two-orderings-tidy-close-*.png.
+!include style.iuml
+$lifelines()
+
+B -> C : close and revoke (sent)
+B -> S : POST the close's signature
+S -> D : $wrong("delete sessions and grants")
+S -> C : poll the signature, up to 20 s
+... the chain is slow ...
+S --> B : $wrong("receipt: contract closed")
+
+note over B, C
+  If the close never lands, the contract stays open,
+  and the site can still draw from the reader's
+  token account. The receipt says the opposite,
+  and the reader has no reason to check it.
+end note
+@enduml

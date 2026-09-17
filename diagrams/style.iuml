@@ -1,0 +1,90 @@
+' Shared look for the diagrams that appear inside articles.
+'
+' Each diagram renders twice, once per colour scheme, because site.css shows
+' `-light.png` or `-dark.png` by the reader's scheme (see the comment above
+' `.body img` there). The colours below are site.css's own tokens, so a plate
+' sits on the page as if it were part of it. `bin/render-diagrams` sets
+' `$theme` just above the `!include` line and names the two files. (PlantUML's
+' default security profile refuses `%getenv`, so the theme cannot come from
+' the environment.) A diagram rendered by hand comes out light.
+'
+' The font is DejaVu Sans because the plates were first rendered on Linux.
+' Rendering on a machine without it substitutes a font of different widths,
+' so every plate moves. Render all of them together, or none.
+
+!if (%not(%variable_exists("$theme")))
+  !$theme = "light"
+!endif
+!if ($theme == "dark")
+  !$paper = "#14130f"
+  !$sunk = "#1c1a15"
+  !$ink = "#e8e4d9"
+  !$soft = "#a09a8c"
+  !$rule = "#3a372f"
+  !$accent = "#e0785c"
+!else
+  !$paper = "#fbf9f4"
+  !$sunk = "#f2eee3"
+  !$ink = "#16150f"
+  !$soft = "#55524a"
+  !$rule = "#d8d2c4"
+  !$accent = "#8a2b16"
+!endif
+
+scale 2
+hide footbox
+skinparam backgroundColor $paper
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 12
+skinparam defaultFontColor $ink
+skinparam maxMessageSize 190
+skinparam roundCorner 0
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+
+skinparam sequence {
+  ArrowColor $ink
+  ArrowFontColor $ink
+  LifeLineBorderColor $soft
+  LifeLineBackgroundColor $sunk
+  ParticipantBorderColor $ink
+  ParticipantBackgroundColor $paper
+  ParticipantFontColor $ink
+  ActorBorderColor $ink
+  ActorBackgroundColor $paper
+  ActorFontColor $ink
+  GroupBorderColor $soft
+  GroupBackgroundColor $paper
+  GroupHeaderFontColor $ink
+  GroupFontColor $soft
+  DividerBackgroundColor $sunk
+  DividerBorderColor $rule
+  DividerFontColor $ink
+  DelayFontColor $soft
+}
+
+skinparam database {
+  BackgroundColor $sunk
+  BorderColor $ink
+  FontColor $ink
+}
+
+skinparam note {
+  BackgroundColor $sunk
+  BorderColor $rule
+  FontColor $ink
+}
+
+' The four lifelines every diagram uses, in the same order everywhere.
+!procedure $lifelines()
+participant "Reader's\nbrowser" as B
+participant "Site\nserver" as S
+database "Site\ndatabase" as D
+participant "Chain" as C
+!endprocedure
+
+' A step that is the mistake the diagram is about.
+!function $wrong($text)
+  !return "<color:" + $accent + "><b>" + $text + "</b></color>"
+!endfunction
