@@ -7,7 +7,7 @@ $lifelines()
 B -> C : close and revoke (sent)
 B -> S : POST the close's signature
 S -> D : $wrong("delete sessions and grants")
-S -> C : poll the signature, up to 20 s
+S -> C : ask about the signature,\nup to 6 times, 2 s apart
 ... the chain is slow ...
 S --> B : $wrong("receipt: contract closed")
 

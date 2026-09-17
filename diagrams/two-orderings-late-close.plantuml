@@ -6,12 +6,12 @@
 $lifelines()
 
 B -> S : POST the close's signature
-S -> C : poll the signature, up to 20 s
+S -> C : ask about the signature,\nup to 6 times, 2 s apart
 S -> C : read the contract account
 C --> S : still there
 S -> D : note: a close is pending
 S --> B : reload in a moment
-hnote over C : the close\nlands at\nsecond 25
+hnote over C : the close\nlands at\nsecond 20
 
 == the reader reloads ==
 

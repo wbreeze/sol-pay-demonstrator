@@ -2,7 +2,7 @@
 title: Privacy
 slug: privacy
 created: 2026-09-04
-revised: 2026-09-16
+revised: 2026-09-17
 metered: false
 status: published
 ---
@@ -18,7 +18,7 @@ The list is short enough to print in full; so, here it is in full.
 | --- | --- | --- |
 | A session cookie — a random id, nothing else | To remember which wallet is paying for this visit | Until you forget the wallet, close your meter, or close the browser |
 | Your wallet address, against that session | It is the one thing the payment needs. Every contract is derived from it | The life of the session: at most twelve hours, then deleted within five minutes |
-| Which articles you have already paid for, and when | So that a refresh, a back button or a second tab doesn't charge you twice for one article | 30 minutes per article, then deleted within five more — or the moment you close your meter |
+| Which articles you have already paid for, and when, with each payment's transaction id and whether it went through | So that a refresh, a back button or a second tab doesn't charge you twice for one article, and so that an article can be shown before its payment confirms | 30 minutes per article, then deleted within five more — or the moment you close your meter |
 | Your address and IP, if you used the faucet | So one visitor can't drain the demo's tokens | Long enough to enforce the limit |
 | A note that you asked to close your meter, if the chain had not confirmed the close yet | So that your records are still deleted when the close lands after we stopped waiting | Until the close is confirmed or found to have failed; at most as long as your session |
 | Ordinary web server request logs | They are how a web server works | Short, and nobody reads them |
@@ -46,6 +46,12 @@ it, refreshing a page would charge you for it again. It is a receipt, not a
 profile. It answers one question — *has this wallet already paid for this
 article?* It is never joined up across articles to work out what you like,
 never leaves this server, feeds nothing, and is gone within thirty-five minutes.
+
+Each receipt also carries the payment's transaction id and one word for what
+became of it. The id is already public on the chain. The word exists because
+the article is shown as soon as the payment is sent, before the chain has
+confirmed it. The site checks afterwards and writes down what it found, and
+if a payment never goes through, you keep the article anyway.
 
 We do count how many times each article has been bought. That is a fact about
 the article, we would like to know it, and it says nothing about you — the

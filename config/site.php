@@ -22,11 +22,24 @@ return [
     'rpc' => [
         'url' => 'https://api.devnet.solana.com',
         'commitment' => 'confirmed',
-        // SPEC §7.3's bounded window. Past it the demo serves the article and
-        // flags the request unconfirmed rather than charging a reader for
-        // nothing.
-        'confirm_timeout_ms' => 20_000,
-        'confirm_poll_ms' => 500,
+        // How the site finds out whether a transaction landed: ask for its
+        // status up to `confirm_attempts` times, `confirm_spacing_ms` apart —
+        // six asks over about twelve seconds (five gaps, plus each ask's own
+        // round trip). SPEC §7.3.
+        //
+        // Measured, 2026-09-09 to 09-17: of some sixty confirmations, all but
+        // three answered on the first ask and those three on the second. A
+        // devnet transaction confirms in a second or two; the article's own
+        // follow-up asks about two seconds after the send, which is why its
+        // first ask nearly always lands. Two seconds apart is a slot rhythm's
+        // worth of patience, not a spinner's. Past the last ask nothing is
+        // decided — a later request asks again, and a transaction is dead
+        // once its blockhash expires (`charge_settle_s`, `close_settle_s`).
+        //
+        // Replaced a 500 ms poll inside a 20 s window (up to ~20 asks) on
+        // 2026-09-17.
+        'confirm_attempts' => 6,
+        'confirm_spacing_ms' => 2_000,
         'http_timeout_s' => 20,
     ],
 
@@ -111,6 +124,14 @@ return [
         // After this, a contract that is still there means the close failed,
         // and its note is dropped.
         'close_settle_s' => 180,
+        // The same question for an article's charge (§7.3, 2026-09-17),
+        // which is served before it confirms. The site fetches the blockhash
+        // itself, immediately before sending, so there is no wallet dialog
+        // to leave room for: 150 blocks is about a minute, and two minutes
+        // is a margin. After this, a charge the cluster has never heard of
+        // (asked with history search) is taken as dropped, and the grant
+        // stays — the reader keeps the article either way.
+        'charge_settle_s' => 120,
         'demo_step_views' => 7, // below the ten-view threshold, so the settle is intermittent
 
         // When the article shell's second line appears (`assets/read-on.js`):

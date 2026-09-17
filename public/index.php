@@ -22,12 +22,15 @@ use Newsprint\Chain\ProgramEvent;
 use Newsprint\Chain\RequestRead;
 use Newsprint\Chain\Rpc;
 use Newsprint\Chain\RpcException;
+use Newsprint\Chain\SubmitStatus;
 use Newsprint\Chain\Submitter;
 use Newsprint\Content\Library;
 use Newsprint\Content\Piece;
 use Newsprint\Support\Alias;
 use Newsprint\Support\Config;
 use Newsprint\Support\RpcTimingMiddleware;
+use Newsprint\Metering\ChargeFollowUp;
+use Newsprint\Metering\ChargeState;
 use Newsprint\Metering\CloseFinisher;
 use Newsprint\Metering\Decision;
 use Newsprint\Metering\Meter;
@@ -252,11 +255,20 @@ $siteVars = static function (RequestRead $reads) use ($params, $decimals): array
 $meterFactory = static function () use ($config, $rpcFactory, $store): Meter {
     $rpc = $rpcFactory();
 
-    return new Meter($config, $rpc, new Submitter(
-        $rpc,
-        (int) $config->rpc()['confirm_timeout_ms'],
-        (int) $config->rpc()['confirm_poll_ms'],
-    ), $store());
+    return new Meter($config, $rpc, Submitter::fromConfig($rpc, $config), $store());
+};
+
+/**
+ * §7.3's second half (2026-09-17): what became of a charge the article was
+ * already served on. Separate from `$meterFactory` on purpose — it holds no
+ * keypair and builds no instruction, so the GET may have it, and
+ * `SafeMethodTest`'s rule that nothing a GET can reach meters stays true
+ * without an exception.
+ */
+$followUpFactory = static function () use ($config, $rpcFactory, $store): ChargeFollowUp {
+    $rpc = $rpcFactory();
+
+    return new ChargeFollowUp($config, $rpc, Submitter::fromConfig($rpc, $config), $store());
 };
 
 $meterVars = static function (Request $request, ?MeterResult $result = null) use ($reads, $config, $store): array {
@@ -506,7 +518,7 @@ $articleContent = static function (Request $request, Library $library, Piece $pi
  * So it claims nothing the chain would have to answer — not even the price,
  * which comes from the `Site` account and arrives with the rest.
  */
-$app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $articleContent, $reads, $wallet, $store, $config): Response {
+$app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $articleContent, $reads, $wallet, $store, $config, $followUpFactory): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -550,7 +562,8 @@ $app->get('/a/{slug}', function (Request $request, Response $response, array $ar
     $result = null;
 
     if ($address !== null && $config->isProvisioned() && Decision::shouldMeter($piece, $address)) {
-        if ($store()->liveGrant($address, $piece->slug) === null) {
+        $grant = $store()->liveGrant($address, $piece->slug);
+        if ($grant === null) {
             // No `$reads`: the inspector is deferred exactly as it is on
             // `/privacy`, and the POST's answer fills it.
             return $page($response, $shell($piece->title, $view->render('article-pending', [
@@ -559,7 +572,16 @@ $app->get('/a/{slug}', function (Request $request, Response $response, array $ar
             ])));
         }
 
-        $result = MeterResult::granted();
+        // **A grant whose charge is still out** (§7.3, 2026-09-17). Asked
+        // once, not waited for, and before anything on this page reads the
+        // accounts — so that when the answer is "landed", the strip's read
+        // comes after it and includes the charge. This is how a reader
+        // without JavaScript ever hears the rest: reload. A grant already
+        // settled either way costs nothing here, which is every grant after
+        // its first minute or so.
+        $result = $grant['charge'] === ChargeState::Pending
+            ? ($followUpFactory()->report($address, $piece->slug, false) ?? MeterResult::granted($grant['charge']))
+            : MeterResult::granted($grant['charge']);
     }
 
     return $page($response, $shell($piece->title, $articleContent($request, $library, $piece, $result), $reads($request), $result));
@@ -589,7 +611,7 @@ $app->get('/a/{slug}', function (Request $request, Response $response, array $ar
  * values read on this request, and a cached copy would be the server's memory
  * answering for the chain.
  */
-$articlePost = $app->post('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $articleContent, $inspector, $reads): Response {
+$articlePost = $app->post('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $articleContent, $inspector, $reads, $wallet, $followUpFactory): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -608,6 +630,22 @@ $articlePost = $app->post('/a/{slug}', function (Request $request, Response $res
     // which is §7.1's defect.
     $metering = $request->getAttribute(MeterMiddleware::ATTRIBUTE);
     $result = $metering instanceof MeterResult ? $metering : null;
+
+    // **A repeated POST whose grant is still waiting on its charge**
+    // (2026-09-17). Without JavaScript, reloading the page this POST answered
+    // resubmits it, and nothing else would ever ask the chain — so this asks
+    // once, as the GET does. Found in the capture with JavaScript off: the
+    // resubmitted form said "the chain was not touched" over a grant whose
+    // charge had not been checked.
+    $address = $wallet($request);
+    if ($result !== null && $result->outcome === MeterOutcome::Granted && $result->awaiting() && $address !== null) {
+        $result = $followUpFactory()->report($address, $piece->slug, false) ?? $result;
+        if (!$result->awaiting()) {
+            // The middleware read the accounts before this answer existed.
+            $reads($request)->invalidatePayer();
+        }
+    }
+
     $content = $articleContent($request, $library, $piece, $result);
 
     if ($request->getHeaderLine('X-Fragment') === '1') {
@@ -621,6 +659,59 @@ $articlePost = $app->post('/a/{slug}', function (Request $request, Response $res
     }
 
     return $page($response, $shell($piece->title, $content, $reads($request), $result))
+        ->withHeader('Cache-Control', 'no-store');
+});
+
+/**
+ * SPEC §7.3's second half (2026-09-17): the page asks what became of the
+ * charge it was served on.
+ *
+ * The charging POST answers as soon as the endpoint accepts the transaction,
+ * with a strip that says the charge is on its way and shows no account
+ * figures — any read taken then would predate the charge. `assets/charge.js`
+ * sends this straight after, and this is where the confirmation window now
+ * lives: off the request the reader was waiting on. It answers in the same
+ * shape as the POST, the article and the inspector rendered from one request,
+ * and `swap.js` replaces both.
+ *
+ * The signature comes from the grant, never from the request. A value the
+ * browser sent would be the reader's word for which transaction to ask about.
+ *
+ * Only as a fragment. Without JavaScript nothing sends this, and the reader's
+ * reload — `GET /a/{slug}`, which asks once — does the same job.
+ */
+$app->post('/a/{slug}/confirm', function (Request $request, Response $response, array $args) use ($view, $contentDir, $articleContent, $inspector, $wallet, $reads, $followUpFactory): Response {
+    $slug = (string) $args['slug'];
+    if ($request->getHeaderLine('X-Fragment') !== '1') {
+        return $response->withStatus(303)->withHeader('Location', '/a/'.rawurlencode($slug));
+    }
+
+    $library = Library::isBuilt($contentDir) ? Library::load($contentDir) : null;
+    $piece = $library?->find($slug);
+    if (!$library instanceof Library || !$piece instanceof Piece || !$piece->metered) {
+        return $response->withStatus(404);
+    }
+
+    $address = $wallet($request);
+    $result = $address === null ? null : $followUpFactory()->report($address, $piece->slug, true);
+    if ($result === null) {
+        // No reader, or no grant for this article: nothing was bought, so
+        // there is nothing to confirm. The page keeps what it has.
+        return $response->withStatus(409);
+    }
+
+    // The chain has answered, or the window has closed. Either way nothing on
+    // this request has read the accounts yet, so the strip's read below is
+    // the first and comes after the answer.
+    $reads($request)->invalidatePayer();
+
+    $response->getBody()->write(
+        $articleContent($request, $library, $piece, $result)
+        .$view->render('inspector', ['sections' => $inspector($reads($request), $result)])
+    );
+
+    return $response
+        ->withHeader('Content-Type', 'text/html; charset=utf-8')
         ->withHeader('Cache-Control', 'no-store');
 });
 
@@ -950,32 +1041,13 @@ $app->post('/meter/opened', function (Request $request, Response $response) use 
         return $json($response, ['message' => 'no signature'], 400);
     }
 
-    $rpc = $rpcFactory();
-    $deadline = microtime(true) + ((int) $config->rpc()['confirm_timeout_ms']) / 1000;
-    $pollMs = (int) $config->rpc()['confirm_poll_ms'];
-    $confirmed = false;
-    $failed = null;
-
-    while (microtime(true) < $deadline) {
-        $status = $rpc->signatureStatuses([$signature])[0] ?? null;
-        if ($status !== null) {
-            if (($status['err'] ?? null) !== null) {
-                $failed = 'the transaction landed and failed';
-
-                break;
-            }
-            if (in_array($status['confirmationStatus'] ?? '', ['confirmed', 'finalized'], true)) {
-                $confirmed = true;
-
-                break;
-            }
-        }
-        usleep($pollMs * 1000);
+    // The wallet sent it; the site only asks whether it landed, on the same
+    // schedule as everything else (`Submitter::confirm`).
+    $outcome = Submitter::fromConfig($rpcFactory(), $config)->confirm($signature);
+    if ($outcome->status === SubmitStatus::Failed) {
+        return $json($response, ['message' => 'the transaction landed and failed'], 409);
     }
-
-    if ($failed !== null) {
-        return $json($response, ['message' => $failed], 409);
-    }
+    $confirmed = $outcome->status === SubmitStatus::Confirmed;
 
     // The wallet's `approve_and_open` has landed by now, so anything this
     // request read before the poll is out of date. It read nothing — the
@@ -1126,25 +1198,13 @@ $app->post('/meter/close/done', function (Request $request, Response $response) 
         return $json($response, ['message' => 'no signature'], 400);
     }
 
-    $rpc = $rpcFactory();
-    $deadline = microtime(true) + ((int) $config->rpc()['confirm_timeout_ms']) / 1000;
-    $pollMs = (int) $config->rpc()['confirm_poll_ms'];
-    $confirmed = false;
-
-    while (microtime(true) < $deadline) {
-        $status = $rpc->signatureStatuses([$signature])[0] ?? null;
-        if ($status !== null) {
-            if (($status['err'] ?? null) !== null) {
-                return $json($response, ['message' => 'the transaction landed and failed; nothing was deleted'], 409);
-            }
-            if (in_array($status['confirmationStatus'] ?? '', ['confirmed', 'finalized'], true)) {
-                $confirmed = true;
-
-                break;
-            }
-        }
-        usleep($pollMs * 1000);
+    // The signature only says when to look (`two-orderings`); the account
+    // read below is the evidence. Same schedule as everything else.
+    $outcome = Submitter::fromConfig($rpcFactory(), $config)->confirm($signature);
+    if ($outcome->status === SubmitStatus::Failed) {
+        return $json($response, ['message' => 'the transaction landed and failed; nothing was deleted'], 409);
     }
+    $confirmed = $outcome->status === SubmitStatus::Confirmed;
 
     // §10.4's ordering: the account is the evidence, not the signature, so
     // this has to be a reading taken after the close confirmed.
@@ -1201,11 +1261,7 @@ $app->post('/faucet', function (Request $request, Response $response) use ($json
     }
 
     $rpc = $rpcFactory();
-    $result = (new Faucet($config, new Submitter(
-        $rpc,
-        (int) $config->rpc()['confirm_timeout_ms'],
-        (int) $config->rpc()['confirm_poll_ms'],
-    ), $store()))->grant($address);
+    $result = (new Faucet($config, Submitter::fromConfig($rpc, $config), $store()))->grant($address);
 
     return $json($response, $result, $result['granted'] ? 200 : 409);
 });
@@ -1249,11 +1305,7 @@ $provisioner = static function () use ($config): Provisioner {
         (int) $config->rpc()['http_timeout_s'],
     );
 
-    return new Provisioner($config, $rpc, new Submitter(
-        $rpc,
-        (int) $config->rpc()['confirm_timeout_ms'],
-        (int) $config->rpc()['confirm_poll_ms'],
-    ));
+    return new Provisioner($config, $rpc, Submitter::fromConfig($rpc, $config));
 };
 
 $app->get('/setup', function (Request $request, Response $response) use ($view, $shell, $page, $provisioner, $config, $siteVars, $reads): Response {

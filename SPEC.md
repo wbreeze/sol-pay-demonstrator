@@ -670,6 +670,14 @@ cross-site POST, so such a request arrives anonymous and nothing is metered.
 A repeated POST — a double click, a retry after a lost answer, a second tab —
 finds the grant the first one recorded under §7.2's lock.
 
+**The POST answers before the charge confirms** (2026-09-17). §7.3 says why and
+what follows. The page asks what became of the charge in a second POST,
+`/a/{slug}/confirm`, sent by the same kind of script as soon as the article is
+on screen. It charges nothing, and neither does the check `GET /a/{slug}` makes
+for a reader without JavaScript: the class behind both holds no key and builds
+no instruction, which is what keeps "a GET never meters" true while a GET may
+ask the chain one question.
+
 ### 7.2 One meter at a time per payer
 
 Two requests from one reader that both reach the metering step build two
@@ -710,8 +718,9 @@ Writing it found one. `Database::open()` set `PRAGMA journal_mode` before
 `PRAGMA busy_timeout`, and SQLite's default timeout is zero, so a request
 opening the database while another held the write lock died with `database is
 locked` before it reached the queue at all. The metering path holds its
-transaction across an RPC round trip, which makes that window exactly §7.3's
-confirmation window wide. Fixed by arming the timeout first.
+transaction across an RPC round trip, which made that window exactly §7.3's
+confirmation window wide (since 2026-09-17, only as wide as the send). Fixed by
+arming the timeout first.
 
 What remains an observation rather than a test is the chain half: one
 `meter_and_settle` for two simultaneous readers. `bin/two-readers` makes that
@@ -740,25 +749,92 @@ is invisible from the front end, and it is invisible from the store too:
 `grants` is keyed on `(wallet, article)` and upserts, so two charges leave one
 row naming only the second signature.
 
-### 7.3 Order, and who absorbs an ambiguous confirmation
+### 7.3 Order: meter, record, render, then confirm
 
-Meter, confirm, record the grant, then render. The grant is recorded before the
-body is rendered so that a render failure still leaves the reader holding what
-they paid for.
+**Amended 2026-09-17.** The order was meter, confirm, record, render, and the
+confirmation sat inside the request the reader was waiting on. It is now
+**meter, record, render — and confirm afterward, on a later request.**
 
-Confirmation can be ambiguous: the transaction was sent, the confirmation did
-not arrive inside the timeout, and it may or may not have landed. The demo
-polls signature status for a bounded window, and if the answer is still
-unknown, **serves the article and records the grant anyway**, flagging the
-request in the inspector as unconfirmed.
+The grant is still recorded before the body is rendered, so a render failure
+still leaves the reader holding what they paid for.
 
-The reasoning is that the two failure modes are not symmetric. Refusing to
-serve risks charging a reader for nothing, which is the failure that destroys
-trust in a payment system. Serving risks giving away one article at
-`page_price`, which for this site is 0.01 DEMO and for a real one is a cent.
-The site absorbs the cheaper error. An integrator who disagrees should
-disagree explicitly rather than inherit this by accident, which is why it is
-written down.
+What moved is the wait. The server sends the charge and serves the article as
+soon as the endpoint has **accepted** it. Acceptance is not nothing: the site
+does not pass `skipPreflight`, so the endpoint simulates the transaction first,
+and a charge the program or SPL would refuse against current state is refused
+there — nothing is served, nothing is recorded, and the reader gets §8's
+screen. This is where a short balance, a revoked approval and a spent limit are
+caught, as they were before. What the wait was protecting against was never
+those; it was not knowing.
+
+So the grant is recorded **pending**, and the page's follow-up
+(`POST /a/{slug}/confirm`) asks the cluster whether the charge landed. That
+wait used to sit in the charging request. A reader without JavaScript gets the
+same answer from `GET /a/{slug}`, which asks once and does not wait. Either
+way the answer is written onto the grant, once:
+
+- **Landed.** `confirmed`. The follow-up also reads the charge's event, so the
+  strip's "this one settled" comes from the chain rather than from the request
+  that predicted it.
+- **Landed and failed.** `refused`. This needs the accounts to move between the
+  endpoint's simulation and inclusion — the reader acting in their wallet in
+  that second, or a second site delegated on the same token account (§8.3).
+  **The grant stays.** The reader already has the article, and taking it back
+  after the fact is the mysterious experience this order exists to avoid. The
+  strip says the charge was turned down and nothing was charged; the site loses
+  one page price and the fee.
+- **Never seen, and the blockhash has expired.** `unknown`, after
+  `charge_settle_s`, asked with history search so that "not found" means what
+  it says. The grant stays, for the same reason.
+- **No answer yet, or the endpoint did not answer.** Still `pending`. Nothing is
+  decided on a maybe.
+
+**How it asks: up to six times, two seconds apart** (`confirm_attempts`,
+`confirm_spacing_ms`; 2026-09-17). The first ask is immediate and there is no
+wait after the last, so the worst case is ten seconds of waiting plus six
+round trips — about twelve seconds, and six requests. It replaced a 500 ms
+poll inside a twenty-second window, which could make some twenty requests to
+learn one fact. The numbers come from the captures. Of some sixty
+confirmations between 2026-09-09 and 09-17, all but three answered on the
+first ask, and those three on the second. A devnet transaction confirms in a
+second or two, and the article's follow-up asks about two seconds after the
+send. Stopping after the last ask costs nothing: a later request asks again,
+and `charge_settle_s` decides when a charge nobody has seen can no longer
+land. The same schedule, in the same method (`Submitter::confirm`), serves
+every transaction the site waits on, including the two the reader's wallet
+sends (`/meter/opened`, `/meter/close/done`) and first-run setup's airdrop.
+
+Devnet produces none of the last three on request: its endpoint refuses the
+charges that would fail, and the rest confirm within a second. So a test fault
+exists, `NEWSPRINT_CHARGE_FAULT`, read only against a devnet endpoint and shown
+in §9's deployment section while it is on. `fail-after-serving` skips the
+endpoint's simulation, so a charge the reader cannot cover lands and fails.
+`never-land` also signs against a blockhash nobody issued, so the charge is
+dropped. `bin/run-dev` documents both.
+
+**While the charge is pending, the page shows no account figure.** A read at
+`confirmed` taken straight after the send returns the accounts from before it
+— numbers from an account, and the wrong ones, which is §2's claim 7 failing
+without a symptom. The strip says the charge is on its way, the advance is not
+offered, and the inspector marks its reading of the reader's accounts as taken
+before the charge confirmed. The follow-up's answer brings the figures, read
+after the chain answered.
+
+The reasoning for serving is the one this section always gave, and it now
+covers two cases instead of one. The two failure modes are not symmetric.
+Refusing to serve risks charging a reader for nothing, which is the failure
+that destroys trust in a payment system. Serving risks giving away one article
+at `page_price`, which for this site is 0.01 DEMO and for a real one is a cent.
+The site absorbs the cheaper error. An integrator who disagrees should disagree
+explicitly rather than inherit this by accident, which is why it is written
+down.
+
+What it bought, at the medians §12.4 records: the charging request fell from
+six calls to four — about 7.5 s to 5 s on a 1.2-second morning — and the
+twenty-second worst case left it entirely. The payer lock is released once the
+grant is written, so §7.2's queue is no longer as long as the confirmation
+window. `content/TwoOrderings.md` describes the earlier order and needs the
+same amendment.
 
 ### 7.4 Advancing the meter on purpose
 
@@ -1181,6 +1257,16 @@ would put *as they landed* under a heading that promises *as the builders
 produced them*, and the sentence above is the whole reason the bytes are worth
 showing.
 
+**A confirmation that arrives later keeps the instructions on screen**
+(2026-09-17). The charging POST now answers before the chain has confirmed
+(§7.3), and the page's follow-up answers with a fresh panel. The follow-up
+never held the instructions, so its last-transaction section carries a line
+saying they were built by the request that sent the charge, marked with the
+signature. The rows the sending request rendered carry the same mark, and the
+browser moves them into that line's place when they are still on the page.
+They are the same evidence from the same request; nothing is rebuilt, stored
+or read back. After a reload, the line is what remains, and it is true.
+
 **The event is read when the panel is opened, not when the transaction is
 made.** Decoding it needs `getTransaction`, a fourth call against §12.4's
 budget of about three per metered view, and this panel is collapsed by default
@@ -1445,7 +1531,7 @@ bound it, and let the bound be checked.
 | store | contents | goes away |
 | --- | --- | --- |
 | session | wallet address | forgetting the wallet, contract close, or within five minutes of session end |
-| view grants | wallet, article, expiry | within 35 minutes: 30 of grant, then a sweep — or at once, on close |
+| view grants | wallet, article, expiry, the charge's signature and what became of it | within 35 minutes: 30 of grant, then a sweep — or at once, on close |
 | payer lock row | wallet | with the wallet's last session and grant — or at once, on close |
 | pending close | wallet, the close's signature | on the erasure it waits for; when the close can no longer land; or with the wallet's last session and grant |
 | faucet ledger | wallet, time | never — see below |
@@ -1493,9 +1579,9 @@ the crontab line shows it there, rather than in a promise that quietly stops
 being true.
 
 Decided 2026-09-17: **a close that lands late is still followed by the
-erasure.** `POST /meter/close/done` waits twenty seconds and then reads the
-contract account. Until that day, a close that landed at second twenty-five
-was never followed by a `DELETE`: the reader reloaded into "no contract", and
+erasure.** `POST /meter/close/done` asks whether the close landed (§7.3's schedule)
+and then reads the contract account. Until that day, a close that landed
+after the server stopped asking was never followed by a `DELETE`: the reader reloaded into "no contract", and
 nothing could tell that meter from one never opened. Now the request that
 finds the account still there writes a *pending close* row, the wallet and
 the close's signature, both already public in the close transaction. Every
@@ -1977,7 +2063,16 @@ six. Every other metered page is one.
 | `POST /faucet` | 3 |
 | the seven-view advance (§7.4) | 5, and 1 on the page it redirects to |
 | a charge the chain refuses (§8.2) | 5 |
-| **an article that charges** | **6** |
+| **an article that charges** | **4** since 2026-09-17; 6 before |
+| its follow-up, `POST /a/{slug}/confirm` | 3 |
+| an article a live grant covers, while its charge is still pending | 2 |
+
+**Amended 2026-09-17.** §7.3 now serves the article before the charge
+confirms, so items 5 and 6 below left the request the reader waits on. They are
+the follow-up's first and third calls; its second is `getTransaction`, for the
+settle the strip reports. The totals rose by one and the wait fell by two.
+What follows is the six as they were counted, kept because the reasons for
+each still hold wherever it now happens.
 
 The six are worth naming, because four are irreducible and two are prices this
 specification has already agreed to pay:
@@ -2001,7 +2096,8 @@ specification has already agreed to pay:
    seven-view advance on 2026-09-10 whose first status came back unconfirmed
    after 536 ms, and whose second, one `confirm_poll_ms` later, confirmed. The
    loop is real and has run; it is counted as one call here because forty of
-   forty-one needed only one.
+   forty-one needed only one. (Since 2026-09-17 the loop is up to six asks,
+   two seconds apart; see §7.3.)
 6. `getMultipleAccounts` a third time, *after* the send — because the charge
    moved `used`, `paid` and the carried residue, and §2's claim 7 is that the
    numbers on the screen came from an account rather than from the server's
@@ -2055,7 +2151,7 @@ one of them three times on the page view that charges:
 - `getLatestBlockhash` — a transaction is compiled against one, fetched
   immediately before the handoff to the wallet (§6.3).
 - `sendTransaction` — hand the signed `meter_and_settle` to the cluster.
-- `getSignatureStatuses` — poll until it confirms, which is the wait in §7.3.
+- `getSignatureStatuses` — asked up to six times, two seconds apart, which is the wait in §7.3.
 
 There is a fifth, and it is deliberately not on that path: §9's inspector reads
 a landed transaction's event with `getTransaction`, once, and only when a reader

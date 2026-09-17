@@ -6,11 +6,11 @@ $lifelines()
 
 B -> C : close and revoke\n(the reader's wallet sends it)
 B -> S : POST the close's signature
-S -> C : poll the signature, up to 20 s
+S -> C : ask about the signature,\nup to 6 times, 2 s apart
 
 alt landed and failed
   S --> B : nothing was deleted
-else confirmed, or no answer in 20 s
+else confirmed, or no answer after 6 asks
   S -> C : read the contract account
   alt account gone
     S -> D : delete sessions, grants, lock row

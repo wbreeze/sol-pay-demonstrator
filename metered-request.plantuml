@@ -35,6 +35,11 @@ break no wallet stored
 end
 
 break live view grant for this article
+  opt its charge is still pending
+    S -> R : getSignatureStatuses (once, history search)
+    R --> S : status
+    S -> S : write what became of the charge onto the grant
+  end
   S -> R : getMultipleAccounts(site, treasury, mint, contract, payer token account)
   R --> S : account data
   S -[#00A0A0]-> V : metered_page (no charge)
@@ -88,7 +93,26 @@ group payer lock -- BEGIN IMMEDIATE on the payer's row (SPEC section 7.2)
   S -> S : sign as site authority
 
   S -> R : sendTransaction
-  R -> P : meter_and_settle(page_views = 1)
+  R -> R : simulate against current state
+  break the simulation fails
+    R --> S : error, nothing sent
+    S -> S : cause(raising program, code); discard logs
+    S -[#00A0A0]-> V : re-authorize, top up, or manage_meter
+  end
+  R --> S : signature
+  S -> S : record view grant, charge pending; count the purchase
+end
+
+S -[#00A0A0]-> V : metered_page + inspector, no account figures (swapped into the shell)
+note right of V
+  Served before the chain answers.
+  A read now would show the accounts
+  from before the charge, so the strip
+  says the charge is on its way instead.
+end note
+deactivate S
+
+R -> P : meter_and_settle(page_views = 1)
   activate P
   P -> P : used += page_price
   P -> P : require used <= limit
@@ -97,21 +121,26 @@ group payer lock -- BEGIN IMMEDIATE on the payer's row (SPEC section 7.2)
     T --> P : ok
     P -> P : paid = used
   end
-  P --> R : Metered event
-  deactivate P
-  R --> S : signature
+P --> R : Metered event
+deactivate P
 
-  S -> R : getSignatureStatuses (poll until confirmed)
-  R --> S : confirmation
+== POST confirm: afterward, charges nothing ==
 
-  break transaction failed
-    S -> S : cause(raising program, code); discard logs
-    S -[#00A0A0]-> V : re-authorize, top up, or manage_meter
-  end
-
-  S -> S : record view grant; count the purchase
+V -> S : POST /a/{slug}/confirm (the page's script, at once)
+activate S
+S -> R : getSignatureStatuses (up to 6 asks, 2 s apart; history search)
+R --> S : status
+S -> S : write onto the grant: confirmed, refused, or still pending
+note right of S
+  The grant stays whatever the answer.
+  A charge that landed and failed was
+  already served: the site takes the loss
+  (SPEC section 7.3).
+end note
+opt confirmed
+  S -> R : getTransaction
+  R --> S : Metered event (did it settle?)
 end
-
 S -> R : getMultipleAccounts(site, treasury, mint, contract, payer token account)
 R --> S : account data
 note right of S
@@ -122,7 +151,7 @@ note right of S
   from the server's memory.
 end note
 
-S -[#00A0A0]-> V : metered_page + inspector (swapped into the shell)
+S -[#00A0A0]-> V : metered_page + inspector (swapped in; the instruction rows are kept)
 deactivate S
 
 legend left
@@ -132,8 +161,8 @@ Colour follows state-machine.plantuml in the sol-pay repository.
 Every break is a screen, not an error page.
 A GET never meters: the charge is the POST (SPEC section 7.1).
 The site authority signs meter_and_settle. The payer is not present.
-An ambiguous confirmation is served, not refused; see SPEC section 7.3.
-Six RPC calls on a charging view, and SPEC section 12.4 says why each is there.
+The article is served before the charge confirms; see SPEC section 7.3.
+Four RPC calls on a charging view and three on its follow-up; SPEC section 12.4.
 endlegend
 
 @enduml

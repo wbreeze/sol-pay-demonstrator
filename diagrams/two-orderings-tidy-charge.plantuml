@@ -7,7 +7,7 @@ $lifelines()
 
 B -> S : POST the article
 S -> C : send the charge
-S -> C : poll the signature, up to 20 s
+S -> C : ask about the signature,\nup to 6 times, 2 s apart
 ... the chain is slow ...
 S --> B : $wrong("no article")
 hnote over C : $wrong("the charge lands")
