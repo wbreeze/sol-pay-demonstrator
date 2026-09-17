@@ -20,6 +20,7 @@ The list is short enough to print in full; so, here it is in full.
 | Your wallet address, against that session | It is the one thing the payment needs. Every contract is derived from it | The life of the session: at most twelve hours, then deleted within five minutes |
 | Which articles you have already paid for, and when | So that a refresh, a back button or a second tab doesn't charge you twice for one article | 30 minutes per article, then deleted within five more — or the moment you close your meter |
 | Your address and IP, if you used the faucet | So one visitor can't drain the demo's tokens | Long enough to enforce the limit |
+| A note that you asked to close your meter, if the chain had not confirmed the close yet | So that your records are still deleted when the close lands after we stopped waiting | Until the close is confirmed or found to have failed; at most as long as your session |
 | Ordinary web server request logs | They are how a web server works | Short, and nobody reads them |
 
 That is the whole list. There is no row for your name, because you were never

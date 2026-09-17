@@ -1447,6 +1447,7 @@ bound it, and let the bound be checked.
 | session | wallet address | forgetting the wallet, contract close, or within five minutes of session end |
 | view grants | wallet, article, expiry | within 35 minutes: 30 of grant, then a sweep — or at once, on close |
 | payer lock row | wallet | with the wallet's last session and grant — or at once, on close |
+| pending close | wallet, the close's signature | on the erasure it waits for; when the close can no longer land; or with the wallet's last session and grant |
 | faucet ledger | wallet, time | never — see below |
 | request logs | IP, path, time | short rotation, never keyed to a wallet |
 
@@ -1490,6 +1491,21 @@ The schedule lives outside the application, where no test can see it. So
 and `overdue` when that wait exceeds the interval. A deployment that forgot
 the crontab line shows it there, rather than in a promise that quietly stops
 being true.
+
+Decided 2026-09-17: **a close that lands late is still followed by the
+erasure.** `POST /meter/close/done` waits twenty seconds and then reads the
+contract account. Until that day, a close that landed at second twenty-five
+was never followed by a `DELETE`: the reader reloaded into "no contract", and
+nothing could tell that meter from one never opened. Now the request that
+finds the account still there writes a *pending close* row, the wallet and
+the close's signature, both already public in the close transaction. Every
+request that resolves a wallet (`$wallet`, and sign-in before it creates a
+session) asks `CloseFinisher` first. With no row, that costs one indexed read
+and no chain call. With a row, a fresh read of the contract decides: gone
+means erase now; still there after `close_settle_s` (three minutes, past any
+blockhash's life) means the close failed and the row is dropped; no answer
+means wait. The row is listed on the privacy page, because the page lists
+what the site holds, not only what is secret.
 
 **2. It costs the reader an article, and they are told before they click.**
 Purging live grants means an article they have paid for stops being served. The

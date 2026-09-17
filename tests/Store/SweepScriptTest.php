@@ -49,7 +49,7 @@ final class SweepScriptTest extends TestCase
         [$status, $out, $err] = $this->sweep('--verbose', $this->db);
 
         self::assertSame(0, $status, $err);
-        self::assertSame("swept 1 grant(s), 1 session(s), 0 lock row(s), 0 nonce(s)\n", $out);
+        self::assertSame("swept 1 grant(s), 1 session(s), 0 lock row(s), 0 nonce(s), 0 pending close(s)\n", $out);
         self::assertNull($store->oldestExpired(), 'nothing expired is left waiting');
         self::assertNotNull($store->liveGrant('PAYRfig', 'article-two'), 'and the live grant is untouched');
     }

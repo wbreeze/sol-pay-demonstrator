@@ -65,10 +65,11 @@ try {
 
 if ($verbose) {
     printf(
-        "swept %d grant(s), %d session(s), %d lock row(s), %d nonce(s)\n",
+        "swept %d grant(s), %d session(s), %d lock row(s), %d nonce(s), %d pending close(s)\n",
         $swept['grants'],
         $swept['sessions'],
         $swept['payers'],
         $swept['nonces'],
+        $swept['closes'],
     );
 }

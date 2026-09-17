@@ -28,6 +28,7 @@ use Newsprint\Content\Piece;
 use Newsprint\Support\Alias;
 use Newsprint\Support\Config;
 use Newsprint\Support\RpcTimingMiddleware;
+use Newsprint\Metering\CloseFinisher;
 use Newsprint\Metering\Decision;
 use Newsprint\Metering\Meter;
 use Newsprint\Metering\MeterMiddleware;
@@ -65,17 +66,6 @@ $store = static function () use ($config): Store {
     return $store ??= new Store(Database::open($config->dbPath()));
 };
 
-/**
- * The viewer-to-wallet map (§5), which is the integrator's one obligation and
- * here is a cookie and a row. Null means no paying wallet is stored for this
- * browser, which is the ordinary state of every public page on this site.
- */
-$wallet = static function (Request $request) use ($store): ?string {
-    $id = Session::idFrom($request);
-
-    return $id === null ? null : $store()->walletForSession($id);
-};
-
 $json = static function (Response $response, array $payload, int $status = 200): Response {
     $response->getBody()->write((string) json_encode($payload, JSON_UNESCAPED_SLASHES));
 
@@ -93,6 +83,50 @@ $rpcFactory = static function () use ($config): Rpc {
         (string) $config->rpc()['commitment'],
         (int) $config->rpc()['http_timeout_s'],
     );
+};
+
+/**
+ * SPEC §10.4: finish an erasure whose close landed after `POST
+ * /meter/close/done` stopped waiting. See {@see CloseFinisher}.
+ *
+ * True when this call erased the reader. With no pending close for the
+ * wallet, the answer is one indexed read and no chain call. With one, a fresh
+ * read of the payer's accounts decides, and that read is made once per wallet
+ * per request, since `$wallet` is asked more than once.
+ */
+$finishClose = static function (string $address) use ($store, $config, $rpcFactory): bool {
+    static $answered = [];
+
+    if (!array_key_exists($address, $answered)) {
+        $finisher = new CloseFinisher($store(), (int) $config->metering()['close_settle_s']);
+        $erased = $finisher->finish(
+            $address,
+            static fn (): ?bool => (new RequestRead($config, $rpcFactory(), $address))->payer()?->hasContract(),
+        );
+        $answered[$address] = $erased !== null;
+    }
+
+    return $answered[$address];
+};
+
+/**
+ * The viewer-to-wallet map (§5), which is the integrator's one obligation and
+ * here is a cookie and a row. Null means no paying wallet is stored for this
+ * browser, which is the ordinary state of every public page on this site.
+ *
+ * Also null when the wallet's close has just been found to have landed: the
+ * erasure runs here, before any route sees the wallet, so no route can act for
+ * a reader who has asked to be forgotten.
+ */
+$wallet = static function (Request $request) use ($store, $finishClose): ?string {
+    $id = Session::idFrom($request);
+    $address = $id === null ? null : $store()->walletForSession($id);
+
+    if ($address !== null && $finishClose($address)) {
+        return null;
+    }
+
+    return $address;
 };
 
 /**
@@ -752,7 +786,7 @@ $app->post('/signin/challenge', function (Request $request, Response $response) 
     return $json($response, ['input' => $issued['input']]);
 });
 
-$app->post('/signin/verify', function (Request $request, Response $response) use ($json, $store, $config): Response {
+$app->post('/signin/verify', function (Request $request, Response $response) use ($json, $store, $config, $finishClose): Response {
     $body = json_decode((string) $request->getBody(), true);
     if (!is_array($body)) {
         return $json($response, ['message' => 'unreadable request'], 400);
@@ -792,6 +826,11 @@ $app->post('/signin/verify', function (Request $request, Response $response) use
         // not hand back a challenge to try again against.
         return $json($response, ['message' => $e->getMessage(), 'reason' => $e->reason], 400);
     }
+
+    // A close from this wallet may have landed since the server last looked.
+    // Finish that erasure first, so the new session starts after it rather
+    // than being swept away by it on the next request.
+    $finishClose($address);
 
     $id = $store()->createSession($address, (int) $config->auth()['session_ttl_s']);
 
@@ -1113,7 +1152,13 @@ $app->post('/meter/close/done', function (Request $request, Response $response) 
 
     $payer = $reads($request)->payer();
     if ($payer === null || $payer->hasContract()) {
-        // Sent, and the account is still there. Nothing is deleted on a maybe.
+        // Sent, and the account is still there, or the chain did not answer.
+        // Nothing is deleted on a maybe. The close may still land, so leave a
+        // note: the next request from this wallet that finds the contract
+        // gone finishes the erasure (`$finishClose`). Without the note, that
+        // request could not tell a meter just closed from one never opened.
+        $store()->recordPendingClose($address, $signature, (int) $config->auth()['session_ttl_s']);
+
         return $json($response, [
             'ok' => false,
             'pending' => true,

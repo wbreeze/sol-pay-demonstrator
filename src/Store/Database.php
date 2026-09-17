@@ -151,6 +151,20 @@ final class Database
                 updated_at INTEGER NOT NULL
             );
 
+            -- §10.4, 2026-09-17. A close the reader sent that the chain had
+            -- not confirmed when the server stopped waiting. It holds the
+            -- wallet and the close's signature, both already public on chain
+            -- in that transaction. It lets a later request finish the
+            -- erasure once the contract is gone, and it goes with the
+            -- erasure, or when the close is found not to have landed, or
+            -- after one session's life at the most.
+            CREATE TABLE IF NOT EXISTS pending_closes (
+                wallet     TEXT PRIMARY KEY,
+                signature  TEXT NOT NULL,
+                sent_at    INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
+
             -- §4.3 and §10.4 qualification 3. This one survives a close, and
             -- the reason is published rather than assumed: the faucet's mint
             -- is an on-chain transaction naming that account forever, so the

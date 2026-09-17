@@ -232,7 +232,10 @@ final class Store
      * it is housekeeping rather than privacy. A used nonce that has not yet
      * expired stays: `consumeNonce()` needs the row to refuse a replay.
      *
-     * @return array{grants: int, sessions: int, payers: int, nonces: int}
+     * A pending-close note goes when it expires, or once its wallet has no
+     * session and no grant left, since the note then protects nothing.
+     *
+     * @return array{grants: int, sessions: int, payers: int, nonces: int, closes: int}
      */
     public function sweepExpired(): array
     {
@@ -256,11 +259,20 @@ final class Store
         $nonces = $this->pdo->prepare('DELETE FROM signin_nonces WHERE expires_at <= ?');
         $nonces->execute([$now]);
 
+        $closes = $this->pdo->prepare(
+            'DELETE FROM pending_closes
+             WHERE expires_at <= ?
+                OR (wallet NOT IN (SELECT wallet FROM sessions)
+                    AND wallet NOT IN (SELECT wallet FROM grants))'
+        );
+        $closes->execute([$now]);
+
         return [
             'grants' => $grants->rowCount(),
             'sessions' => $sessions->rowCount(),
             'payers' => $payers->rowCount(),
             'nonces' => $nonces->rowCount(),
+            'closes' => $closes->rowCount(),
         ];
     }
 
@@ -293,8 +305,9 @@ final class Store
 
     /**
      * Closing the contract purges the site's record of the reader: session,
-     * grants, and the lock row. The faucet ledger deliberately survives, for
-     * the published reason in §10.4 qualification 3.
+     * grants, the lock row, and the note of a close still waiting to be
+     * confirmed. The faucet ledger deliberately survives, for the published
+     * reason in §10.4 qualification 3.
      *
      * Returns what went, because §10.4 says this is testable from outside and
      * the inspector shows the DELETE happening rather than asserting it.
@@ -308,8 +321,52 @@ final class Store
         $grants = $this->pdo->prepare('DELETE FROM grants WHERE wallet = ?');
         $grants->execute([$wallet]);
         $this->pdo->prepare('DELETE FROM payers WHERE wallet = ?')->execute([$wallet]);
+        $this->pdo->prepare('DELETE FROM pending_closes WHERE wallet = ?')->execute([$wallet]);
 
         return ['sessions' => $sessions->rowCount(), 'grants' => $grants->rowCount()];
+    }
+
+    // ---- §10.4 a close the chain had not confirmed yet -------------------
+
+    /**
+     * Remember that this wallet sent a close the server stopped waiting for.
+     *
+     * `POST /meter/close/done` waits a bounded time and then reads the
+     * contract account. When the account is still there, nothing is deleted,
+     * and the close may still land a few seconds later. Without this note, the
+     * request that comes after cannot tell a wallet that has just closed its
+     * meter from one that never opened a meter, and the erasure never runs.
+     * {@see \Newsprint\Metering\CloseFinisher} reads the note.
+     */
+    public function recordPendingClose(string $wallet, string $signature, int $ttlSeconds): void
+    {
+        $now = $this->now();
+        $this->pdo->prepare(
+            'INSERT INTO pending_closes (wallet, signature, sent_at, expires_at)
+             VALUES (:w, :s, :n, :e)
+             ON CONFLICT (wallet) DO UPDATE SET signature = :s, sent_at = :n, expires_at = :e'
+        )->execute([':w' => $wallet, ':s' => $signature, ':n' => $now, ':e' => $now + $ttlSeconds]);
+    }
+
+    /** @return array{signature: string, sent_at: int}|null */
+    public function pendingClose(string $wallet): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT signature, sent_at FROM pending_closes WHERE wallet = ? AND expires_at > ?'
+        );
+        $stmt->execute([$wallet, $this->now()]);
+        $row = $stmt->fetch();
+
+        return $row === false ? null : [
+            'signature' => (string) $row['signature'],
+            'sent_at' => (int) $row['sent_at'],
+        ];
+    }
+
+    /** The close did not land and no longer can. */
+    public function dropPendingClose(string $wallet): void
+    {
+        $this->pdo->prepare('DELETE FROM pending_closes WHERE wallet = ?')->execute([$wallet]);
     }
 
     // ---- §7.2 one meter at a time per payer ------------------------------

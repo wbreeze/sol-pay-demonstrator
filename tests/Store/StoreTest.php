@@ -34,7 +34,7 @@ final class StoreTest extends TestCase
 
         $this->now += 2;
         self::assertNull($store->liveGrant('PAYRfig', 'why-approve-comes-first'), 'thirty minutes, and no more');
-        self::assertSame(['grants' => 1, 'sessions' => 0, 'payers' => 0, 'nonces' => 0], $store->sweepExpired());
+        self::assertSame(['grants' => 1, 'sessions' => 0, 'payers' => 0, 'nonces' => 0, 'closes' => 0], $store->sweepExpired());
     }
 
     public function testTheSweepDeletesExpiredSessionsAndOrphanedLockRows(): void
@@ -48,7 +48,7 @@ final class StoreTest extends TestCase
         $this->now += 3_601;
 
         self::assertSame(
-            ['grants' => 0, 'sessions' => 1, 'payers' => 1, 'nonces' => 0],
+            ['grants' => 0, 'sessions' => 1, 'payers' => 1, 'nonces' => 0, 'closes' => 0],
             $store->sweepExpired(),
             'the expired session goes, and so does the lock row nothing refers to',
         );
@@ -63,8 +63,48 @@ final class StoreTest extends TestCase
         $live = $store->issueNonce(300);
         $this->now += 101;
 
-        self::assertSame(['grants' => 0, 'sessions' => 0, 'payers' => 0, 'nonces' => 1], $store->sweepExpired());
+        self::assertSame(['grants' => 0, 'sessions' => 0, 'payers' => 0, 'nonces' => 1, 'closes' => 0], $store->sweepExpired());
         self::assertTrue($store->consumeNonce($live), 'a live challenge still works after a sweep');
+    }
+
+    public function testAPendingCloseIsKeptUntilDroppedErasedOrExpired(): void
+    {
+        $store = $this->store();
+        $store->createSession('PAYRfig', 43_200);
+        self::assertNull($store->pendingClose('PAYRfig'));
+
+        $store->recordPendingClose('PAYRfig', 'sigclose', 43_200);
+        self::assertSame(['signature' => 'sigclose', 'sent_at' => $this->now], $store->pendingClose('PAYRfig'));
+
+        $store->dropPendingClose('PAYRfig');
+        self::assertNull($store->pendingClose('PAYRfig'), 'dropped when the close cannot land');
+
+        $store->recordPendingClose('PAYRfig', 'sigclose', 43_200);
+        $store->eraseReader('PAYRfig');
+        self::assertNull($store->pendingClose('PAYRfig'), 'and it goes with the erasure it was waiting for');
+
+        $store->recordPendingClose('PAYRfig', 'sigclose', 600);
+        $this->now += 600;
+        self::assertNull($store->pendingClose('PAYRfig'), 'and it stops counting when it expires');
+    }
+
+    public function testTheSweepDeletesExpiredAndOrphanedPendingCloses(): void
+    {
+        $store = $this->store();
+        $store->createSession('PAYRfig', 43_200);
+        $store->recordPendingClose('PAYRfig', 'sigfig', 600);
+        $store->createSession('PAYRcat', 43_200);
+        $store->recordPendingClose('PAYRcat', 'sigcat', 43_200);
+        $store->recordPendingClose('PAYRdog', 'sigdog', 43_200);
+
+        $this->now += 600;
+
+        self::assertSame(
+            ['grants' => 0, 'sessions' => 0, 'payers' => 0, 'nonces' => 0, 'closes' => 2],
+            $store->sweepExpired(),
+            'the expired note goes, and so does the note whose wallet has nothing left to erase',
+        );
+        self::assertNotNull($store->pendingClose('PAYRcat'), 'a live note for a live session stays');
     }
 
     public function testTheOldestExpiredRowSaysHowLongItHasWaited(): void

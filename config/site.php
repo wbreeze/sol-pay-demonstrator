@@ -104,6 +104,13 @@ return [
         // `grant_ttl_s + sweep_every_s`, thirty-five minutes. The site cannot
         // run the schedule itself; `GET /health` reports whether it is kept.
         'sweep_every_s' => 300, // five minutes
+        // How long a close the chain has not confirmed can still land
+        // (§10.4). A transaction is dead once its blockhash expires: 150
+        // blocks, a minute or so. The blockhash is fetched before the reader
+        // signs, so three minutes leaves room for a slow wallet dialog.
+        // After this, a contract that is still there means the close failed,
+        // and its note is dropped.
+        'close_settle_s' => 180,
         'demo_step_views' => 7, // below the ten-view threshold, so the settle is intermittent
 
         // When the article shell's second line appears (`assets/read-on.js`):
