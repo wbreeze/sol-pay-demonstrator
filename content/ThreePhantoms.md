@@ -2,14 +2,17 @@
 title: Three wallets, one name, and a refusal that wasn't true
 slug: three-phantoms
 created: 2026-09-07
+revised: 2026-09-17
 metered: true
-status: draft
+status: published
 lede: >
   This site told a perfectly good wallet that it did not support the sign-in
   feature it was advertising. The wallet was fine. The site had thrown it away
   and kept a different one with the same name.
 reading_time: 4
 ---
+
+*By Douglas Lovell with Claude Opus 5 (Anthropic)*
 
 For a day this site would not let anyone in. Connect a wallet, and the panel
 answered:
@@ -37,15 +40,19 @@ is not a thing you can do carefully; it is a thing you can only do or not do.
 
 ## The instrument
 
-So: a page that filters nothing. Every wallet that announces itself, with every
-feature key it advertises, in the order they arrived and with the milliseconds
-at which they did. The legacy injected objects too, and whether the browser
-reports itself as Brave. And beside each wallet, a button that calls the
-sign-in feature **whether or not the wallet claims to have it** — because "the
-wallet lacks it", "the wallet has it under another name" and "the call works
-anyway" are three different findings and the site's own check cannot tell them
-apart. That is what made it useless as a diagnostic: it had already collapsed
-the distinction.
+So: a page that filters nothing, at `/diagnostics/wallets`. Every wallet that
+announces itself, with every feature key it advertises, in the order they
+arrived and with the milliseconds at which they did. The legacy injected objects
+too, and whether the browser reports itself as Brave. And beside each wallet, a
+button that calls the sign-in feature **whether or not the wallet claims to have
+it** — because "the wallet lacks it", "the wallet has it under another name" and
+"the call works anyway" are three different findings and the site's own check
+cannot tell them apart. That is what made it useless as a diagnostic: it had
+already collapsed the distinction.
+
+It is still there, unlinked from anything a reader sees — built for whoever is
+debugging a wallet, not for an article's audience — and it writes what it finds
+to a file rather than offering a verdict.
 
 The report came back in one look.
 
