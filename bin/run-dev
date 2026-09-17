@@ -5,6 +5,9 @@
 #   bin/run-dev              # http://localhost:8000
 #   PORT=8100 bin/run-dev
 #   PHP_CLI_SERVER_WORKERS=1 bin/run-dev
+#   NEWSPRINT_RPC_TIMING=1 bin/run-dev
+#   NEWSPRINT_CHARGE_FAULT=fail-after-serving bin/run-dev
+#   NEWSPRINT_CHARGE_FAULT=never-land bin/run-dev
 #
 # Two choices here are deliberate, and both are easy to undo by accident.
 #
@@ -28,6 +31,25 @@
 # \`Cache-Control: no-store\` and \`.wasm\` with \`application/wasm\`. Without it a
 # browser can keep a cached \`assets/meter.js\` across a restart, which means the
 # page runs code that is not the code on disk and nothing on screen says so.
+#
+# **Two environment variables for measuring and testing**, read by the site
+# rather than by this script, so they are set on the command line in front of
+# it and pass straight through to `php -S`.
+#
+# - `NEWSPRINT_RPC_TIMING=1` puts the request's RPC calls in every response's
+#   headers: `X-Rpc-Calls` (how many), `X-Rpc-Ms` (their total time) and
+#   `X-Rpc-Detail` (each method and its milliseconds). A HAR taken with it on
+#   carries the call counts SPEC §12.4 quotes; without it, the counts can only
+#   be guessed from timings. Off by default, because the detail line names
+#   internal calls. See `src/Support/RpcTimingMiddleware.php`.
+# - `NEWSPRINT_CHARGE_FAULT` breaks the article charge on purpose, to reach the
+#   two outcomes of SPEC §7.3 devnet will not produce by itself.
+#   `fail-after-serving` skips the endpoint's check, so a charge the reader
+#   cannot cover is served, lands and fails; the site pays the fee.
+#   `never-land` also compiles it against a blockhash nobody issued, so it is
+#   dropped. Devnet only: against any other endpoint, or with a value it does
+#   not know, the site refuses to run. The inspector's first section says when
+#   it is on. See `src/Chain/ChargeFault.php`.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -42,6 +64,13 @@ bin/build-content
 # the original line only printed on the way out.
 echo
 echo "Newsprint on http://localhost:${PORT}/ — ${PHP_CLI_SERVER_WORKERS} workers, devnet, ctrl-c to stop"
+# Said out loud, because both are invisible until a response shows them, and
+# a server still running from before holds the port and serves the new code
+# without them. `php -S` then fails to bind below, and that line is easy to
+# miss.
+timing=off
+[ "${NEWSPRINT_RPC_TIMING:-}" = 1 ] && timing=on
+echo "RPC timing headers: ${timing} · charge fault: ${NEWSPRINT_CHARGE_FAULT:-none}"
 echo
 
 php -S "localhost:${PORT}" -t public bin/dev-router.php

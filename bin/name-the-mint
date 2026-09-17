@@ -79,11 +79,7 @@ if (!$write) {
 
 $faucet = Keypair::load($config->keypairPath('faucet'));
 
-$outcome = (new Submitter(
-    $rpc,
-    (int) $config->rpc()['confirm_timeout_ms'],
-    (int) $config->rpc()['confirm_poll_ms'],
-))->send([
+$outcome = Submitter::fromConfig($rpc, $config)->send([
     TokenMetadata::createV3(
         mint: $mint,
         mintAuthority: $faucet->address,

@@ -63,9 +63,7 @@ if ($wantAirdrop || $balance < 20_000_000) {
         $signature = $rpc->requestAirdrop($authority->address, 1_000_000_000);
         echo "           {$signature}\n";
         // The endpoint answers before the transaction lands.
-        for ($i = 0; $i < 30 && $rpc->balance($authority->address) <= $balance; $i++) {
-            usleep(500_000);
-        }
+        Submitter::fromConfig($rpc, $config)->confirm($signature);
         $balance = $rpc->balance($authority->address);
         printf("balance    %.9f SOL\n", $balance / 1_000_000_000);
     } catch (Throwable $e) {
@@ -123,11 +121,7 @@ printf(
 echo "keys       ".implode("\n           ", MessageSigner::accountKeys($preview))."\n";
 printf("message    %d bytes\n", strlen($preview));
 
-$submitter = new Submitter(
-    $rpc,
-    (int) $config->rpc()['confirm_timeout_ms'],
-    (int) $config->rpc()['confirm_poll_ms'],
-);
+$submitter = Submitter::fromConfig($rpc, $config);
 $outcome = $submitter->send($instructions, $authority);
 
 echo "\n";
@@ -135,6 +129,8 @@ echo match ($outcome->status) {
     SubmitStatus::Confirmed => "CONFIRMED  {$outcome->signature}\n",
     SubmitStatus::Unconfirmed => "UNCONFIRMED {$outcome->signature} — sent, no confirmation inside the window (§7.3)\n",
     SubmitStatus::Failed => "FAILED     {$outcome->detail}\n",
+    // Only when `send()` is told not to wait, which this script never does.
+    SubmitStatus::Sent => "SENT       {$outcome->signature} — not waited for\n",
 };
 
 if ($outcome->signature !== null) {
