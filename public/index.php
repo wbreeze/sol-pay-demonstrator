@@ -1399,7 +1399,7 @@ $app->post('/diagnostics/report', function (Request $request, Response $response
 });
 
 /** Operator-facing, and deliberately not keyed to any reader (§10.4). */
-$app->get('/health', function (Request $request, Response $response) use ($config, $contentDir): Response {
+$app->get('/health', function (Request $request, Response $response) use ($config, $contentDir, $store): Response {
     $payload = [
         'php' => PHP_VERSION,
         'extensions' => [
@@ -1412,6 +1412,20 @@ $app->get('/health', function (Request $request, Response $response) use ($confi
         'provisioned' => $config->isProvisioned(),
         'content_built' => Library::isBuilt($contentDir),
     ];
+
+    // §10.4 q.1: how long the oldest expired grant or session has waited for
+    // a sweep. `bin/sweep` on its schedule keeps the wait under `every_s`, so
+    // `overdue` means the schedule is not running. Read only when the database
+    // exists, so that asking does not create one.
+    if (is_file($config->dbPath())) {
+        $every = (int) $config->metering()['sweep_every_s'];
+        $waited = $store()->oldestExpired();
+        $payload['sweep'] = [
+            'every_s' => $every,
+            'oldest_expired_s' => $waited,
+            'overdue' => $waited !== null && $waited > $every,
+        ];
+    }
 
     // Costs one RPC call, and answers the question that otherwise surfaces as
     // "Attempt to load a program that does not exist" halfway through setup.

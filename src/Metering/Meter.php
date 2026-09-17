@@ -70,6 +70,14 @@ final class Meter
     public function forArticle(string $wallet, string $article, SiteState $state): MeterResult
     {
         return $this->store->withPayerLock($wallet, function () use ($wallet, $article, $state): MeterResult {
+            // §10.4 q.1: expiry only hides a row, and this call is what
+            // deletes it. Every request that reaches the metering step sweeps
+            // every reader's expired grants and sessions, which is what makes
+            // the privacy page's thirty minutes true. A session whose reader
+            // never charges waits for the next charge by anyone.
+            // `Metering\ChargeSweepsTest` fails without this line.
+            $this->store->sweepExpired();
+
             // Inside the lock, because a request that queued behind another
             // must see the grant that one recorded rather than the state it
             // read before waiting.

@@ -59,6 +59,27 @@ transfer and pays one.
 Nothing under `var/` is committed: the SQLite file, and the devnet keypairs
 setup generates. They control nothing of value and the site says so.
 
+### The sweep, on a schedule
+
+The privacy page promises that a receipt is gone within thirty-five minutes of
+the purchase: thirty for the grant, and at most five more until a sweep deletes
+the row. Expiry alone deletes nothing. The metering path sweeps on every
+charge, but a site where nobody buys anything never reaches that code. A
+deployed copy therefore runs `bin/sweep` every five minutes:
+
+```
+*/5 * * * *  /path/to/sol-pay-demonstrator/bin/sweep
+```
+
+The script is silent when it succeeds, so cron mails only failures.
+`bin/sweep --verbose` says what went. `GET /health` reports how long the oldest
+expired grant or session has waited, under `sweep`. When `overdue` is true, the
+schedule is not running, and the privacy page is making a promise the server
+is not keeping.
+
+`bin/run-dev` runs no schedule. On a development copy the charge-time sweep is
+enough.
+
 ## Continuous integration
 
 `.github/workflows/ci.yml`, on every push and pull request. The matrix is

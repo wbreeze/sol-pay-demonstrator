@@ -34,7 +34,58 @@ final class StoreTest extends TestCase
 
         $this->now += 2;
         self::assertNull($store->liveGrant('PAYRfig', 'why-approve-comes-first'), 'thirty minutes, and no more');
-        self::assertSame(1, $store->sweepExpired());
+        self::assertSame(['grants' => 1, 'sessions' => 0, 'payers' => 0, 'nonces' => 0], $store->sweepExpired());
+    }
+
+    public function testTheSweepDeletesExpiredSessionsAndOrphanedLockRows(): void
+    {
+        $store = $this->store();
+        $store->createSession('PAYRfig', 3_600);
+        $kept = $store->createSession('PAYRcat', 7_200);
+        $store->withPayerLock('PAYRfig', static fn (): null => null);
+        $store->withPayerLock('PAYRcat', static fn (): null => null);
+
+        $this->now += 3_601;
+
+        self::assertSame(
+            ['grants' => 0, 'sessions' => 1, 'payers' => 1, 'nonces' => 0],
+            $store->sweepExpired(),
+            'the expired session goes, and so does the lock row nothing refers to',
+        );
+        self::assertSame('PAYRcat', $store->walletForSession($kept), 'and nobody else is touched');
+    }
+
+    public function testTheSweepDeletesExpiredNoncesAndKeepsLiveOnes(): void
+    {
+        $store = $this->store();
+        $store->issueNonce(300);
+        $this->now += 200;
+        $live = $store->issueNonce(300);
+        $this->now += 101;
+
+        self::assertSame(['grants' => 0, 'sessions' => 0, 'payers' => 0, 'nonces' => 1], $store->sweepExpired());
+        self::assertTrue($store->consumeNonce($live), 'a live challenge still works after a sweep');
+    }
+
+    public function testTheOldestExpiredRowSaysHowLongItHasWaited(): void
+    {
+        $store = $this->store();
+        self::assertNull($store->oldestExpired(), 'an empty store has nothing waiting');
+
+        $store->recordGrant('PAYRfig', 'article-one', 1_800);
+        $store->createSession('PAYRfig', 600);
+        $store->issueNonce(60);
+        $this->now += 30;
+        self::assertNull($store->oldestExpired(), 'nothing has expired yet');
+
+        $this->now += 970;
+        self::assertSame(400, $store->oldestExpired(), 'the session expired 400 s ago, and the older nonce does not count');
+
+        $this->now += 1_000;
+        self::assertSame(1_400, $store->oldestExpired(), 'the grant expired later than the session, so the session is still the oldest');
+
+        $store->sweepExpired();
+        self::assertNull($store->oldestExpired(), 'and a sweep clears both');
     }
 
     public function testAGrantIsPerArticleAndPerWallet(): void

@@ -209,13 +209,84 @@ final class Store
         return (int) $stmt->fetch()['n'];
     }
 
-    /** Expiry does the work; this is the sweep that makes it visible (§10.4 q.1). */
-    public function sweepExpired(): int
+    /**
+     * Delete the grants, sessions and sign-in nonces that have expired, and the
+     * lock rows that nothing refers to any more (§10.4 q.1).
+     *
+     * Expiry by itself deletes nothing. `liveGrant()` and `walletForSession()`
+     * skip an expired row, and the row stays. Until 2026-09-16 nothing called
+     * this method, so every lapsed grant stayed in the table until the reader
+     * closed the meter: one row per wallet and article, with the time and the
+     * signature. Those rows add up to a reading history, and the privacy page
+     * promises a receipt that is gone in thirty minutes. The metering path now
+     * calls this method inside the payer lock; see
+     * {@see \Newsprint\Metering\Meter::forArticle()}. `bin/sweep` calls it on
+     * a schedule, for the hours when nobody buys anything.
+     *
+     * A `payers` row goes once its wallet has no session and no grant left.
+     * The row exists only to be locked. A wallet address kept after the
+     * reader's session and grants are gone is a store the privacy page does
+     * not list.
+     *
+     * An expired nonce names no reader and can never be consumed, so deleting
+     * it is housekeeping rather than privacy. A used nonce that has not yet
+     * expired stays: `consumeNonce()` needs the row to refuse a replay.
+     *
+     * @return array{grants: int, sessions: int, payers: int, nonces: int}
+     */
+    public function sweepExpired(): array
     {
-        $stmt = $this->pdo->prepare('DELETE FROM grants WHERE expires_at <= ?');
-        $stmt->execute([$this->now()]);
+        $now = $this->now();
 
-        return $stmt->rowCount();
+        $grants = $this->pdo->prepare('DELETE FROM grants WHERE expires_at <= ?');
+        $grants->execute([$now]);
+
+        $sessions = $this->pdo->prepare('DELETE FROM sessions WHERE expires_at <= ?');
+        $sessions->execute([$now]);
+
+        // After the two deletes above, so a wallet whose last session or
+        // grant just went loses its lock row in the same sweep.
+        $payers = $this->pdo->prepare(
+            'DELETE FROM payers
+             WHERE wallet NOT IN (SELECT wallet FROM sessions)
+               AND wallet NOT IN (SELECT wallet FROM grants)'
+        );
+        $payers->execute();
+
+        $nonces = $this->pdo->prepare('DELETE FROM signin_nonces WHERE expires_at <= ?');
+        $nonces->execute([$now]);
+
+        return [
+            'grants' => $grants->rowCount(),
+            'sessions' => $sessions->rowCount(),
+            'payers' => $payers->rowCount(),
+            'nonces' => $nonces->rowCount(),
+        ];
+    }
+
+    /**
+     * How long the oldest expired grant or session has waited for a sweep, in
+     * seconds, or null when nothing is waiting.
+     *
+     * `GET /health` reports this number. With `bin/sweep` on its schedule, the
+     * number stays below `sweep_every_s`. A number that keeps growing means the
+     * schedule is not running, and the privacy page's promise is slipping.
+     * Nonces are left out, because they name no reader.
+     */
+    public function oldestExpired(): ?int
+    {
+        $now = $this->now();
+        $stmt = $this->pdo->prepare(
+            'SELECT MIN(expires_at) AS oldest FROM (
+                 SELECT expires_at FROM grants WHERE expires_at <= :now
+                 UNION ALL
+                 SELECT expires_at FROM sessions WHERE expires_at <= :now
+             )'
+        );
+        $stmt->execute([':now' => $now]);
+        $oldest = $stmt->fetch()['oldest'] ?? null;
+
+        return $oldest === null ? null : $now - (int) $oldest;
     }
 
     // ---- §10.4 erasure ---------------------------------------------------

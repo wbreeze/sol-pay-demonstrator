@@ -1,0 +1,74 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Delete what has expired, on a schedule (SPEC §10.4 q.1).
+ *
+ * Expiry only hides a row. The metering path sweeps on every charge, and that
+ * sweep needs no setup, but it waits for somebody to buy something. On a quiet
+ * night, last evening's receipts would stay on disk until the morning's first
+ * charge. This script is the part that runs whether anyone visits or not.
+ *
+ * Run it every five minutes, the `sweep_every_s` in `config/site.php`. The
+ * crontab line is in README.md, under "The sweep, on a schedule". With a
+ * thirty-minute grant, no receipt then outlives its purchase by more than
+ * thirty-five minutes, and that is the number the privacy page states.
+ *
+ *   bin/sweep                  # the site's own database, silent
+ *   bin/sweep --verbose        # say what went
+ *   bin/sweep other.sqlite     # another database file; the test uses this
+ *
+ * Silent on success, so cron mails only failures. `GET /health` reports how
+ * long the oldest expired row has waited, which is how a missing schedule
+ * shows itself.
+ */
+
+use Newsprint\Store\Database;
+use Newsprint\Store\Store;
+use Newsprint\Support\Config;
+
+$root = dirname(__DIR__);
+require $root.'/vendor/autoload.php';
+
+$verbose = false;
+$paths = [];
+foreach (array_slice($argv, 1) as $arg) {
+    if ($arg === '--verbose') {
+        $verbose = true;
+    } elseif (str_starts_with($arg, '-')) {
+        fwrite(STDERR, "usage: bin/sweep [--verbose] [database]\n");
+        exit(2);
+    } else {
+        $paths[] = $arg;
+    }
+}
+
+$path = $paths[0] ?? Config::load($root)->dbPath();
+
+if (!is_file($path)) {
+    // No database means nothing was ever stored, so nothing can be waiting.
+    // Opening one here would create it, which is not this script's business.
+    if ($verbose) {
+        echo "no database at {$path}; nothing to sweep\n";
+    }
+    exit(0);
+}
+
+try {
+    $swept = (new Store(Database::open($path)))->sweepExpired();
+} catch (Throwable $e) {
+    fwrite(STDERR, 'bin/sweep: '.$e->getMessage()."\n");
+    exit(1);
+}
+
+if ($verbose) {
+    printf(
+        "swept %d grant(s), %d session(s), %d lock row(s), %d nonce(s)\n",
+        $swept['grants'],
+        $swept['sessions'],
+        $swept['payers'],
+        $swept['nonces'],
+    );
+}

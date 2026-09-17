@@ -1444,8 +1444,9 @@ bound it, and let the bound be checked.
 
 | store | contents | goes away |
 | --- | --- | --- |
-| session | wallet address | forgetting the wallet, contract close, or session end |
-| view grants | wallet, article, expiry | 30 minutes — or at once, on close |
+| session | wallet address | forgetting the wallet, contract close, or within five minutes of session end |
+| view grants | wallet, article, expiry | within 35 minutes: 30 of grant, then a sweep — or at once, on close |
+| payer lock row | wallet | with the wallet's last session and grant — or at once, on close |
 | faucet ledger | wallet, time | never — see below |
 | request logs | IP, path, time | short rotation, never keyed to a wallet |
 
@@ -1473,6 +1474,22 @@ whose data persisted longest, and the promise would be structured to be kept
 for the minority who ask and quietly broken for everyone else. So the claim
 rests on the thirty-minute expiry, which applies to everybody and needs no
 action. Closing accelerates something that was already going to happen.
+
+Decided 2026-09-16: **expiry hides a row, and only a `DELETE` removes it.**
+Until that day nothing called the sweep. Every lapsed grant stayed in the
+table until its reader closed the meter, so the claim this qualification rests
+on was false for exactly the readers it was written for. Two sweeps now carry
+it. The metering path sweeps inside the payer lock on every charge
+(`Meter::forArticle`), which needs no setup and is covered by a test.
+`bin/sweep`, run every five minutes (`sweep_every_s`), covers the hours when
+nobody buys anything. The bound a reader is told is the sum: thirty minutes of
+grant plus at most five of waiting, thirty-five in all.
+
+The schedule lives outside the application, where no test can see it. So
+`GET /health` reports how long the oldest expired grant or session has waited,
+and `overdue` when that wait exceeds the interval. A deployment that forgot
+the crontab line shows it there, rather than in a promise that quietly stops
+being true.
 
 **2. It costs the reader an article, and they are told before they click.**
 Purging live grants means an article they have paid for stops being served. The
@@ -2070,7 +2087,9 @@ the revision does not read as a concession:
 - **The lock is the store.** §7.2's per-payer serialization is a transaction on
   the row rather than a mutex beside it, so the thing being serialized and the
   thing doing the serializing cannot drift apart.
-- **The grant window is a row expiry**, which is what §7.1 describes in prose.
+- **The grant window is a row expiry**, which is what §7.1 describes in prose,
+  and a sweep that deletes the row once the window has passed (§10.4
+  qualification 1).
 - **§10.4's erasure becomes a `DELETE` that can be shown**, rather than a
   process detail asserted. A reader who closes their contract can watch the row
   go. Under the in-memory design the claim was true but invisible, and §9's

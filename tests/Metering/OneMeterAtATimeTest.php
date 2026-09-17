@@ -156,7 +156,7 @@ final class OneMeterAtATimeTest extends TestCase
             'nothing runs before the lock is taken: '.trim(substr($body, 0, $lock)),
         );
 
-        foreach (['liveGrant(', 'recordGrant(', 'countPurchase('] as $call) {
+        foreach (['sweepExpired(', 'liveGrant(', 'recordGrant(', 'countPurchase('] as $call) {
             $at = strpos($body, $call);
             self::assertIsInt($at, "forArticle calls {$call}");
             self::assertGreaterThan($lock, $at, "{$call} is inside the lock, not in front of it");

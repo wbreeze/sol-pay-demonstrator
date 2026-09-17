@@ -99,6 +99,11 @@ return [
     // SPEC §7.1 and §7.4. Both are policy numbers with no chain meaning.
     'metering' => [
         'grant_ttl_s' => 1_800, // thirty minutes
+        // How often `bin/sweep` should run (§10.4 q.1). The privacy page's
+        // promise is the sum: no receipt outlives its purchase by more than
+        // `grant_ttl_s + sweep_every_s`, thirty-five minutes. The site cannot
+        // run the schedule itself; `GET /health` reports whether it is kept.
+        'sweep_every_s' => 300, // five minutes
         'demo_step_views' => 7, // below the ten-view threshold, so the settle is intermittent
 
         // When the article shell's second line appears (`assets/read-on.js`):

@@ -164,10 +164,11 @@ We do not know whether anyone was ever charged for an article they did not
 open.
 
 A site that kept a record of who read what, and when, could find out. This site
-deliberately keeps no such record. A grant has an expiry, and when the grant
-lapses, the fact that the reader read anything is gone. The privacy promise
-that makes this site worth demonstrating is the same promise that stops the
-site from auditing its own past mistake.
+deliberately keeps no such record. An article grant has an expiry. Within
+five minutes of the grant lapsing, a sweep deletes the grant. The fact that the
+reader read that article is then gone. The privacy promise that makes this site
+worth demonstrating is the same promise that stops the site from auditing its
+own past mistake.
 
 That gap is a good argument for making the repair structural rather than
 watchful. A site that cannot see an error must be built so that the error
