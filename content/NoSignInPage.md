@@ -2,8 +2,9 @@
 title: The ID of what's paying
 slug: no-sign-in-page
 created: 2026-09-07
+revised: 2026-09-18
 metered: true
-status: draft
+status: published
 lede: >
   Every site that monetizes itself reaches for the same shape first: prove who
   you are, then we'll leverage your use. This site was built from a diagram
@@ -100,8 +101,8 @@ are not the same act.
 
 ## Postscript: the same mistake, one screen up
 
-Our development work eliminated the sign-in screen in one revision. The
-masthead prompt should have gone in the same one. It did not.
+Our development work eliminated the sign-in screen in one revision. It left a
+prompt in the masthead that could have gone at the same time. It did not.
 
 Across the top of every page, under the wordmark, the site had been saying
 `signed in as 4xkQ…9fT`, with a link to sign out beside it. The objection that
