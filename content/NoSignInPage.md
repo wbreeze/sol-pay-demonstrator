@@ -16,9 +16,7 @@ reading_time: 6
 *By Douglas Lovell with Claude Opus 5 (Anthropic)*
 
 The original spec for this demonstration and its original construction had a
-masthead with an implement identified as "sign-in". After running through a
-sign-in screen, with a wallet identified, the masthead displayed a "sign-out"
-implement.
+sign-in screen.
 
 ## The objection
 
@@ -39,8 +37,6 @@ years being asked to sign in before anything happens has very different
 expectations about what that arrangement means.  The experience was,
 you have identified.  The solution: no sign-in page.
 
-The diagram had been saying so all along.
-
 ## Who is granting what to whom
 
 The sign-in shape gets one thing backwards, and it is the thing that matters. A
@@ -54,7 +50,7 @@ Seen that way, "who are you" is the wrong question for the site to be asking.
 The only thing it needs to know is which grant it is drawing on. The
 address that signed the grant is the whole answer. The library underneath this
 site drew that line on its first day: *who is this visitor* is a site's own
-affair, and the payment core wants exactly one input, a wallet address: Not a
+affair, and the payment core wants exactly one input, a wallet address: not a
 person. Not a session with a name attached. An address that can sign, and that
 already has a balance.
 
@@ -74,7 +70,7 @@ site's to promise against. It is not an account either. An account has a
 profile, a history, preferences — things a site keeps about someone across
 visits, on purpose, because that is the product. A verifiable pseudonymous
 token has none of that built in. It proves one thing: that whoever is here
-right now controls the secret behind the wallet.
+right now controls the secret key behind the wallet.
 
 That is also why the wallet still signs something, even with the sign-in screen
 gone.  It would be tempting to skip the signature too. The reader is about to
@@ -97,7 +93,7 @@ first visit. The first proves control of the address. The second grants the
 scope. No wallet does both in a single prompt. The two interactions sit behind
 two clicks rather than one because a wallet interaction has to originate from a
 real user gesture.  After the first wait for a wallet response initiated by a
-click gesture, any second wallet response is outside of that gesture. On
+click gesture, any second wallet call is outside of that gesture. On
 Android that is a blocked navigation, not a warning. One wallet interaction per
 click is also the more honest experience: proving control and granting scope
 are not the same act.
@@ -124,7 +120,7 @@ places. Only one of them reflected the change.
 
 The address now appears exactly once, where it does work: on the meter, beside
 what it is allowed to spend, next to a control that offers to forget it. The
-vocabulary in use followed the change in focus-- *Signed in* and *signed out*
+vocabulary in use followed the change in focus — *Signed in* and *signed out*
 name a relationship this site does not have. Instead, the screens say the paying
 wallet is **stored**, or **forgotten**.  That is a token kept or let go, not a
 person let in or shown the door.
