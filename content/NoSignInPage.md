@@ -1,134 +1,137 @@
 ---
-title: The screen the diagram never had
+title: The ID of what's paying
 slug: no-sign-in-page
 created: 2026-09-07
 metered: true
 status: draft
 lede: >
-  This site used to have a sign-in page. It was in the specification, it was
-  built, and it worked. It was also absent from the state diagram the whole
-  design had been drawn against — and the diagram was right.
-reading_time: 5
+  Every site that charges per view reaches for the same shape first: prove who
+  you are, then we'll trust you. This one was built from a diagram that never
+  asked for that, and the shape showed up anyway — because that is what
+  software does now. What the meter actually needed to know was never a
+  person.
+reading_time: 6
 ---
 
-The objection was one sentence: *a sign-in page feels like identifying for
-tracking.*
+*By Douglas Lovell with Claude Opus 5 (Anthropic)*
 
-Which it is. That is what the page did. It collected an identity and it did
+Every site that asks you to pay per view reaches for the same shape first:
+prove who you are, then we will trust you. This site was built from a diagram
+that never asked for that, and the shape showed up anyway — not because
+anything required it, but because it is what software does now.
+
+## The objection
+
+It was one sentence: *a sign-in page feels like identifying for tracking.*
+
+Which it is. That is what the page did. It collected an identity and did
 nothing else, and a reader who has spent twenty years being asked to sign in
-before anything happens has learned what that arrangement usually means. The
-fact that this site's version collects one address and a session id and holds
-nothing else is a claim the reader has no reason to believe at the moment they
-are being asked.
+before anything happens has learned what that arrangement usually means. That
+this site's version held one address and a session id and nothing more was a
+claim the reader had no reason to believe at the moment of being asked, and no
+way to check.
 
-## What the drawing said
+The diagram had been saying so all along. In the library's state machine,
+`identified` is a choice, not a screen: a wallet address is known or it is not,
+and if not, the next stop is setting a limit. The screen was this site's own
+addition. Its specification even said so in passing — a demo "needs a front
+door and a wallet needs a sign-in" — and nobody had asked whether the second
+half of that was true.
 
-The library this site demonstrates ships a state diagram. It has cyan nodes for
-screens and yellow for wallet interactions, and it had been the reference for
-every design decision here for weeks.
+## Who is granting what to whom
 
-It has no sign-in node.
+The sign-in shape gets one thing backwards, and it is the thing that matters. A
+login admits a reader to a site, on the site's terms. What happens at this
+meter is the reverse. The reader is about to grant the site something: a
+scope, in tokens, that the reader chooses and that the site cannot exceed. The
+site is the party being held to a limit. The reader can raise it, let it run
+out, or revoke it, and the site has no say in any of that.
 
-What it has is `identified`, drawn as a choice — a diamond, not a screen — with
-two edges: *viewer's wallet address known* goes on to find the contract, and
-*viewer not identified* goes straight to `set_meter`. Identifying is a
-condition to be evaluated, not a place to send somebody.
+Seen that way, "who are you" is the wrong question for the site to be asking.
+The only thing it needs to know is which grant it is drawing on, and the
+address that signed the grant is the whole answer. The library underneath this
+site drew that line on its first day: *who is this visitor* is a site's own
+affair, and the payment core wants exactly one input, a wallet address. Not a
+person. Not a session with a name attached. An address that can sign, and that
+already has a balance.
 
-The specification for this site had added the screen anyway, and had even said
-so out loud: five screens, three of them cyan nodes from the diagram, "the
-other two exist because a demo needs a front door and a wallet needs a
-sign-in." That sentence is where the invention is admitted, and nobody had read
-it as an admission.
+So the identification moved into the meter panel, one click before the grant,
+on the same screen as the price. A reader who declines has lost nothing and is
+still reading the lede. A reader who continues sees, in the same breath, what
+the address is for and what it will be allowed to spend.
 
-Nobody had read the diagram either. Two people had been designing against a
-picture neither had looked at recently, and the picture had been right the
-whole time.
+## A token, not an account
 
-## Where it went
+A wallet address is a pseudonym — a name nobody chose, that the same person
+tends to keep, and that can be checked without being explained. It is not
+anonymous: exchanges, address reuse, chain analysis and plain timing link
+addresses to people every day, and none of that is this site's doing or this
+site's to promise against. But it is not an account either. An account has a
+profile, a history, preferences — things a site keeps about someone across
+visits, on purpose, because that is the product. A verifiable pseudonymous
+token has none of that built in. It proves one thing: that whoever is here
+right now controls the key behind this address.
 
-Into the meter. On any article that is metered, the panel that would have said
-"you need to pay for this" now also says "and here is who you would be paying
-as", one click before the money and on the same screen as the price.
+That is also why the wallet still signs something, even with the screen gone.
+It would be tempting to skip the signature too — the reader is about to sign a
+transaction on chain anyway, so why not just watch for it and take its signer
+as the reader? Because a landed signature is public. Anyone reading the ledger
+could copy it into this site's form and be handed the session that draws on
+somebody else's grant. The signature is there for the reader's sake as much as
+the site's: it makes sure that nobody but the key holder can spend what the key
+holder authorized. It proves control, not identity, and the difference is the
+whole design.
 
-That placement is the argument. Identification here is real, and it is narrow —
-one address, one session id — and the way to make the narrowness legible is to
-put it next to the thing it is for. A reader who declines has lost nothing and
-is still reading the lede. A reader who continues has been shown, in the same
-breath, exactly what the identity buys and exactly what it costs.
-
-## What could not be dropped
-
-There is a tempting simplification, and it is wrong.
-
-With no sign-in page, why sign anything? The reader is about to authorize a
-contract. That transaction is signed by their wallet and lands on a public
-chain. The site could simply watch for it and take the payer named in the
-account as the reader's identity — no message, no signature, one fewer wallet
-dialog.
-
-**Transaction signatures are public.** Anyone watching the chain sees that
-contract open, and the site would have no way to distinguish the reader from
-someone who read the ledger and typed the same signature into the same form.
-Whoever asks second gets a session belonging to whoever paid first, and reads
-against their limit.
-
-Making it first-claim-wins narrows the window to about a second and does
-nothing at all for renewals. A race is not a boundary. So the wallet still
-signs a message the server issued, and the verification that was written for
-the sign-in page survives unchanged — it simply happens somewhere else.
+Everything else follows from the address. The contract is derived from the site
+and the payer rather than looked up, so a reader who comes back tomorrow with a
+fresh session lands on the same grant with nothing remembered in between.
 
 ## What it costs
 
-Two wallet dialogs on a first visit: one proving who you are, one authorizing
-the spend. No wallet does both in a single prompt.
-
-They sit behind two clicks rather than one, and that is not a stylistic choice.
-Every wallet call has to originate from a real user gesture, and after the
-first `await` the second call is no longer inside one — on Android that is not
-a warning, it is a blocked navigation. One dialog per click is also the more
-honest description of what is happening, since the two are not the same act.
-
-## The rule
-
-**A document and a drawing of the same system are two claims, and they can
-disagree without anyone noticing.** Prose accumulates; a diagram is redrawn.
-This specification had grown a screen the diagram never gained, and the growth
-was invisible because it happened one sentence at a time, each of them
-reasonable.
-
-The narrower rule underneath it: when a design adds something its reference
-does not have, the addition should have to justify itself out loud. This one
-had — in a subordinate clause, in a section nobody was reading for that
-purpose. Which is not quite the same as being justified.
+Two wallet dialogs on a first visit: one proving control of the address, one
+granting the scope. No wallet does both in a single prompt, and they sit behind
+two clicks rather than one because a wallet call has to originate from a real
+user gesture — after the first `await`, the second is not inside one, and on
+Android that is a blocked navigation rather than a warning. One dialog per
+click is also the more honest description: the two are not the same act.
 
 ## Postscript: the same mistake, one screen up
 
-The page went in one revision. The masthead went in the next, and it should
-have gone in the first.
+The screen went in one revision. The masthead should have gone in the same one
+and did not.
 
 Across the top of every page, under the wordmark, the site had been saying
-`signed in as 4xkQ…9fT`, with a link to sign out beside it. Removing the
-sign-in screen had not touched it. But the objection that killed the screen
-applies to a name and an exit repeated on every page at least as well: that is
-what an account looks like, and an account is assumed to have contents. A
-profile. A history. Preferences. What is actually there is a cookie, a row
-mapping it to one address, and a contract on a public chain.
+`signed in as 4xkQ…9fT`, with a link to sign out beside it. The objection that
+killed the sign-in screen applies to a name and an exit repeated on every page
+at least as well: that is what an account looks like, and an account is assumed
+to have contents. Nobody had argued for the masthead either. It arrived as a
+convention — sites that have sign-in have a signed-in indicator — and a
+convention is never asked to justify itself.
 
-Nobody had argued for the masthead. It was not in the diagram either. It
-arrived as a convention — sites that have sign-in have a signed-in indicator —
-and a convention is not asked to justify itself out loud, which is precisely
-the failure the rule above describes. The screen at least had a sentence
-admitting it was an invention. The masthead had none, because nothing had been
-asked of it.
-
-It also had a bug, and the bug is the same fact seen from underneath. Closing a
-contract erases the session, and the meter reports that erasure in place rather
-than reloading, because a reader ought to be able to watch a deletion happen.
-The masthead had rendered before any of that. It went on saying *signed in as*
-to a reader the site had just finished forgetting. One fact displayed in two
+It also had a bug, and the bug was the same fact seen from underneath. Closing
+a contract erases the session, and the meter reports that erasure in place
+rather than reloading, so a reader can watch the deletion happen. The masthead
+had already rendered before any of that and went on saying *signed in as* to a
+reader the site had just finished forgetting. One fact, displayed in two
 places, and only one of them was ever told.
 
-The identity now appears where it does work: on the meter, beside what it is
-spending, next to a control that offers to forget it. The vocabulary followed.
-*Signed in* and *signed out* name a relationship this site does not have, so
-the screens say the paying wallet is **stored**, or **forgotten**.
+The address now appears exactly once, where it does work: on the meter, beside
+what it is allowed to spend, next to a control that offers to forget it. The
+vocabulary followed. *Signed in* and *signed out* name a relationship this site
+does not have, so the screens say the paying wallet is **stored**, or
+**forgotten** — a token kept or let go, not a person let in or shown the door.
+
+## The rule
+
+Software defaults to identifying people, even when the transaction in front of
+it does not need one. The default is not a technical requirement. It is the
+shape twenty years of login screens have trained every builder to reach for
+first — here, on a diagram that never asked for it, for a site whose whole
+point is that the reader is the one setting terms.
+
+What replaced it was not less than identification. It was narrower: a token,
+proved by a signature, standing for what is paying rather than who is.
+[Privacy](/privacy) makes the fuller case for why that narrowness is worth
+keeping on purpose. Here it is the smaller claim: asked what a page view needs
+to know about its reader, the honest answer was never a person. It was an
+address that can sign, and a limit that address chose.
