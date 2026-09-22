@@ -1,0 +1,32 @@
+@startuml
+' One token account, two sites: the second approval replaced the first.
+' Source for public/assets/img/one-delegate-accounts-*.png.
+!pragma layout smetana
+!include style.iuml
+
+class "Reader's wallet" as W <<System program>>
+
+class "Reader's token account" as RTA <<Token program>> {
+  mint
+  owner
+  amount
+  delegate
+  delegated_amount
+}
+
+class "Contract account, site A" as KA <<Metering program>> {
+  limit
+  used
+  paid
+}
+
+class "Contract account, site B" as KB <<Metering program>> {
+  limit
+  used
+  paid
+}
+
+RTA --> W : owner
+RTA --> KB : delegate\n(written by B's approve)
+KA ..> RTA : $wrong("A's settle is refused")\nOwnerMismatch
+@enduml
