@@ -2,7 +2,7 @@
 title: What a dime has to do
 slug: pay-per-view
 created: 2026-09-04
-revised: 2026-09-15
+revised: 2026-09-22
 metered: true
 status: published
 lede: >
@@ -24,8 +24,9 @@ question is how low a price has to be to feel like nothing — *sure, I'll toss
 you a dime* — and whether enough readers pay at that price to come near what
 advertising earns. Near is enough. A site that tracks nobody gives its readers
 something that advertising cannot, even though no revenue figure shows it. A
-trial of sol-pay should be built around that question. The trial should also
-claim no more than it can measure.
+trial of [sol-pay](https://github.com/wbreeze/sol-pay#what-is-here) should be
+built around that question. The trial should also claim no more than it can
+measure.
 
 ## What advertising earns on a page view
 
@@ -269,9 +270,9 @@ The price and the ad figures are sourced. The share is an assumption, stated as
 one. A publisher can check the ad figures against its own books in an
 afternoon. The share is what the trial is for.
 
-`page_price` is a per-site parameter in sol-pay, and nothing in the program
-constrains it. A trial can set a dime, or run two sites at two prices. This
-demonstrator charges 0.01 DEMO, a figure chosen so a visitor reaches the
+`page_price` is a per-site parameter, and nothing in the sol-pay metering
+program constrains it. A trial can set a dime, or run two sites at two prices.
+This demonstrator charges 0.01 DEMO, a figure chosen so a visitor reaches the
 collection threshold in ten views. That figure is not a recommendation.
 
 ## Sources

@@ -14,22 +14,21 @@ reading_time: 6
 
 *By Douglas Lovell with Claude Opus 5 (Anthropic)*
 
-This site meters with [sol-pay](https://github.com/wbreeze/sol-pay#what-is-here):
-a metering program on Solana, and a client library that a site uses to build
-the program's instructions and read its accounts.
-[The permission nobody shows you](/a/the-delegate) describes what a reader
-grants when setting a limit. The Token program writes two fields onto the
-reader's token account: a `delegate`, naming the site's contract account, and
-a `delegated_amount`, the most that contract may draw. This piece is about the
-number of those fields. There is one of each.
+This site meters with
+[sol-pay](https://github.com/wbreeze/sol-pay#what-is-here). [The permission
+nobody shows you](/a/the-delegate) describes what a reader grants when setting
+a limit. The Token program writes two fields onto the reader's token account: a
+`delegate`, naming the site's contract account, and a `delegated_amount`, the
+most that contract may draw. This piece is about the number of those fields.
+There is one of each.
 
 ## One delegate, and approve replaces it
 
 A token account's record holds a single `delegate` and a single
 `delegated_amount`. The Token program's `approve` does not add a delegate. The
-`approve` instruction overwrites the one that is there. That is the Token program's account layout, not a choice the metering
-program made. The layout is the same
-for USDC, and the same again under Token-2022.
+`approve` instruction overwrites the one that is there. That is the Token
+program's account layout, not a choice the sol-pay metering program made. The
+layout is the same for USDC, and the same again under Token-2022.
 
 Every wallet uses one token account per token by default: the associated token
 account, at an address derived from the wallet and the mint. So a reader who

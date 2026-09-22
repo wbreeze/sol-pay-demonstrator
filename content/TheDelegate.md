@@ -38,9 +38,10 @@ address derived from the wallet and the mint, so anyone can compute where it
 is.
 
 "Writing a field" on a token account therefore means one thing. An instruction
-asks the Token program to change the record. The Token program checks that
-the right party signed, and then makes the change. The metering program cannot
-write the reader's token account at all.
+asks the Token program to change the record. The Token program checks that the
+right party signed, and then makes the change. The
+[sol-pay](https://github.com/wbreeze/sol-pay#what-is-here) metering program
+cannot write the reader's token account at all.
 
 ![Five boxes, each labelled with the program that owns it. The reader's token account, owned by the Token program, has the fields owner, amount, delegate and delegated_amount. Its owner field points to the reader's wallet, owned by the System program. Its delegate field points to the contract account, owned by the metering program, with the fields limit, used and paid. Dotted arrows labelled seed run from the contract account to the reader's wallet and to the site account, because the contract's address is derived from both. The site account, also owned by the metering program, has the fields treasury and page price; its treasury field points to the site treasury, a token account with an amount. A dashed arrow from the reader's token account to the site treasury is labelled a charge: transfer_checked, signed as the delegate.](/assets/img/the-delegate-accounts-light.png)
 ![Five boxes, each labelled with the program that owns it. The reader's token account, owned by the Token program, has the fields owner, amount, delegate and delegated_amount. Its owner field points to the reader's wallet, owned by the System program. Its delegate field points to the contract account, owned by the metering program, with the fields limit, used and paid. Dotted arrows labelled seed run from the contract account to the reader's wallet and to the site account, because the contract's address is derived from both. The site account, also owned by the metering program, has the fields treasury and page price; its treasury field points to the site treasury, a token account with an amount. A dashed arrow from the reader's token account to the site treasury is labelled a charge: transfer_checked, signed as the delegate.](/assets/img/the-delegate-accounts-dark.png)

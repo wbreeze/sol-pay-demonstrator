@@ -21,12 +21,13 @@ sign-in screen.
 
 ## The objection
 
-In the sol-pay library's state machine, `identified` is a choice, not a screen.
-A wallet address is known or it is not. If not, the next stop is setting a
-limit using a wallet. A sign-in screen was this site's own addition. Its
-specification even said so in passing — a demo "needs a front door and a wallet
-needs a sign-in" — and nobody had asked whether the second half of that was
-true.
+In the state machine that
+[sol-pay](https://github.com/wbreeze/sol-pay#what-is-here) documents,
+`identified` is a choice, not a screen. A wallet address is known or it is not.
+If not, the next stop is setting a limit using a wallet. A sign-in screen was
+this site's own addition. Its specification even said so in passing — a demo
+"needs a front door and a wallet needs a sign-in" — and nobody had asked
+whether the second half of that was true.
 
 The objection was one sentence: *a sign-in page feels like identifying for
 tracking.*
@@ -48,12 +49,12 @@ site is the party being held to a limit. The reader can raise it, let it run
 out, or revoke it. The site has no say in any of that.
 
 Seen that way, "who are you" is the wrong question for the site to be asking.
-The only thing it needs to know is which grant it is drawing on. The
-address that signed the grant is the whole answer. The library underneath this
-site drew that line on its first day: *who is this visitor* is a site's own
-affair, and the payment core wants exactly one input, a wallet address: not a
-person. Not a session with a name attached. An address that can sign, and that
-already has a balance.
+The only thing it needs to know is which grant it is drawing on. The address
+that signed the grant is the whole answer. The sol-pay client library drew that
+line on its first day: *who is this visitor* is a site's own affair, and the
+payment core wants exactly one input, a wallet address: not a person. Not a
+session with a name attached. An address that can sign, and that already has a
+balance.
 
 The revised experience moved identification of the wallet into the meter
 panel, one click before the grant, on the same screen as the price. A reader

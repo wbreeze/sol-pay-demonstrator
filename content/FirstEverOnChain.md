@@ -8,9 +8,9 @@ status: published
 lede: >
   On 5 September a validator accepted the first transaction this site's
   server ever built, and sol-pay touched the chain for the first time. The
-  library's specification had already written down what would count as proof,
-  and a transfer was not it. The proof came two days later, when a reader's
-  metering call settled.
+  sol-pay client library's specification had already written down what would
+  count as proof, and a transfer was not it. The proof came two days later,
+  when a reader's metering call settled.
 reading_time: 5
 ---
 
@@ -18,8 +18,8 @@ reading_time: 5
 
 On 5 September a validator on devnet accepted a transaction assembled by this
 site's server. The fee was the standard 5,000 lamports for one signature.
-Confirmation took two seconds. It was the first time anything built with sol-pay reached
-the chain.
+Confirmation took two seconds. It was the first time anything built with
+[sol-pay](https://github.com/wbreeze/sol-pay#what-is-here) reached the chain.
 
 This piece is partly a keepsake of that run. It is also a record of what the
 run did not prove, and of the condition that decided when the proof was good
@@ -27,7 +27,8 @@ enough.
 
 ## The gap
 
-sol-pay's PHP client builds instructions. It does not send them.
+The PHP port of the sol-pay client library builds instructions. It does not
+send them.
 
 Between an instruction and the wire sits a legacy transaction message. The
 message has compact-u16 length prefixes, account keys deduplicated and sorted
@@ -38,10 +39,11 @@ language. Rust never needed to, because Solana publishes crates that do it.
 Node never needed to either. In the browser, the wallet compiles the message
 and the question never comes up.
 
-sol-pay's specification said that "the integrator owns the connection". For
-every consumer that existed when the sentence was written, owning the
-connection cost nothing. For a PHP server, it meant writing a wire encoder by
-hand. The sentence had not changed. The population it applied to had.
+The client library's specification said that "the integrator owns the
+connection". For every consumer that existed when the sentence was written,
+owning the connection cost nothing. For a PHP server, it meant writing a wire
+encoder by hand. The sentence had not changed. The population it applied to
+had.
 
 ## Why not just write it
 
@@ -118,10 +120,10 @@ memory would have been wrong here, and nobody would have known why.
 
 ## What the run did not prove
 
-sol-pay's specification had a sentence waiting on a condition. "It builds
-instructions and decodes bytes" was to become "it builds instructions and the
-message that carries them, and decodes bytes". The condition, written down
-before the run, was that **the demonstrator had settled a metering call
+The client library's specification had a sentence waiting on a condition. "It
+builds instructions and decodes bytes" was to become "it builds instructions
+and the message that carries them, and decodes bytes". The condition, written
+down before the run, was that **the demonstrator had settled a metering call
 against devnet**.
 
 The transfer was not a metering call. The transfer carried no Anchor
@@ -140,11 +142,11 @@ Three more results followed, and each one carried something the one before
 could not.
 
 - **Later on 5 September**, first-run setup sent `initialize_site` to the
-  deployed metering program. That put one of the library's own instructions
-  in front of the program that defines it: the discriminator, the account
-  list and its flags, the borsh arguments, and a program address the program
-  re-derives from its own seeds. A disagreement anywhere would have been
-  refused.
+  deployed sol-pay metering program. That put one of the library's own
+  instructions in front of the program that defines it: the discriminator, the
+  account list and its flags, the borsh arguments, and a program address the
+  program re-derives from its own seeds. A disagreement anywhere would have
+  been refused.
 - **On 7 September** the site metered a reader's page view. The
   `meter_and_settle` instruction was built by the PHP client, compiled by
   `SolPay\Tx`, signed by the site authority, and accepted. Unlike setup,
@@ -156,9 +158,9 @@ could not.
 The accepted call and the settled call are different claims. A
 `meter_and_settle` whose unpaid total has not reached the collection threshold
 raises `used` and moves nothing. Only the settle met the condition as written.
-On 7 September the specification's sentence changed. sol-pay now "builds
-instructions and the message that carries them, and decodes bytes". Every
-other verb in that section survives unchanged. The library still does not
+On 7 September the specification's sentence changed. The client library now
+"builds instructions and the message that carries them, and decodes bytes".
+Every other verb in that section survives unchanged. The library still does not
 sign, send, or learn what happened to a transaction.
 
 ## The rule

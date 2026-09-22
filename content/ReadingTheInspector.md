@@ -22,7 +22,7 @@ Every page of this demonstrator ends with an inspector.
 Expanding the inspector shows every number behind the metering of this page,
 each one read from an account on the public chain. The inspector exists for a
 technical person evaluating the
-[`sol-pay`](https://github.com/wbreeze/sol-pay) on-chain metering capability
+[sol-pay](https://github.com/wbreeze/sol-pay#what-is-here) on-chain metering capability
 that this site demonstrates.
 
 ## The order
@@ -33,8 +33,8 @@ The inspector displays the most-changing data above the more static data.
   changed or not.
 - Preflight: changes on every request. The site's own arithmetic over the
   accounts read for this request.
-- The last transaction: present only on a request that metered. The
-  instruction as the sol-pay library built it, not as the chain returned it.
+- The last transaction: present only on a request that metered. The instruction
+  as the sol-pay client library built it, not as the chain returned it.
 - You, on chain: read on every request that has a wallet. Changes when the
   reader is charged. The on-chain content that links the reader to the meter.
 - The treasury: changes when a settle lands. The on-chain account of the
@@ -71,7 +71,7 @@ alone, linked to its row here.
 Under each value is a description of what it represents and how it is
 derived.
 
-Some of these addresses are derived by the metering program: the site
+Some of these addresses are derived by the sol-pay metering program: the site
 account from `["site", AUTH…]` and the reader's contract account from
 `["contract", SPDA…, PAYR…]`, each with the bump that made it land off the
 curve. Two more are derived by Solana's associated-token program, which this
@@ -123,7 +123,7 @@ The transaction this request produced, and the instruction that went into it.
 ![Signature, outcome, page views, then the instruction: program, eight accounts in order with their signer and writable flags, and the data. Below, a link reading This transaction on chain.](/assets/img/inspector-last-transaction-light.png)
 ![Signature, outcome, page views, then the instruction: program, eight accounts in order with their signer and writable flags, and the data. Below, a link reading This transaction on chain.](/assets/img/inspector-last-transaction-dark.png)
 
-The objects the sol-pay library handed the server— the program, the accounts in
+The objects the client library handed the server— the program, the accounts in
 order with their signer and writable flags, and the data bytes.  The first
 eight data bytes are the Anchor discriminator,
 sha256("global:meter_and_settle") truncated; the rest is borsh. The account
@@ -227,7 +227,7 @@ The account this site runs on, field by field.
 ![The site account's fields in order: site account, authority, mint, treasury, page price, collection threshold, minimum limit, bump and mint decimals.](/assets/img/inspector-site-account-dark.png)
 
 Read from the account on this request.  The fields are in the order and sizes
-the sol-pay library specification lays them out in (wasm-client/SPEC.md §6.2).
+the client library's specification lays them out in (wasm-client/SPEC.md §6.2).
 It is itself a check, since a field read at the wrong offset would show up here
 as a number that makes no sense, rather than as silence.
 
