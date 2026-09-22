@@ -2,6 +2,7 @@
 title: How to read the inspector
 slug: reading-the-inspector
 created: 2026-09-14
+revised: 2026-09-22
 metered: false
 status: published
 lede: >
@@ -11,16 +12,18 @@ lede: >
 reading_time: 9
 ---
 
+*By Douglas Lovell with Claude Opus 5 (Anthropic)*
+
 Every page of this demonstrator ends with an inspector.
 
 ![The foot of a page: a hairline rule, and the word INSPECTOR beside a disclosure triangle.](/assets/img/inspector-closed-light.png)
 ![The foot of a page: a hairline rule, and the word INSPECTOR beside a disclosure triangle.](/assets/img/inspector-closed-dark.png)
 
-Expanding it reveals every number from accounts on the public chain
-manipulated by this site together with the metering of pages on this site.
-It exists to help a technical person evaluating the
+Expanding the inspector shows every number behind the metering of this page,
+each one read from an account on the public chain. The inspector exists for a
+technical person evaluating the
 [`sol-pay`](https://github.com/wbreeze/sol-pay) on-chain metering capability
-this site demonstrates.
+that this site demonstrates.
 
 ## The order
 
@@ -68,14 +71,15 @@ alone, linked to its row here.
 Under each value is a description of what it represents and how it is
 derived.
 
-Some of these addresses are derived by this site's own program: the site
-account from `["site", AUTH…]` and your contract from `["contract", SPDA…,
-PAYR…]`, each with the bump that made it land off the curve. Two more are
-derived by Solana's associated-token program, which this site did not write
-and does not own — the treasury and your token account. Five were never
-derived at all, for four different reasons: two are keypairs first-run setup
-generated, one is your own wallet, one is an address a program was deployed
-to, and one is a constant every Solana cluster shares.
+Some of these addresses are derived by the metering program: the site
+account from `["site", AUTH…]` and the reader's contract account from
+`["contract", SPDA…, PAYR…]`, each with the bump that made it land off the
+curve. Two more are derived by Solana's associated-token program, which this
+site did not write and does not own — the treasury and the reader's token
+account. Five were never derived at all, for four different reasons: two are
+keypairs first-run setup generated, one is the reader's own wallet, one is an
+address a program was deployed to, and one is a constant every Solana cluster
+shares.
 
 ## Preflight, for this request
 
@@ -85,8 +89,8 @@ each with the on-chain program check the answer mirrors written underneath.
 ![Six rows: charge(1), can_meter, will_settle, views_remaining, limit_floor and required_allowance, each with its answer and, beneath it, the on-chain check it mirrors.](/assets/img/inspector-preflight-light.png)
 ![Six rows: charge(1), can_meter, will_settle, views_remaining, limit_floor and required_allowance, each with its answer and, beneath it, the on-chain check it mirrors.](/assets/img/inspector-preflight-dark.png)
 
-The preflight saves the server a round trip, and sometimes a fee. The endpoint
-the server queries will simulate a transaction before forwarding it. A call the
+The preflight saves the server a round trip. The endpoint the server queries
+will simulate a transaction before forwarding it. A call the
 on-chain program would refuse is usually rejected there, never included in a
 block, and costs nothing.
 
@@ -94,8 +98,8 @@ A fee is charged when a transaction lands and then fails. Failure implies that
 the accounts moved between the simulation and call: another copy of this site
 metered the same wallet, or the wallet had an unrelated transaction in the gap.
 The fee is the site's fee either way. The site authority signs every metering
-call and pays for it. The only transactions the reader pays are the three their
-wallet signs.
+call and pays for it. The only transactions the reader pays for are the three the
+reader's wallet signs.
 
 The mirroring is the point, and it is also the risk. The client library's
 arithmetic is a *copy* of the program's, made because a web server cannot call
@@ -138,7 +142,7 @@ this system, because a list like that is exactly the reading history the
 design exists not to hold. On a page that metered nothing the section is
 absent rather than empty.
 
-### The row that populates when you expand the inspector
+### The row that fills in when the inspector opens
 
 The `event` row arrives saying it has not been read yet, and then reads
 itself.
@@ -168,7 +172,9 @@ wallet to read for.
 Authorizing a limit names this site's contract account as a delegate on the
 reader's token account and sets how much it may draw.  Closing clears both.
 **The delegate line is what authorizing gave this site and what closing takes
-back.** It lives on the reader token account, not in the contract. Most
+back.** The delegate lives on the reader's token account, not in the contract
+account. [The permission nobody shows you](/a/the-delegate) explains how the
+Token program writes it. Most
 wallets never show it. It is here, read back from the account on every
 request. The delegation is a field on the token account, so the address to
 open in an explorer is the token account's — `PATA` in the values table — and
@@ -301,6 +307,6 @@ on chain.
 ## What the panel is for, one more time
 
 Every section above is the same argument in a different place: a number
-displayed without its source is a number you have to take on trust, and this
-site is trying not to be trusted.
+displayed without its source is a number the reader has to take on trust, and
+this site is trying not to be trusted.
 

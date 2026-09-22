@@ -2,7 +2,7 @@
 title: The ID of what's paying
 slug: no-sign-in-page
 created: 2026-09-07
-revised: 2026-09-18
+revised: 2026-09-22
 metered: true
 status: published
 lede: >
@@ -35,8 +35,8 @@ Which it is. That is what the sign-in page did. It collected an identity and
 did nothing else.  That this site's version of "sign-in" held one address, a
 session id and nothing more was not evident.  A reader who has spent twenty
 years being asked to sign in before anything happens has very different
-expectations about what that arrangement means.  The experience was,
-you have identified.  The solution: no sign-in page.
+expectations about what that arrangement means.  The experience said:
+*you have been identified.* The solution: no sign-in page.
 
 ## Who is granting what to whom
 

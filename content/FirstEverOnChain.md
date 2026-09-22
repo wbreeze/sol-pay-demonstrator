@@ -147,7 +147,7 @@ could not.
   refused.
 - **On 7 September** the site metered a reader's page view. The
   `meter_and_settle` instruction was built by the PHP client, compiled by
-  `SolPay\Tx`, signed by the site's authority, and accepted. Unlike setup,
+  `SolPay\Tx`, signed by the site authority, and accepted. Unlike setup,
   metering sits on the path every reader takes.
 - **Later that day** a metering call settled, moving 0.15 DEMO from a reader's
   token account into the site's treasury. The settle carried what the other

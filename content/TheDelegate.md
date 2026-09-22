@@ -121,8 +121,8 @@ about.
 
 So this site does three things.
 
-- The inspector shows the `delegate` and `delegated_amount` fields on every
-  page. The inspector reads both fields back from the reader's token account;
+- [The inspector](/a/reading-the-inspector) shows the `delegate` and
+  `delegated_amount` fields on every page. The inspector reads both fields back from the reader's token account;
   neither comes from the site's memory.
 - The screen where the reader closes shows the delegate before the button. A
   permission the reader is about to withdraw is worth naming while the reader

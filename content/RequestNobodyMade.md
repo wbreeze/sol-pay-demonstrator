@@ -2,7 +2,7 @@
 title: The request nobody made
 slug: request-nobody-made
 created: 2026-09-11
-revised: 2026-09-16
+revised: 2026-09-22
 metered: true
 status: published
 lede: >
@@ -28,9 +28,9 @@ now follows. The text inside says what went wrong without the rule.
 ## Charge on a POST, never on a GET
 
 A browser fetches URLs on its own account all day. It prefetches the link it
-expects you to click. It prerenders a whole page in the background so that the
-click feels instant. It fetches again when you press back or restore a window.
-A chat app fetches your link to draw a preview card. None of those fetches is a
+expects the reader to click. It prerenders a whole page in the background so
+that the click feels instant. It fetches again when the reader presses back or
+restores a window. A chat app fetches a pasted link to draw a preview card. None of those fetches is a
 reader opening an article. All of them are `GET` requests.
 
 Our defence was a list of three headers. Chrome sends `Sec-Purpose: prefetch`,

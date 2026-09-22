@@ -2,22 +2,26 @@
 title: Three wallets, one name, and a refusal that wasn't true
 slug: three-phantoms
 created: 2026-09-07
-revised: 2026-09-17
+revised: 2026-09-22
 metered: true
 status: published
 lede: >
-  This site told a perfectly good wallet that it did not support the sign-in
-  feature it was advertising. The wallet was fine. The site had thrown it away
+  This site told a perfectly good wallet that it did not support Sign In With
+  Solana, a feature the wallet was advertising. The wallet was fine. The site had thrown it away
   and kept a different one with the same name.
 reading_time: 4
 ---
 
 *By Douglas Lovell with Claude Opus 5 (Anthropic)*
 
-For a day this site would not let anyone in. Connect a wallet, and the panel
-answered:
+For a day no reader could store a paying wallet on this site. Connect a
+wallet, and the meter panel answered:
 
 > A wallet is here, but it does not offer Sign In With Solana.
+
+The site uses Sign In With Solana for one purpose: proving that whoever stores
+a wallet here controls its key. [The ID of what's paying](/a/no-sign-in-page)
+explains why that proof is not a sign-in.
 
 It said this in Brave. It said it in Firefox. The wallet in both was Phantom,
 which has offered that feature since version 23.11.0, and which was sitting
@@ -44,7 +48,7 @@ So: a page that filters nothing, at `/diagnostics/wallets`. Every wallet that
 announces itself, with every feature key it advertises, in the order they
 arrived and with the milliseconds at which they did. The legacy injected objects
 too, and whether the browser reports itself as Brave. And beside each wallet, a
-button that calls the sign-in feature **whether or not the wallet claims to have
+button that calls Sign In With Solana **whether or not the wallet claims to have
 it** — because "the wallet lacks it", "the wallet has it under another name" and
 "the call works anyway" are three different findings and the site's own check
 cannot tell them apart. That is what made it useless as a diagnostic: it had
@@ -56,7 +60,7 @@ to a file rather than offering a verdict.
 
 The report came back in one look.
 
-| chains | sign-in? |
+| chains | Sign In With Solana? |
 | --- | --- |
 | `solana:mainnet` `devnet` `testnet` `localnet` | **yes** |
 | `bitcoin:mainnet` `testnet` `regtest` | no |
@@ -89,13 +93,13 @@ called.
 While the instrument was out, it recorded something else worth keeping.
 
 A wallet's list of connected accounts is **empty on every page load** until
-that page connects for itself. Signing in connects — but signing in ends in a
-navigation, and the wallet the new page discovers starts empty. The site had
-been reading that list on the next screen and concluding the reader had
-switched accounts.
+that page connects for itself. Proving control of the address connects. The
+proof step then reloads the page, and the wallet the new page discovers starts
+empty. The site had been reading that list on the next screen and
+concluding the reader had switched accounts.
 
 The fix is to reconnect before looking, silently first, which is what a wallet
-does without a prompt for a site you have already authorized. The old error
+does without a prompt for a site its user has already authorized. The old error
 message told the reader to "reconnect" without saying to what. It now names
 both addresses: the one this site is waiting for, and the one the wallet is
 actually on.
@@ -110,7 +114,7 @@ sort of thing that is true of most objects and simply isn't true of these.
 **When your code can only be wrong inside somebody else's software, stop
 reasoning and build the thing that reports back.** The instrument took an
 afternoon and has since earned it twice more — once confirming that this site's
-sign-in message is byte-identical to what the wallet actually produces, and
+Sign In With Solana message is byte-identical to what the wallet actually produces, and
 once proving a failure was not where everyone assumed.
 
 And the smaller rule, which is the one that would have saved the day: a
