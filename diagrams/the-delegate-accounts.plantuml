@@ -1,0 +1,39 @@
+@startuml
+' The accounts behind one reader's meter: which program owns each, and
+' which field names which account. Source for
+' public/assets/img/the-delegate-accounts-*.png.
+!pragma layout smetana
+!include style.iuml
+
+class "Reader's wallet" as W <<System program>>
+
+class "Reader's token account" as RTA <<Token program>> {
+  mint
+  owner
+  amount
+  delegate
+  delegated_amount
+}
+
+class "Contract account" as K <<Metering program>> {
+  limit
+  used
+  paid
+}
+
+class "Site account" as SITE <<Metering program>> {
+  treasury
+  page price
+}
+
+class "Site treasury" as T <<Token program>> {
+  amount
+}
+
+RTA --> W : owner
+RTA --> K : delegate
+K ..> W : seed
+K ..> SITE : seed
+SITE --> T : treasury
+RTA ..> T : a charge: transfer_checked,\nsigned as the delegate
+@enduml

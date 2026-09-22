@@ -88,3 +88,21 @@ participant "Chain" as C
 !function $wrong($text)
   !return "<color:" + $accent + "><b>" + $text + "</b></color>"
 !endfunction
+
+' Account diagrams: one box per account, its owner program as the
+' stereotype, its fields as the members. Nothing here reaches a sequence
+' diagram, so the plates above do not move.
+skinparam class {
+  BackgroundColor $paper
+  BorderColor $ink
+  FontColor $ink
+  AttributeFontColor $ink
+  StereotypeFontColor $soft
+  ArrowColor $ink
+  ArrowFontColor $ink
+  HeaderBackgroundColor $sunk
+}
+skinparam circledCharacterRadius 0
+hide circle
+hide empty methods
+hide empty members
