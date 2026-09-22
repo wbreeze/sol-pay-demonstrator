@@ -158,9 +158,10 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
 
             <h2>Close and revoke</h2>
             <p>
-                Closing ends the contract and withdraws this site's authority
-                over your token account. Your wallet will show no delegate
-                afterwards — that is the check worth doing.
+                Closing ends the contract and revokes this site's permission
+                to draw from your token account. Afterwards your token account
+                will show no delegate — in the table above, and on the explorer.
+                Reading the token account is the check worth doing.
             </p>
             <p>
                 The <?= View::e((string) $contract['unpaid']) ?> <?= $symbol ?>
