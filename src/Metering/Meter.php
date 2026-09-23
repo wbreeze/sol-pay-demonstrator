@@ -241,6 +241,10 @@ final class Meter
             $this->shortfall($payer, $payer->contract->unpaid() + $charge),
             $outcome->signature,
             $instructions,
+            // Asked of the same read the shortfall came from. The library's
+            // `delegatePresent` cannot answer it: a delegate another site's
+            // `approve` installed is present and is not ours.
+            $payer->delegateIsContract(),
         );
     }
 

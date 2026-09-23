@@ -11,6 +11,14 @@
  * reader's token account. What the wallet shows afterwards is the point of
  * claim 6 in §2 — leaving costs nothing and leaves nothing behind.
  *
+ * **The revoke is conditional, and that is the repair.** SPL `revoke` clears
+ * whatever delegate is set, not this site's in particular, and a token account
+ * holds one. A reader who has since authorized another site would lose that
+ * site's permission by closing here — a site this one has no business
+ * touching. So when the delegate is not this site's contract, the close sends
+ * `close_contract` alone. The server answers the question, from the account,
+ * in `/meter/close/prepare`.
+ *
  * The server's half of §10.4 runs after the chain confirms, and this page
  * **shows what it deleted** rather than asserting that it did.
  */
@@ -72,8 +80,17 @@ async function runClose(wallet) {
     }
 
     // `close_contract` then `revoke`, in that order, which is the order the
-    // program requires and the reason `core::tx` pairs them at all.
-    const instructions = pay.closeAndRevoke(prep.payerTokenAccount, prep.payer, prep.site);
+    // program requires and the reason `core::tx` pairs them at all — but only
+    // when the delegate to withdraw is this site's. Otherwise the close goes
+    // alone and the other site's approval is left where the reader put it.
+    const ours = prep.delegateIsContract !== false;
+    const instructions = ours
+        ? pay.closeAndRevoke(prep.payerTokenAccount, prep.payer, prep.site)
+        : pay.closeContract(prep.site, prep.payer);
+
+    if (!ours) {
+        say('Closing without revoking: the delegate on your token account belongs to another site.', 'note');
+    }
 
     const signature = await sign(ctx, kit, wallet, account, prep, instructions, preparedAt);
 
@@ -86,6 +103,23 @@ async function runClose(wallet) {
     }
 
     show(result);
+}
+
+/**
+ * What the token account's delegate says after the close, read back rather
+ * than asserted.
+ *
+ * A surviving delegate is an alarm when this site was the one that set it, and
+ * is the correct outcome when another site's approval is what is there: the
+ * close deliberately left it alone, and reporting it as STILL SET would accuse
+ * this site of failing to do something it declined to do on purpose.
+ */
+function delegateRow(result) {
+    if (!result.delegate) return 'none — read back from your token account';
+    if (result.delegateIsContract === false) {
+        return 'another site\'s, left as it was — ' + result.delegate;
+    }
+    return 'STILL SET: ' + result.delegate;
 }
 
 /**
@@ -106,7 +140,7 @@ function show(result) {
         ['contract', 'closed, on chain'],
         // Read back from the token account after the close rather than
         // asserted — this is the line §2's claim 6 is actually about.
-        ['delegate', result.delegate ? 'STILL SET: ' + result.delegate : 'none — read back from your token account'],
+        ['delegate', delegateRow(result)],
         ['session', (erased.sessions || 0) + ' row deleted — paying wallet forgotten'],
         ['view grants', (erased.grants || 0) + ' row(s) deleted'],
         ['faucet ledger', 'kept, for the reason on the privacy page'],

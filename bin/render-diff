@@ -264,6 +264,9 @@ function fixtures(string $tree): array
     $PAYER = 'BFT5EZLV7eWhwX4jjRP7JJDuJYoCQRmvmzuDUBbvSMqR';
     $CONTRACT = 'Fgm6costwpmn4d1CTqdM5su8jBptdwnW134cNoFixgqs';
     $TOKEN = '3KDoatBW3VwL5tyKLnCrWreKSsAXEhymyCUpei6eLd7v';
+    // Another site's contract, for the branches where its approval is the one
+    // on the reader's token account.
+    $OTHER = 'D5VoE7hnS4yDaaMcEfgwcPyMnwNG5Xb2j4WFFFtHKwKq';
     $SIG = 'FKb3eeBwq5fXi4M6NhLY5tkstxRi2N6VoKtPpkG23ASSxyz';
 
     $P = Newsprint\Content\Piece::class;
@@ -283,22 +286,32 @@ function fixtures(string $tree): array
         'provisioned' => true, 'chain' => 'solana:devnet',
         'program' => $program->id, 'token_program' => $program->tokenProgram,
         'result' => null, 'page_price' => '0.01', 'step_views' => 7, 'advanced' => null, 'solvency' => null,
+        'delegate' => $CONTRACT, 'delegate_is_ours' => true,
     ];
 
-    $shortfall = static fn (int $bal, int $allow, bool $delegate = true): SolPay\Core\Shortfall
+    // `$delegate`: true for this site's contract, false for an empty field, or
+    // an address for another site's approval sitting where ours was.
+    $shortfall = static fn (int $bal, int $allow, bool|string $delegate = true): SolPay\Core\Shortfall
         => SolPay\Core\Shortfall::diagnose(
-            new SolPay\Core\TokenAccount($MINT, $PAYER, 210000 - $bal, $delegate ? $CONTRACT : null, 210000 - $allow),
+            new SolPay\Core\TokenAccount(
+                $MINT,
+                $PAYER,
+                210000 - $bal,
+                $delegate === true ? $CONTRACT : ($delegate === false ? null : $delegate),
+                210000 - $allow,
+            ),
             210000,
         );
 
-    $solvency = static function (int $bal, int $allow, bool $delegate = true) use ($shortfall): array {
+    $solvency = static function (int $bal, int $allow, bool|string $delegate = true) use ($shortfall): array {
         $s = $shortfall($bal, $allow, $delegate);
+        $ours = $delegate === true;
 
         return [
             'would_move' => '0.21',
             'balance_short' => $s->balanceShort, 'balance_short_demo' => '0.08',
             'allowance_short' => $s->allowanceShort, 'allowance_short_demo' => '0.05',
-            'delegate_present' => $s->delegatePresent, 'clear' => $s->isClear(),
+            'delegate_is_ours' => $ours, 'clear' => $s->isClear() && $ours,
         ];
     };
 
@@ -383,7 +396,9 @@ function fixtures(string $tree): array
     $f['meter-failed-balance'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', SolPay\Core\Cause::of($program, $program->tokenProgram, 1), $shortfall(80000, 0), null)]);
     $f['meter-failed-deadend'] = $m(['stage' => 'failed', 'faucet' => ['demo' => '0.6', 'sol' => '0.05', 'available' => false], 'result' => $R::failed('refused', null, $shortfall(80000, 0), null)]);
     $f['meter-failed-allowance'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', null, $shortfall(0, 90000), null)]);
-    $f['meter-failed-delegate'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', null, $shortfall(0, 0, false), null)]);
+    $f['meter-failed-delegate'] = $m(['stage' => 'failed', 'delegate' => null, 'delegate_is_ours' => false, 'result' => $R::failed('refused', null, $shortfall(0, 0, false), null, [], false)]);
+    $f['meter-failed-delegate-replaced'] = $m(['stage' => 'failed', 'delegate' => $OTHER, 'delegate_is_ours' => false, 'result' => $R::failed('refused', null, $shortfall(0, 0, $OTHER), null, [], false)]);
+    $f['meter-set-meter-displaces'] = $m(['stage' => 'set-meter', 'contract' => null, 'delegate' => $OTHER, 'delegate_is_ours' => false]);
     $f['meter-failed-both'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', null, $shortfall(80000, 90000), null)]);
     $f['meter-limit'] = $m(['stage' => 'limit']);
     $f['meter-running'] = $m();
@@ -399,15 +414,17 @@ function fixtures(string $tree): array
     $f['strip-metered-nosettle'] = $strip(['result' => $R::metered($SIG, 10000, false)]);
     $f['strip-adv-failed-balance'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000, 0), 'advanced' => $advance($O::Failed)]);
     $f['strip-adv-failed-allowance'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 50000), 'advanced' => $advance($O::Failed)]);
-    $f['strip-adv-failed-revoked'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 0, false), 'advanced' => $advance($O::Failed)]);
-    $f['strip-adv-failed-revoked-zeroed'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 50000, false), 'advanced' => $advance($O::Failed)]);
+    $f['strip-adv-failed-revoked'] = $strip(['result' => $R::granted(), 'delegate' => null, 'delegate_is_ours' => false, 'solvency' => $solvency(0, 0, false), 'advanced' => $advance($O::Failed)]);
+    $f['strip-adv-failed-revoked-zeroed'] = $strip(['result' => $R::granted(), 'delegate' => null, 'delegate_is_ours' => false, 'solvency' => $solvency(0, 50000, false), 'advanced' => $advance($O::Failed)]);
+    $f['strip-adv-failed-replaced'] = $strip(['result' => $R::granted(), 'delegate' => $OTHER, 'delegate_is_ours' => false, 'solvency' => $solvency(0, 0, $OTHER), 'advanced' => $advance($O::Failed)]);
     $f['strip-adv-failed-clear'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 0), 'advanced' => $advance($O::Failed)]);
     $f['strip-adv-blocked'] = $strip(['result' => $R::granted(), 'advanced' => $advance($O::Blocked)]);
     $f['strip-adv-unreadable'] = $strip(['result' => $R::granted(), 'advanced' => $advance($O::Unreadable)]);
     $f['strip-adv-settled'] = $strip(['result' => $R::granted(), 'advanced' => $advance($O::Metered, true, $SIG)]);
     $f['strip-adv-unsettled'] = $strip(['result' => $R::granted(), 'advanced' => $advance($O::Metered, false, null)]);
     $f['strip-headsup-balance'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000, 0)]);
-    $f['strip-headsup-delegate'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 0, false)]);
+    $f['strip-headsup-delegate'] = $strip(['result' => $R::granted(), 'delegate' => null, 'delegate_is_ours' => false, 'solvency' => $solvency(0, 0, false)]);
+    $f['strip-headsup-replaced'] = $strip(['result' => $R::granted(), 'delegate' => $OTHER, 'delegate_is_ours' => false, 'solvency' => $solvency(0, 0, $OTHER)]);
     $f['strip-headsup-allowance'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 50000)]);
 
     // The repair of 2026-09-14: an advance that said nothing about solvency

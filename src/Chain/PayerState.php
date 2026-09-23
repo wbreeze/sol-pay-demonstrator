@@ -44,6 +44,22 @@ final class PayerState
     }
 
     /**
+     * Is this site's contract the delegate on the reader's token account?
+     *
+     * `Shortfall::diagnose` answers `delegate !== null`, which is true of any
+     * delegate at all — including one another site's `approve` put there,
+     * because a token account holds exactly one. A settle this site signs
+     * needs the delegate to be *this* contract, so the question is asked here
+     * rather than taken from the library's boolean. False also covers the two
+     * ways the field empties: an explicit revoke, and SPL clearing it when the
+     * approved amount reaches zero.
+     */
+    public function delegateIsContract(): bool
+    {
+        return $this->funds !== null && $this->funds->delegate === $this->contractAddress;
+    }
+
+    /**
      * No token account at all, or one with nothing in it.
      *
      * Worth separating from "no contract", because they are different

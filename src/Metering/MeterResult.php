@@ -28,6 +28,16 @@ final class MeterResult
         public readonly ?Cause $cause = null,
         /** Which constraint on the token account is short (§8.2's ambiguity). */
         public readonly ?Shortfall $shortfall = null,
+        /**
+         * Whether this site's contract was the delegate on the reader's token
+         * account when the charge was refused. Null where the question was not
+         * asked, which is every outcome that did not read the account.
+         *
+         * Separate from the shortfall's own `delegatePresent`, which answers
+         * `delegate !== null` and is therefore true of another site's delegate
+         * as well as of this one's.
+         */
+        public readonly ?bool $delegateIsContract = null,
         public readonly string $detail = '',
         /** What this call would charge, in base units. */
         public readonly int $charge = 0,
@@ -166,9 +176,17 @@ final class MeterResult
 
     /** The chain refused. */
     /** @param list<Instruction> $instructions */
-    public static function failed(string $detail, ?Cause $cause, ?Shortfall $shortfall, ?string $signature = null, array $instructions = []): self
+    public static function failed(string $detail, ?Cause $cause, ?Shortfall $shortfall, ?string $signature = null, array $instructions = [], ?bool $delegateIsContract = null): self
     {
-        return new self(MeterOutcome::Failed, signature: $signature, cause: $cause, shortfall: $shortfall, detail: $detail, instructions: $instructions);
+        return new self(
+            MeterOutcome::Failed,
+            signature: $signature,
+            cause: $cause,
+            shortfall: $shortfall,
+            delegateIsContract: $delegateIsContract,
+            detail: $detail,
+            instructions: $instructions,
+        );
     }
 
     /**

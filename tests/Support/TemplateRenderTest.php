@@ -43,6 +43,7 @@ final class TemplateRenderTest extends TestCase
     private const MINT = 'AKRs35WnmePSDLcPLyVtC5UPPBC8xjmVZ4EUJ3XwU9op';
     private const PAYER = 'BFT5EZLV7eWhwX4jjRP7JJDuJYoCQRmvmzuDUBbvSMqR';
     private const CONTRACT = 'Fgm6costwpmn4d1CTqdM5su8jBptdwnW134cNoFixgqs';
+    private const OTHER_DELEGATE = 'D5VoE7hnS4yDaaMcEfgwcPyMnwNG5Xb2j4WFFFtHKwKq';
     private const ATA = '3KDoatBW3VwL5tyKLnCrWreKSsAXEhymyCUpei6eLd7v';
 
     private function view(): View
@@ -76,6 +77,12 @@ final class TemplateRenderTest extends TestCase
         return new Program('F8UDAGgxVTm8Vmh4RmskpMBCFqhRvuTqbDxDCj8UMedL', Ids::TOKEN_PROGRAM_ID);
     }
 
+    /** @return array<string, string> */
+    private function site(): array
+    {
+        return ['symbol' => 'DEMO', 'page_price_demo' => '0.01'];
+    }
+
     /** @return array<string, mixed> */
     private function panel(array $overrides = []): array
     {
@@ -99,14 +106,23 @@ final class TemplateRenderTest extends TestCase
             'step_views' => 7,
             'advanced' => null,
             'solvency' => null,
+            'delegate' => self::CONTRACT,
+            'delegate_is_ours' => true,
         ];
     }
 
-    /** @return array<string, mixed> */
-    private function solvency(int $balanceShort, int $allowanceShort, bool $delegate = true): array
+    /**
+     * `$delegate`: true for this site's contract, false for an empty field, or
+     * an address for another site's approval sitting where this site's was.
+     *
+     * @return array<string, mixed>
+     */
+    private function solvency(int $balanceShort, int $allowanceShort, bool|string $delegate = true): array
     {
-        $account = new TokenAccount(self::MINT, self::PAYER, 210000 - $balanceShort, $delegate ? self::CONTRACT : null, 210000 - $allowanceShort);
+        $held = $delegate === true ? self::CONTRACT : ($delegate === false ? null : $delegate);
+        $account = new TokenAccount(self::MINT, self::PAYER, 210000 - $balanceShort, $held, 210000 - $allowanceShort);
         $shortfall = Shortfall::diagnose($account, 210000);
+        $ours = $delegate === true;
 
         return [
             'would_move' => '0.21',
@@ -114,8 +130,8 @@ final class TemplateRenderTest extends TestCase
             'balance_short_demo' => '0.0'.$balanceShort,
             'allowance_short' => $shortfall->allowanceShort,
             'allowance_short_demo' => '0.0'.$allowanceShort,
-            'delegate_present' => $shortfall->delegatePresent,
-            'clear' => $shortfall->isClear(),
+            'delegate_is_ours' => $ours,
+            'clear' => $shortfall->isClear() && $ours,
         ];
     }
 
@@ -291,12 +307,162 @@ final class TemplateRenderTest extends TestCase
             $meter = $this->panel([
                 'result' => MeterResult::granted(),
                 'solvency' => $solvency,
+                'delegate' => null,
+                'delegate_is_ours' => false,
                 'advanced' => ['outcome' => MeterOutcome::Failed, 'views' => 7, 'signature' => null, 'settled' => false],
             ]);
             $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
 
             self::assertStringContainsString('no longer a delegate on your token account, so the', $html, $label);
             self::assertStringNotContainsString('The amount you approved no longer covers it', $html, $label.': the approval is gone, not short');
+        }
+    }
+
+    /**
+     * The strip's heads-up paragraph, one branch per reason a settle would be
+     * refused.
+     *
+     * Reached when the advance has not run yet, so it predicts rather than
+     * reports, and it is the same cascade as the failed advance's: balance
+     * first, then whose delegate it is, then the allowance. Only
+     * `bin/render-diff` was watching these, and it cannot compare across the
+     * shape change that introduced `delegate_is_ours`, so they are pinned here.
+     *
+     * The order is the assertion. A replaced approval reports a short allowance
+     * as well, because the delegated amount went with the delegate, and "the
+     * amount you approved is short" is the wrong account of an approval that
+     * belongs to somebody else.
+     */
+    public function testTheHeadsUpNamesTheReasonASettleWouldBeRefused(): void
+    {
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
+
+        foreach ([
+            'a short balance' => [
+                ['solvency' => $this->solvency(80000, 0)],
+                'your balance is short by',
+            ],
+            'an empty delegate field' => [
+                ['solvency' => $this->solvency(0, 0, false), 'delegate' => null, 'delegate_is_ours' => false],
+                'this site is no longer a delegate on your token account',
+            ],
+            "another site's approval" => [
+                ['solvency' => $this->solvency(0, 0, self::OTHER_DELEGATE), 'delegate' => self::OTHER_DELEGATE, 'delegate_is_ours' => false],
+                "another site's approval has replaced this one",
+            ],
+            'a short allowance' => [
+                ['solvency' => $this->solvency(0, 50000)],
+                'the amount you approved is short by',
+            ],
+        ] as $label => [$overrides, $expected]) {
+            $meter = $this->panel(['result' => MeterResult::granted()] + $overrides);
+            $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
+
+            self::assertStringContainsString('Heads up:', $html, $label.': there is something to warn about');
+            self::assertStringContainsString($expected, $html, $label);
+        }
+    }
+
+    /**
+     * A delegate whose approval was displaced is short on the allowance too, and
+     * the allowance is not what the reader needs to hear about.
+     */
+    public function testTheHeadsUpPrefersTheDisplacedApprovalOverTheAllowance(): void
+    {
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
+        $meter = $this->panel([
+            'result' => MeterResult::granted(),
+            'solvency' => $this->solvency(0, 50000, self::OTHER_DELEGATE),
+            'delegate' => self::OTHER_DELEGATE,
+            'delegate_is_ours' => false,
+        ]);
+        $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
+
+        self::assertStringContainsString("another site's approval has replaced this one", $html);
+        self::assertStringNotContainsString('the amount you approved is short by', $html);
+    }
+
+    /**
+     * A delegate another site installed is present, and is not this site's.
+     *
+     * `Shortfall::delegatePresent` says "present" and says nothing more, so
+     * before the repair this branch was unreachable for a replaced delegate:
+     * the strip fell through to "the amount you approved no longer covers it",
+     * which is the wrong account of an approval that belongs to somebody else.
+     * The two shapes read differently to a reader and are worded differently.
+     */
+    public function testAFailedAdvanceSaysWhenAnotherSitesApprovalReplacedThisOne(): void
+    {
+        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
+        $meter = $this->panel([
+            'result' => MeterResult::granted(),
+            'solvency' => $this->solvency(0, 0, self::OTHER_DELEGATE),
+            'delegate' => self::OTHER_DELEGATE,
+            'delegate_is_ours' => false,
+            'advanced' => ['outcome' => MeterOutcome::Failed, 'views' => 7, 'signature' => null, 'settled' => false],
+        ]);
+        $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
+
+        self::assertStringContainsString("Another site's approval has replaced this one", $html);
+        self::assertStringNotContainsString('The amount you approved no longer covers it', $html);
+        self::assertStringNotContainsString('the approval was revoked', $html, 'it was not revoked; it was displaced');
+    }
+
+    /**
+     * §8.2 on the meter screen, from the result rather than from the shortfall.
+     *
+     * The failed screen used `$shortfall->delegatePresent`, which is true of a
+     * delegate another site installed, so the screen said nothing about the one
+     * thing standing between the reader and a settle.
+     */
+    public function testTheFailedMeterScreenNamesADisplacedApproval(): void
+    {
+        $shortfall = Shortfall::diagnose(
+            new TokenAccount(self::MINT, self::PAYER, 400_000, self::OTHER_DELEGATE, 400_000),
+            210_000,
+        );
+        self::assertTrue($shortfall->delegatePresent, 'the library sees a delegate, which is the whole trouble');
+
+        $meter = $this->panel([
+            'stage' => 'failed',
+            'delegate' => self::OTHER_DELEGATE,
+            'delegate_is_ours' => false,
+            'result' => MeterResult::failed('refused', null, $shortfall, null, [], false),
+        ]);
+        $html = $this->renderStrictly('meter', ['meter' => $meter, 'site' => $this->site()]);
+
+        self::assertStringContainsString("Another site's approval has replaced this one", $html);
+    }
+
+    /**
+     * `set_meter`, before the wallet dialog rather than after another site's
+     * next collection fails.
+     */
+    public function testSetMeterWarnsThatAuthorizingDisplacesAnotherSitesApproval(): void
+    {
+        $displaced = $this->renderStrictly('meter', [
+            'meter' => $this->panel([
+                'stage' => 'set-meter',
+                'contract' => null,
+                'delegate' => self::OTHER_DELEGATE,
+                'delegate_is_ours' => false,
+            ]),
+            'site' => $this->site(),
+        ]);
+
+        self::assertStringContainsString('already names a delegate, and it is not this site', $displaced);
+        self::assertStringContainsString('authorizing here replaces it', $displaced);
+
+        foreach ([
+            'nothing there yet' => ['delegate' => null, 'delegate_is_ours' => false],
+            'already ours' => ['delegate' => self::CONTRACT, 'delegate_is_ours' => true],
+        ] as $label => $held) {
+            $quiet = $this->renderStrictly('meter', [
+                'meter' => $this->panel(['stage' => 'set-meter', 'contract' => null] + $held),
+                'site' => $this->site(),
+            ]);
+
+            self::assertStringNotContainsString('already names a delegate', $quiet, $label.': there is nothing to warn about');
         }
     }
 

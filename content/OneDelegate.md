@@ -2,6 +2,7 @@
 title: The approval that quietly replaces another
 slug: one-delegate
 created: 2026-09-22
+revised: 2026-09-23
 metered: true
 status: published
 lede: >
@@ -93,7 +94,10 @@ account and the reader's wallet, so every site can compute its own and compare
 it with the token account's `delegate` field. The client library's
 `diagnose` reports
 `delegate_present` as "some delegate is set". That answers the question after
-a revoke. That does not answer the question after a second site's approve.
+a revoke. That does not answer the question after a second site's approve. So
+the comparison belongs to the site, and on this site it is one method on the
+reader's account state. Every screen that acts on the answer reads that method
+rather than the library's boolean.
 
 The comparison belongs in three places:
 
@@ -101,17 +105,26 @@ The comparison belongs in three places:
   the reader's token account to show the balance. If the `delegate` field
   names an address other than this site's contract, the reader is about to end
   an arrangement with another site. The screen should say so before the
-  wallet asks.
+  wallet asks. This site's screen names the address the approval is about to
+  replace, and says that the other site will not find out until it next tries
+  to collect.
 - **Before building a close.** If the token account no longer names this
   site's contract, send `close_contract` alone. The client library builds
   `closeContract` separately from `closeAndRevoke` for this reason. Revoking
-  a permission that belongs to another site is not the reader's intent.
+  a permission that belongs to another site is not the reader's intent. Here
+  the server answers the question from the account it has just read, and the
+  browser builds the pair or the single instruction from that answer. The
+  receipt reads the `delegate` field back afterwards, where a surviving
+  delegate is an alarm when it is this site's and the expected outcome when it
+  is not.
 - **When a settle fails.** An `OwnerMismatch` from the Token program means the
   permission is gone. Read the token account. If the delegate is empty, the
   reader revoked it, or the Token program cleared it when the approved amount
   reached zero. If the delegate names another address, another approval
   replaced it. Either way, renewal re-approves. Renewal also repoints the
-  delegate, which takes the permission back from whichever site holds it.
+  delegate, which takes the permission back from whichever site holds it. This
+  site's meter says which of the two happened, because they are not the same
+  news to a reader.
 
 None of this changes what the reader can lose. A's contract cannot draw
 anything once the permission is gone, and B can draw only up to B's limit.

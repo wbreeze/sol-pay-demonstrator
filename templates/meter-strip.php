@@ -70,20 +70,33 @@ $awaiting = $result->awaiting();
         purpose so that a depleted balance is reachable.
         <a href="/meter">The meter</a> shows where you stand.
     </p>
-<?php elseif (($solvency['delegate_present'] ?? true) === false): ?>
+<?php elseif (($solvency['delegate_is_ours'] ?? true) === false): ?>
     <?php /* Checked before the allowance rather than after it. SPL clears the
              delegate the moment the approved amount is spent to zero, so a
              revoked account usually reports `allowance_short > 0` as well —
              and "the amount you approved no longer covers it" is the wrong
              account of an approval that is *gone*. Checked last, it was also
              checked never: a revoke that left `delegated_amount` standing
-             produced no paragraph at all, which is how this was found. */ ?>
+             produced no paragraph at all, which is how this was found.
+
+             The account holds one delegate, so there are two ways to arrive
+             here and they read differently to a reader: the field is empty, or
+             it names somebody else. */ ?>
+<?php if (($meter['delegate'] ?? null) === null): ?>
     <p class="pending">
         This site is no longer a delegate on your token account, so the
         transfer was refused — the approval was revoked, or SPL cleared it
         when the approved amount reached zero.
         <a href="/meter">Renewing re-approves</a>.
     </p>
+<?php else: ?>
+    <p class="pending">
+        Another site's approval has replaced this one on your token account, so
+        the transfer was refused. A token account holds one delegate at a time.
+        <a href="/meter">Renewing re-approves</a> here, and takes that site's
+        permission away in turn.
+    </p>
+<?php endif ?>
 <?php elseif (($solvency['allowance_short'] ?? 0) > 0): ?>
     <p class="pending">
         The amount you approved no longer covers it — short by
@@ -232,9 +245,16 @@ $awaiting = $result->awaiting();
         and your balance is short by
         <?= View::e((string) $solvency['balance_short_demo']) ?>.
         It will be refused, and nothing will be charged.
-<?php elseif (!$solvency['delegate_present']): ?>
+<?php elseif (!($solvency['delegate_is_ours'] ?? true)): ?>
+<?php if (($meter['delegate'] ?? null) === null): ?>
         Heads up: this site is no longer a delegate on your token account, so a
         settle would be refused. <a href="/meter">Renewing re-approves</a>.
+<?php else: ?>
+        Heads up: another site's approval has replaced this one on your token
+        account, so a settle would be refused.
+        <a href="/meter">Renewing re-approves</a> here, and takes that site's
+        permission away in turn.
+<?php endif ?>
 <?php else: ?>
         Heads up: the amount you approved is short by
         <?= View::e((string) $solvency['allowance_short_demo']) ?>

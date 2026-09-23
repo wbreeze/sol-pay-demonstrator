@@ -119,6 +119,20 @@ $contract = $meter['contract'];
         <?= View::e((string) $meter['limit_floor']) ?> <?= $symbol ?>.
     </p>
 
+<?php /* A token account holds exactly one delegate. Authorizing here names
+         this site's contract, which takes away whatever permission is there
+         now — so a reader who has authorized another site is told before the
+         wallet dialog opens, not after that site's next collection fails. */ ?>
+<?php if (($meter['delegate'] ?? null) !== null && !$meter['delegate_is_ours']): ?>
+    <p class="pending">
+        Your token account already names a delegate, and it is not this site:
+        <code><?= View::e(substr((string) $meter['delegate'], 0, 4).'…'.substr((string) $meter['delegate'], -4)) ?></code>.
+        An account holds one at a time, so authorizing here replaces it. The
+        site that set it will stop being able to collect, and will not find out
+        until it next tries.
+    </p>
+<?php endif ?>
+
     <p>
         <button type="button" class="wallet" data-authorize>Authorize</button>
     </p>
@@ -173,12 +187,23 @@ $contract = $meter['contract'];
     </p>
     <p><a href="/meter">Renew the meter</a></p>
 <?php endif ?>
-<?php if ($shortfall !== null && !$shortfall->delegatePresent): ?>
+<?php /* Not `$shortfall->delegatePresent`, which is true of any delegate: a
+         token account holds one, and another site's `approve` installs its own
+         over this site's. The result carries the comparison instead. */ ?>
+<?php if ($meter['result']?->delegateIsContract === false): ?>
+<?php if (($meter['delegate'] ?? null) === null): ?>
     <p>
         This site is no longer a delegate on your token account — the approval
         was revoked, or SPL cleared it when the approved amount reached zero.
         Renewing re-approves.
     </p>
+<?php else: ?>
+    <p>
+        Another site's approval has replaced this one on your token account, so
+        the transfer was refused. Renewing re-approves here, and takes that
+        site's permission away in turn.
+    </p>
+<?php endif ?>
     <p><a href="/meter">Renew the meter</a></p>
 <?php endif ?>
 <?php $said = Causes::describe($meter['result']?->cause); ?>

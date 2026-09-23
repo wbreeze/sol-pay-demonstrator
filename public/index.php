@@ -310,6 +310,13 @@ $meterVars = static function (Request $request, ?MeterResult $result = null) use
         'step_views' => (int) $config->metering()['demo_step_views'],
         // Filled in below when there is a contract to diagnose against.
         'solvency' => null,
+        // The delegate on the reader's token account, and whether it is this
+        // site's contract. Asked outside `solvency` because `set_meter` has no
+        // contract to diagnose against and still needs the answer: a token
+        // account holds one delegate, so authorizing here takes another site's
+        // permission away, and the reader is told before the wallet asks.
+        'delegate' => null,
+        'delegate_is_ours' => false,
     ];
 
     if ($panel['wallet'] === null) {
@@ -331,6 +338,8 @@ $meterVars = static function (Request $request, ?MeterResult $result = null) use
 
     $panel['balance'] = Units::fromBaseUnits($payer->balance(), $payer->decimals);
     $panel['limit_floor'] = Units::fromBaseUnits($payer->limitFloor(), $payer->decimals);
+    $panel['delegate'] = $payer->funds?->delegate;
+    $panel['delegate_is_ours'] = $payer->delegateIsContract();
 
     if ($payer->hasContract()) {
         $contract = $payer->contract;
@@ -357,8 +366,10 @@ $meterVars = static function (Request $request, ?MeterResult $result = null) use
             'balance_short_demo' => Units::fromBaseUnits($shortfall->balanceShort, $decimals),
             'allowance_short' => $shortfall->allowanceShort,
             'allowance_short_demo' => Units::fromBaseUnits($shortfall->allowanceShort, $decimals),
-            'delegate_present' => $shortfall->delegatePresent,
-            'clear' => $shortfall->isClear(),
+            // Not `$shortfall->delegatePresent`, which is true of any
+            // delegate, including one another site's `approve` installed.
+            'delegate_is_ours' => $payer->delegateIsContract(),
+            'clear' => $shortfall->isClear() && $payer->delegateIsContract(),
         ];
         $panel['contract'] = [
             'address' => $payer->contractAddress,
@@ -1171,6 +1182,11 @@ $app->post('/meter/close/prepare', function (Request $request, Response $respons
         'payer' => $payer->wallet,
         'payerTokenAccount' => $payer->tokenAccount,
         'contract' => $payer->contractAddress,
+        // SPL `revoke` clears whatever delegate is set, so a close that always
+        // revoked would take another site's permission with it. The browser
+        // picks `close_contract` alone when the delegate is not ours.
+        'delegate' => $payer->funds?->delegate,
+        'delegateIsContract' => $payer->delegateIsContract(),
         'blockhash' => $blockhash['blockhash'],
         'lastValidBlockHeight' => $blockhash['lastValidBlockHeight'] ?? null,
         'chain' => (string) $config->auth()['chain_id'],
@@ -1243,6 +1259,9 @@ $app->post('/meter/close/done', function (Request $request, Response $response) 
         // is the line claim 6 in §2 is actually about, and it is the one a
         // wallet is least likely to show the reader itself.
         'delegate' => $payer->funds?->delegate,
+        // Whose it is, so the receipt can tell a delegate this site failed to
+        // withdraw from one it deliberately left alone.
+        'delegateIsContract' => $payer->delegateIsContract(),
         'tokenAccount' => $payer->tokenAccount,
     ]), Session::isSecure($request));
 });
