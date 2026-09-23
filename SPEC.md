@@ -1512,7 +1512,7 @@ Verification is mechanical: load every screen with devtools recording, and
 assert that no request leaves the origin. Worth a test rather than an
 inspection.
 
-### 10.4 Erasure — what goes away, when, and what cannot
+### 10.4 Erasure: what goes away, when, and what cannot
 
 Decided 2026-09-02. **Closing the contract purges the site's record of the
 reader.** The premise is the reader's, and it is right: closing a contract is
@@ -1766,7 +1766,7 @@ open a terminal after the start command.
 It also earns its place as documentation. `initialize_site` is part of the
 library's published surface and has no worked example anywhere.
 
-### 12.1 Server language — decided: PHP
+### 12.1 Server language, decided: PHP
 
 **Decided 2026-09-04: PHP, with Slim 4 as the framework.** The front end is
 JavaScript either way (§12.2); this was only ever about what runs the server
@@ -2030,7 +2030,7 @@ two consumers and half of what an integrator comes here to read. Reusing code
 because it exists is not a reason to move a boundary the library drew
 deliberately.
 
-### 12.4 RPC — decided
+### 12.4 RPC, decided
 
 The public devnet endpoint, `https://api.devnet.solana.com`, called from the
 server.
@@ -2180,7 +2180,7 @@ Further reading: the [JSON RPC API reference](https://solana.com/docs/rpc), and
 ["Clusters and Public RPC Endpoints"](https://solana.com/docs/references/clusters)
 for endpoints and the current limits.
 
-### 12.5 Session, grant and lock store — decided: SQLite
+### 12.5 Session, grant and lock store, decided: SQLite
 
 Revised 2026-09-04. This section previously said "in memory, in the one
 process", and §12.1 invalidated it: **PHP is share-nothing per request.**
@@ -2213,7 +2213,7 @@ running more than one instance: one SQLite file is one machine's answer, and
 single-process dev server still hides the race rather than solving it — see
 §12.1's caveat on `PHP_CLI_SERVER_WORKERS`.
 
-### 12.6 Hosting — decided, mostly by not needing any
+### 12.6 Hosting, decided mostly by not needing any
 
 The documented path is running it yourself: a process on your own machine,
 talking to devnet, reached at `http://localhost`. `http://localhost` is a
@@ -2228,7 +2228,7 @@ mobile path, puts the same process behind HTTPS** on any small host; mobile
 needs a secure context that is not loopback, so it is the one thing running
 locally cannot demonstrate.
 
-### 12.7 Content pipeline — decided
+### 12.7 Content pipeline, decided
 
 Roughly twelve markdown files with front matter, rendered at build time (§10.1).
 No CMS, no fetch at request time. Listed only so it is not rediscovered as a
