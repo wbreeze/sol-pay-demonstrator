@@ -3,6 +3,7 @@
 # requires to be committed. The rule would have hidden the two vendored files
 # from git with no error anywhere.
 /SPEC.pdf
+/README.pdf
 /handoff/
 /vendor/
 /var/
