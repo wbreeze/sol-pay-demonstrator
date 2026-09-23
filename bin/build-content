@@ -6,7 +6,7 @@ declare(strict_types=1);
 /**
  * Render `content/*.md` into `var/content/` (SPEC §12.7).
  *
- * Twelve files rendered once, not a CMS: §12.1 rejected one partly because
+ * Content files rendered once, not a CMS: §12.1 rejected one partly because
  * page and template caching is actively hostile to per-request metering —
  * either the cache serves an unpaid reader or the CMS runs with its main
  * feature off. Rendering ahead of time has neither problem, because what is
