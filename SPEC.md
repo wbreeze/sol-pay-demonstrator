@@ -928,6 +928,7 @@ fixes these:
 | 6006 | `DelegateAllowanceTooLow` | `open_contract`, `renew_contract` | the approved amount does not cover the limit asked for |
 | 6007 | `LimitBelowUsage` | `renew_contract` | the renewal screen's own `limit_floor` check should have caught this; if it appears, the screen is wrong |
 | 1 (SPL) | `InsufficientFunds` | the `transfer_checked` cross-program invocation (CPI) inside `meter_and_settle` | ambiguous — see below |
+| 4 (SPL) | `OwnerMismatch` | the same CPI | the signer is not an authority on the account: the `delegate` field is empty, or it names another site's contract (§8.3) |
 | — | `Unknown` | anywhere | the program address and the code, and a link. No guess. |
 
 The `raised by` column matters more than it looks. The program checks the
@@ -935,7 +936,20 @@ delegate in `open_contract` and `renew_contract` and **not** in
 `meter_and_settle` — metering leans on the delegation the token program
 enforces during the transfer. So a reader who revokes their approval between
 opening and reading does not get 6004; they get SPL Token's error from inside
-the CPI, which is the ambiguity the next paragraph is about.
+the CPI.
+
+**Corrected 2026-09-23: that error is not the ambiguous one.** This section
+previously sent the revoke case into the paragraph below, and SPL does not put
+it there. `InsufficientFunds` is what the token program returns when the signer
+*is* the delegate and `delegated_amount` is short. A signer that is not the
+delegate — because the field is empty, or because it names another site's
+contract — is not an authority on the account at all, and the answer is
+`OwnerMismatch`, code 4. The client library says so where it enumerates the
+codes this flow can provoke: code 4 "includes the case where the delegate was
+cleared", because SPL drops the delegate once its allowance reaches zero. So a
+revoked reader gets 4 and nothing about it is ambiguous. The correction is read
+off the library and SPL's own behaviour rather than off a devnet run; a run
+would confirm it directly and none has been done.
 
 `InsufficientFunds` is ambiguous by construction: SPL Token appears to return
 it both for a short balance and for a short allowance, and the two need
@@ -951,6 +965,15 @@ payer's token account, call `diagnose(account, unpaid)`, and act on the
 - both — show both, in that order, because a re-approval the balance cannot
   cover fixes nothing.
 
+`OwnerMismatch` needs a read too, and a different one. The shortfall cannot
+answer it: `diagnose` reports `delegate_present` as "some delegate is set",
+which is true of another site's delegate as well as of this site's. The demo
+compares the account's `delegate` with this site's contract PDA and says which
+of the two happened — the field is empty, so the reader revoked it or SPL
+cleared it, or it names somebody else, so another approval replaced it. Renewal
+re-approves either way, and in the second case it takes the permission back
+from whichever site holds it.
+
 `Shortfall` is a struct and not a verdict for exactly this reason, and the demo
 is the site making the choice the library refused to make for it.
 
@@ -959,7 +982,10 @@ is the site making the choice the library refused to make for it.
 An SPL token account has exactly one delegate, and `approve` replaces it rather
 than adding to it. Two sites therefore cannot both be delegated on the same
 token account: the second `approve` silently repoints the delegate, and the
-first site's next settle fails inside the token program as `DelegateMismatch`.
+first site's next settle fails inside the token program as `OwnerMismatch`,
+code 4 (corrected 2026-09-23; this said `DelegateMismatch`, which is the
+metering program's 6005 and is raised only by `open_contract` and
+`renew_contract`, neither of which runs in a settle).
 
 **It belongs in §8 because of the shape of that failure.** Nothing rejects the
 second `approve` — it succeeds — and the damage surfaces later, on the *first*
@@ -1053,20 +1079,52 @@ the question does not start from scratch.
 
 #### What the demo does
 
-The demo uses the ATA, so within it a reader has one contract, which is all one
-site needs. What it owes the reader is the check that requirement 5's absence
-makes necessary: not to spend a signature on a transaction that cannot succeed.
+**Rewritten 2026-09-23. The previous version described this as preflight, and
+it is not.** It said the demo declines to ask for an approval "that will fail
+as `DelegateMismatch` after the reader has paid a fee". That approval does not
+fail. `approve` precedes `open_contract` in the same transaction, so the
+approve overwrites the delegate and the open's own delegate check then finds
+this site's contract and passes. The transaction succeeds, the reader pays a
+fee for something that worked, and the damage lands on the other site. There is
+nothing here to preflight, because nothing the reader is about to sign is going
+to be refused.
 
-It already holds what it needs in order to tell. The payer's token account is
-decoded on the `set_meter` screen for the balance display, so its `delegate`
-field is in hand, and that field either names this site's contract PDA, names
-something else, or is empty. When it names something else, the screen says so
-and explains the choice — close the other contract, or use a different token
-account — instead of asking for an approval that will fail as `DelegateMismatch`
-after the reader has paid a fee.
+So what the demo owes the reader is not a refusal but a disclosure, and what it
+owes the other site is not to revoke a permission on its behalf. Three checks,
+all of them the same comparison: is the `delegate` field this site's contract
+PDA? The library cannot answer that, because `diagnose` reports
+`delegate_present` as "some delegate is set" — true of another site's delegate
+as much as of this one's — so the comparison belongs to the site, and in this
+demo it is one method on the reader's decoded account state.
 
-That is preflight in the general sense the library means it: check what the
-program will check, before the payer pays to be told.
+1. **Before asking for an approval.** The payer's token account is already
+   decoded on the `set_meter` screen for the balance display, so the field is
+   in hand. When it names something other than this site's contract, the screen
+   says so before the wallet dialog opens, names the address the approval is
+   about to replace, and says that the other site will not find out until it
+   next tries to collect.
+2. **Before building a close.** SPL `revoke` clears whatever delegate is set
+   rather than a particular one, so a close that always revoked would take
+   another site's permission with it. When the field is not this site's
+   contract, the demo sends `close_contract` alone. The server answers the
+   question from the account it has just read, in `/meter/close/prepare`, and
+   the browser builds the pair or the single instruction from that answer. The
+   receipt reads the field back afterwards, where a surviving delegate is an
+   alarm when it is this site's and the expected outcome when it is not.
+3. **When a settle is refused.** §8.2's `OwnerMismatch` paragraph: the screens
+   say whether the field is empty or names somebody else, because those are not
+   the same news to a reader.
+
+The demo still uses the ATA, so within it a reader has one contract, which is
+all one site needs. Requirement 5's absence is what makes these three checks
+necessary: a reader who cannot easily hold a second token account is a reader
+whose one account the sites take turns overwriting.
+
+What the demo does **not** do is walk the reader through the alternatives. An
+earlier version of this section had the screen explain the choice — close the
+other contract, or use a different token account — and it does not. It states
+the consequence and lets the reader decide, because the second of those
+alternatives is requirement 5's gap and no wallet makes it ordinary.
 
 ## 9. The inspector
 
