@@ -1,8 +1,8 @@
 # sol-pay demonstrator
 
-A working site that meters a small set of articles with
-[sol-pay](https://github.com/wbreeze/sol-pay), on devnet, against a token it
-issues itself.
+A working site that meters a small set of articles on the Solana blockchain
+using [sol-pay](https://github.com/wbreeze/sol-pay) on devnet, against a token
+it issues itself.
 
 [`SPEC.md`](SPEC.md) is this site's design, and every platform choice in
 [SPEC.md §12](SPEC.md#12-platform) is decided and in service: PHP with Slim 4,
@@ -49,46 +49,46 @@ and the argument for it. In the order that builds:
 1. [What a dime has to do](content/MeteredPayEconomics.md) — at a penny,
    pay-per-view cannot come near what advertising earns. At about a dime it
    can, without tracking anyone, if one page view in five is paid for.
-2. [The first transaction, and the one that counted](content/FirstEverOnChain.md)
-   — a validator accepted the first transaction this site's server ever built.
-   The library's specification had already written down what would count as
-   proof, and a transfer was not it.
-3. [The ID of what's paying](content/NoSignInPage.md) — every site that
+1. [The ID of what's paying](content/NoSignInPage.md) — every site that
    monetizes itself reaches for the same shape first: prove who you are, then
    we'll leverage your use. What the meter actually needs to know is never a
    person.
-4. [The permission nobody shows you](content/TheDelegate.md) — setting a limit
+1. [Privacy](content/privacy.md) — not a privacy policy. The list of what this
+    site holds about a reader, short enough to print in full.
+1. [How to read the inspector](content/ReadingTheInspector.md) — the panel at
+    the foot of every page, section by section: what each one says, and what
+    the site had to do to be able to say it.
+1. [The permission nobody shows you](content/TheDelegate.md) — setting a limit
    grants a permission, and most wallets never display it. A site that meters
    this way should point at the account where the permission lives, so the
    reader can look without the site in between.
-5. [What the limit promises](content/WhatTheLimitPromises.md) — a limit is not
+1. [What the limit promises](content/WhatTheLimitPromises.md) — a limit is not
    a reading budget. The site signs every charge alone and can charge up to the
    limit whenever it likes. The limit is the most the reader can lose.
-6. [The approval that quietly replaces another](content/OneDelegate.md) — a
-   token account has room for exactly one delegate. Authorizing a second site
-   from the same account takes the first site's permission away, and nothing
-   fails until that site next tries to collect.
-7. [The request nobody made](content/RequestNobodyMade.md) — this site charged
+1. [The request nobody made](content/RequestNobodyMade.md) — this site charged
    for an article on a GET, and a browser makes that kind of request whenever
    it likes. Moving the charge to a POST closed a hole and removed the longest
    silent wait on the site.
-8. [Two orderings that disagree on purpose](content/TwoOrderings.md) — charging
+1. [Two orderings that disagree on purpose](content/TwoOrderings.md) — charging
    records the grant without waiting for the chain. Closing waits for the chain
    and then checks the account before deleting anything. Making the two match
    would put a bug in one of them.
-9. [The error log that keeps a reader's spending](content/TheLogs.md) — a
+1. [The error log that keeps a reader's spending](content/TheLogs.md) — a
    failed charge returns a number that does not say which program raised it.
    The answer is in the transaction logs, and so is the reader's wallet address
    and spending.
-10. [Three wallets, one name, and a refusal that wasn't true](content/ThreePhantoms.md)
+1. [The approval that quietly replaces another](content/OneDelegate.md) — a
+   token account has room for exactly one delegate. Authorizing a second site
+   from the same account takes the first site's permission away, and nothing
+   fails until that site next tries to collect.
+1. [Three wallets, one name, and a refusal that wasn't true](content/ThreePhantoms.md)
     — this site told a perfectly good wallet that it did not support a feature
     the wallet was advertising. The site had thrown it away and kept a
     different one with the same name.
-11. [How to read the inspector](content/ReadingTheInspector.md) — the panel at
-    the foot of every page, section by section: what each one says, and what
-    the site had to do to be able to say it.
-12. [Privacy](content/privacy.md) — not a privacy policy. The list of what this
-    site holds about a reader, short enough to print in full.
+1. [The first transaction, and the one that counted](content/FirstEverOnChain.md)
+   — a validator accepted the first transaction this site's server ever built.
+   The library's specification had already written down what would count as
+   proof, and a transfer was not it.
 
 ## Content
 
