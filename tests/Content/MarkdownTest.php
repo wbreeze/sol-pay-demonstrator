@@ -111,6 +111,17 @@ final class MarkdownTest extends TestCase
                 'sample' => "1. first\n2. second\n",
                 'expect' => ['<ol>', '<li>first</li>'],
             ],
+            // Not a syntax anybody defined, which is why nothing caught it
+            // for a fortnight: two hyphens rendered as two hyphens, and the
+            // same keystroke is right in `wasm-client/SPEC.md`, which goes
+            // through a converter that folds it into a dash. The detector
+            // excludes a longer run, so a table's delimiter row and a front
+            // matter fence are not this.
+            'an em dash from two hyphens' => [
+                'detect' => '/(?<!-)--(?!-)/',
+                'sample' => "Two hyphens -- typed like this -- mean a dash.\n",
+                'expect' => ['Two hyphens — typed like this — mean a dash.'],
+            ],
             // A piece carries its illustrations as pairs of images, one per
             // colour scheme, and `site.css` hides the one the scheme is not —
             // so the `src` has to survive intact or the rule matches nothing.
@@ -169,6 +180,46 @@ final class MarkdownTest extends TestCase
                 'gets' => 'nothing; it is stripped on purpose, so §10.3 cannot be broken by a body',
             ],
         ];
+    }
+
+    /**
+     * The em dash conversion stops at the edge of code, and it stops short of
+     * guessing.
+     *
+     * Separate from the fixture because these are the cases where getting it
+     * wrong would be worse than not doing it at all. A code span is where a
+     * reader finds something to type, so `--no-dev` folded into `—no-dev` would
+     * be an instruction that fails for whoever trusts it. Code is literal
+     * before inline parsing reaches it, so this holds by construction — and it
+     * is asserted rather than trusted, because "by construction" is the kind of
+     * claim that stops being true when somebody changes the dialect.
+     *
+     * A run of three or more is left as typed. At the start of a line it is a
+     * thematic break, a setext underline or a front matter fence, all of them
+     * blocks; anywhere else, printing what was written beats inventing a dash
+     * the writer may not have meant.
+     */
+    public function testTheEmDashStopsAtCodeAndAtLongerRuns(): void
+    {
+        $converter = Markdown::converter();
+
+        $span = (string) $converter->convert("Install with `composer install --no-dev` first.\n");
+        self::assertStringContainsString('<code>composer install --no-dev</code>', $span);
+        self::assertStringNotContainsString('—', $span, 'a flag a reader is meant to type');
+
+        $fenced = (string) $converter->convert("```\nbin/sweep --verbose\n```\n");
+        self::assertStringContainsString('bin/sweep --verbose', $fenced);
+        self::assertStringNotContainsString('—', $fenced);
+
+        $longer = (string) $converter->convert("Three --- hyphens mid-sentence.\n");
+        self::assertStringContainsString('Three --- hyphens', $longer);
+
+        // The front matter fence and a table's delimiter row are blocks, parsed
+        // before any inline parser runs. Asserted because both are three-hyphen
+        // runs sitting in every piece in `content/`.
+        $table = (string) $converter->convert("| a | b |\n| --- | --- |\n| 1 | 2 |\n");
+        self::assertStringContainsString('<table>', $table);
+        self::assertStringNotContainsString('—', $table);
     }
 
     /** The fixture: every sample above, in one body, separated as blocks. */

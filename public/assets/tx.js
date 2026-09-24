@@ -26,7 +26,7 @@ export function context(panel) {
     const status = panel && panel.querySelector('[data-status], [data-meter-status]');
 
     // For the console, on a machine Claude cannot reach.
-    const trace = { prepare: null, instructions: null, wire: null, timings: {}, error: null };
+    const trace = { prepare: null, signIn: null, instructions: null, wire: null, timings: {}, error: null };
     window.__newsprint = trace;
 
     const say = (message, kind = 'note') => {
@@ -348,6 +348,15 @@ export function signatureToString(signature) {
  * wallet bug until you can see the clock.
  *
  * Same destination as the wallet diagnostics: var/wallet-reports/.
+ *
+ * **`signIn` was added on 2026-09-23, and it closes the one gap this report had
+ * when it mattered.** On 2026-09-10 three identical `-32603 "Unexpected error"`
+ * reports came out of Phantom during `solana:signIn`, and every one of them
+ * carried `prepare: null` and `instructions: []` — because those belong to the
+ * transaction paths and sign-in has neither. The cause turned out to be
+ * Phantom's side panel not noticing it had locked, so nothing on this side was
+ * wrong; had it been, the first thing anybody would have wanted was the input
+ * the wallet was handed, and the report did not have it.
  */
 async function report(ctx, error) {
     try {
@@ -361,6 +370,11 @@ async function report(ctx, error) {
                 error: describeError(error),
                 timings: ctx.trace.timings,
                 prepare: ctx.trace.prepare,
+                // The challenge this page handed the wallet, when the failure
+                // was on the sign-in path. No signature and no signed message:
+                // what a diagnosis needs is the *input*, and the output is the
+                // reader's to give away rather than this page's.
+                signIn: ctx.trace.signIn,
                 instructions: (ctx.trace.instructions || []).map((ix) => ({
                     programAddress: ix.programAddress,
                     accounts: ix.accounts,

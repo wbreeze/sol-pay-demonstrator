@@ -27,6 +27,12 @@ const choices = panel && panel.querySelector('[data-wallet-choices]');
 async function runSignIn(wallet) {
     say('Waiting for ' + wallet.name + '…');
     const challenge = await post('/signin/challenge');
+
+    // Written down before the wallet is called, because the call is what fails:
+    // a `-32603` out of an extension leaves this page holding the only record
+    // of what it asked for. See the `signIn` note in `tx.js`'s `report`.
+    ctx.trace.signIn = { wallet: wallet.name, input: challenge.input };
+
     const output = await signIn(wallet, challenge.input);
 
     await post('/signin/verify', {

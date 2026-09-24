@@ -18,6 +18,12 @@ declare(strict_types=1);
  * of not committing generated files.
  *
  * Usage:  bin/build-content [--quiet]
+ *
+ * `NEWSPRINT_CONTENT_SOURCE` and `NEWSPRINT_CONTENT_TARGET` move the two
+ * directories, which is how a test drives this script over a fixture instead of
+ * over `content/`. The front matter rules below are refusals a reader never
+ * sees, and a refusal nothing exercises is a refusal that can quietly stop
+ * refusing.
  */
 
 use League\CommonMark\Extension\FrontMatter\Output\RenderedContentWithFrontMatter;
@@ -39,8 +45,8 @@ if (!class_exists(\Symfony\Component\Yaml\Yaml::class)) {
 }
 
 $root = dirname(__DIR__);
-$source = $root.'/content';
-$target = $root.'/var/content';
+$source = (string) (getenv('NEWSPRINT_CONTENT_SOURCE') ?: $root.'/content');
+$target = (string) (getenv('NEWSPRINT_CONTENT_TARGET') ?: $root.'/var/content');
 $quiet = in_array('--quiet', $argv, true);
 
 if (!is_dir($target) && !mkdir($target, 0o755, true) && !is_dir($target)) {
@@ -141,6 +147,18 @@ foreach (glob($source.'/*.md') ?: [] as $path) {
         exit(1);
     }
 
+    // `status` decides whether a piece is published, and nothing checked it.
+    // The default when the key is absent is `published`, and every reader of
+    // the value asks `=== 'draft'` — `Piece::isDraft()` and `DateAudit` both —
+    // so a typo does not fall back to the safe answer. It publishes. A draft
+    // spelled `draftt` would go out with its dates unaudited, which is the one
+    // mistake in this file that a reader sees before anybody else does.
+    $status = (string) ($front['status'] ?? 'published');
+    if (!in_array($status, ['draft', 'published'], true)) {
+        fwrite(STDERR, "{$name}: 'status' is '{$status}'; it must be 'draft' or 'published'\n");
+        exit(1);
+    }
+
     $body = $rendered->getContent();
 
     // The title is written once, in the front matter, and rendered once, by
@@ -165,7 +183,7 @@ foreach (glob($source.'/*.md') ?: [] as $path) {
         'lede' => trim((string) ($front['lede'] ?? '')),
         'reading_time' => (int) ($front['reading_time'] ?? max(1, (int) ceil($words / 238))),
         'metered' => $metered,
-        'status' => (string) ($front['status'] ?? 'published'),
+        'status' => $status,
         'created' => $dates['created'],
         'revised' => $dates['revised'] ?? null,
         'source' => $name,

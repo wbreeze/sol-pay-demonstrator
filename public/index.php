@@ -1573,4 +1573,21 @@ $app->get('/health', function (Request $request, Response $response) use ($confi
  */
 $app->add(new RpcTimingMiddleware());
 
-$app->run();
+/**
+ * **Run it, unless somebody asked for the app itself** (2026-09-23).
+ *
+ * A real SAPI — `php -S`, fpm, anything pointed here — is present to serve a
+ * request, so this runs. Under the CLI it is a test that has `require`d this
+ * file, and what a test wants is `$app->handle()` against *this* routing table:
+ * the routes, the middleware and the wiring as they actually are, rather than a
+ * second assembly of them in a fixture that can drift from this one.
+ *
+ * Two lines rather than a `bootstrap/app.php`, because seven tests and several
+ * SPEC sections name `public/index.php` by path, and the point of the change is
+ * to make this file testable rather than to move it.
+ */
+if (PHP_SAPI !== 'cli') {
+    $app->run();
+}
+
+return $app;

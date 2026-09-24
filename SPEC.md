@@ -277,6 +277,15 @@ Two reasons, and the first is that sol-pay's own diagram never had one.
 and "viewer not identified" goes straight to `set_meter`. The screen was this
 document's addition, and §6 admitted as much.
 
+**And neither does this repository's own flow diagram, since 2026-09-13.**
+`metered-request.plantuml` had a `sign_in` branch on the no-session path, which
+made the diagram the last place the screen still existed; `94da085` replaced it
+with a note reading that identifying happens on the article and there is no
+sign-in page. Recorded here because a diagram that disagrees with a published
+article is the kind of thing somebody finds by reading rather than by testing —
+and because this document went on listing the old branch as an outstanding job
+for five days after it was fixed.
+
 The second is the site's own argument. A page whose only purpose is to collect
 an identity reads as identifying for tracking, which is the thing §10 disputes.
 The identification here is real but narrow — one address, one session id — and
@@ -622,6 +631,16 @@ article and is the defect most likely to be shipped by an integrator who wires
 The demo issues a **view grant**: on a successful meter, the server records
 `(wallet, article, expires_at)` with a thirty-minute life. A request that finds
 a live grant is served without touching the chain.
+
+**The guards that hold this, named here so the list is somewhere**
+(2026-09-23). `PrerenderTest` drives a real prerender and fails if the page
+charges before the reader opens it; `SessionCookieTest` pins `SameSite=Lax`,
+which is what stops a cross-site POST arriving with a session;
+`MeterMiddlewareTest` covers the server's own refusal of a request carrying
+`Sec-Purpose: … prerender`, which is the half that does not depend on the
+page's script being right; and `RouteTest` asks the routing table itself
+whether any GET route can reach a `Meter`, by reading what each route's handler
+closed over rather than by looking for names somebody remembered to check.
 
 Thirty minutes is a policy number with no chain meaning, and it is settled at
 thirty. It says a reader who paid for an article may finish it, follow a link
@@ -1137,7 +1156,7 @@ Four things to show. **Amended 2026-09-08:** the panel renders them as up to
 seven headings, because the first two split by provenance rather than by topic
 and the split is the point. **Amended 2026-09-12:** there are up to eight, and
 they run in the order below rather than the order they were once written in —
-*What the short names mean*, *Preflight, for this request*, *The last
+*The values, in full*, *Preflight, for this request*, *The last
 transaction* (only on a request that made one), *You, on chain*, *Treasury*,
 *Configuration drift* (only when config and chain disagree), *Site account,
 decoded*, *Deployment*. Both amendments are argued further down. The four
@@ -1189,10 +1208,42 @@ or an explorer.
 **Amended 2026-09-12: the short names are defined once, at the top, and used
 alone below.** What this section already asked of the *site* — the alias alone,
 the base58 one click away — now holds inside the panel as well. Its first
-section is **What the short names mean**: one row per long value, the short
+section is **The values, in full**: one row per long value, the short
 name, the value with the explorer link on it and the copy button after it, and
 its provenance on the line beneath. Every other section writes the short name,
 linked to its row.
+
+**Amended 2026-09-14: the heading is *The values, in full*, and the row says
+what its value is before it says where it came from.** *What the short names
+mean* described an expansion, and the table had stopped being one: it states
+what each value **is**. *The address table* was declined over a single row —
+the instruction's bytes are not an address. Each row's line is now `<meaning>:
+<derivation>`, meaning first, because a reader looking up `CPDAcat` wants to
+know what it is before wanting to know how it was computed. An unplaced address
+says what it is rather than carrying a blank line where every other row has a
+sentence.
+
+**Amended 2026-09-14: the panel's explanatory notes are gone, and one line and
+a link stand where they were.** Every section had carried a `note`; all of them
+were deleted, with the template branch and the CSS rule that styled them, and
+the panel body fell from 3,243px to 2,569px. The surviving sentence is this
+section's own obligation — that the short names are this site's invention —
+said once, with a link to the piece that explains the panel at length. It lives
+in the sections partial rather than the outer template, because a deferred page
+renders only the partial and a preamble in the outer one is a preamble most
+readers never see. The two alarm states kept a sentence each, as the row's own
+claim rather than as a note: background work can wait for an article, a failed
+read cannot.
+
+**Amended 2026-09-17: the serve-first rows** (§7.3). A charging request now
+answers before the chain has confirmed, so the panel gained the lines that says
+so: that the article was served *before* the charge was known to have landed,
+the instruction carry that keeps the bytes on screen when the follow-up brings
+the outcome, the absorbed charge's claim — *failed, so nothing moved*, because
+a failed transaction emits no event and "the event says which" would be a
+citation of nothing — and a `test fault` row, which names the injected fault
+when one is set so that a screen produced by `NEWSPRINT_CHARGE_FAULT` cannot be
+mistaken for one the chain produced.
 
 Counted before the change, on a charging view with a payer and a landed
 transaction: **21 address occurrences of 9 distinct addresses** — the
@@ -1299,7 +1350,9 @@ Showing the instruction bytes beside the transaction is what makes the demo
 useful to someone who is about to write their own. It is also a live check on
 the library's claim that its output drops straight into a transaction message.
 
-Three things this section is not, decided 2026-09-08 when it was built.
+What this section is not, decided 2026-09-08 when it was built and added to
+since. (This said "three things" and the list has outgrown the number twice;
+the number is gone rather than maintained.)
 
 **"Last" means this request's, and §10.4 is why.** This site keeps no record of
 a reader's metering calls, so there is no earlier transaction for the panel to
@@ -1482,6 +1535,14 @@ privacy policy. It is the complete list of what the site holds, followed by the
 argument that the list is short because of how the reader is paying.
 
 Public, reachable without signing in, and linked from the footer of every page.
+
+**Amended 2026-09-14: it is served at `/a/privacy`, and `/privacy` is a
+permanent redirect to it.** The promise is the URL a reader can type and the
+footer can link, and `GET /a/{slug}` already serves an unmetered piece whole —
+so a second renderer for one page was a copy of the article path that could
+drift from it. A 301 keeps the address; the piece is rendered by the same code
+as everything else. The site's own links and the content still point at
+`/privacy`, which is the address worth keeping stable.
 
 **The argument, in three moves.**
 

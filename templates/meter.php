@@ -114,7 +114,7 @@ $contract = $meter['contract'];
                size="8">
         <?= $symbol ?>
     </label>
-    <p class="fine" data-floor>
+    <p class="fine">
         The smallest limit you can set is
         <?= View::e((string) $meter['limit_floor']) ?> <?= $symbol ?>.
     </p>

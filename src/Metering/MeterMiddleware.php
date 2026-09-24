@@ -40,10 +40,22 @@ use Slim\Routing\RouteContext;
  * This used to be a GET, and a GET that charges needs defending from
  * everything that makes GETs for its own reasons. The defence was a list of
  * prefetch headers — `Sec-Purpose`, `Purpose`, `X-Moz` — which covered the
- * requests that announced themselves and nothing that did not. It is gone
- * because the hazard is gone. What remains is a prerendered page *running
- * the script* that sends this POST, and that is answered where it arises, in
- * `assets/read-on.js`, which waits for `document.prerendering` to clear.
+ * requests that announced themselves and nothing that did not. Most of it is
+ * gone because most of the hazard is gone. What remains is a prerendered page
+ * *running the script* that sends this POST, and that is answered where it
+ * arises, in `assets/read-on.js`, which waits for `document.prerendering` to
+ * clear.
+ *
+ * **`Sec-Purpose` came back for that one case, on 2026-09-23, and it is the
+ * server's half of the same guard.** A prerendering document's own subresource
+ * requests carry the header its navigation carried, so a POST sent while the
+ * page is still prerendering says so on the way in. The script is the right
+ * place for the check and this is the place that does not depend on the script
+ * being right: `PrerenderTest` proves the page waits, and a browser that runs
+ * the script anyway, or a speculation-rules implementation that differs, gets
+ * refused here instead of charging a reader who never opened the article. Two
+ * checks for one hazard, on opposite sides of the request, and the cheap one
+ * is here.
  *
  * A POST is also why a cross-site page cannot spend a reader's money by
  * embedding a form: the session cookie is `SameSite=Lax`, which a browser
@@ -72,6 +84,13 @@ final class MeterMiddleware implements MiddlewareInterface
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
+        // First, before the route is even looked at: a request that announces
+        // itself as prerendering should cost this site nothing at all, and the
+        // header is the one fact here that needs no other fact to read it.
+        if (self::prerendering($request)) {
+            return $handler->handle($request);
+        }
+
         $slug = RouteContext::fromRequest($request)->getRoute()?->getArgument('slug');
         $piece = is_string($slug) ? ($this->piece)($slug) : null;
 
@@ -144,5 +163,15 @@ final class MeterMiddleware implements MiddlewareInterface
         // moved to the request that can make it mean something.
 
         return $handler->handle($request->withAttribute(self::ATTRIBUTE, $result));
+    }
+
+    /**
+     * `Sec-Purpose: prefetch;prerender`, matched on the word rather than on the
+     * whole value, because the field is a token list and `prefetch` alone is a
+     * different thing: a prefetched POST is not a POST a browser makes.
+     */
+    private static function prerendering(ServerRequestInterface $request): bool
+    {
+        return str_contains(strtolower($request->getHeaderLine('Sec-Purpose')), 'prerender');
     }
 }

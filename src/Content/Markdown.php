@@ -60,6 +60,11 @@ final class Markdown
         // so in a form that goes red.
         $environment->addExtension(new TableExtension());
 
+        // Not a syntax, which is why nothing caught it: `--` typed in a body
+        // stayed two hyphens. See {@see EmDashParser}.
+
+        $environment->addInlineParser(new EmDashParser());
+
         return new MarkdownConverter($environment);
     }
 }
