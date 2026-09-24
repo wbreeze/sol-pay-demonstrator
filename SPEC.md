@@ -2450,72 +2450,196 @@ a second toolchain. They are compatible only because both dependencies ship a
 form that needs no build step, which was a fact to check rather than a thing to
 assume.
 
-What is genuinely still open:
+What is genuinely still open: nothing on this list. The site authority key was
+the last of them, and §15 now answers it as far as a specification can. That
+section states the bound on what the key authorizes, what a deployment should
+not copy from this one, and what changing the key costs. Where to hold the key
+is left to the integrator on purpose, with the factors written down.
 
-**The site authority key**, tabled at §15.
-
-That is the only one left on this list, but §5 closed with a **risk rather than
-a resolution**, and it should be read as such: requiring `signIn` with no
-fallback narrows the demo to wallets that offer the feature, and the only
-primary source found says that is Phantom's extension, with its mobile support
-described as coming rather than shipped. The desktop half has since been
-settled by measurement (§5, 2026-09-07); whether §6.3's Android and iOS paths
-can sign in at all is still unknown until someone tries it on a device.
-That is a test, not a decision, which is why it is not a §14 question — but it
-is the one that could send §5 back here.
+§5, though, closed with a **risk rather than a resolution**, and it should be
+read as such: requiring `signIn` with no fallback narrows the demo to wallets
+that offer the feature, and the only primary source found says that is
+Phantom's extension, with its mobile support described as coming rather than
+shipped. The desktop half has since been settled by measurement (§5,
+2026-09-07); whether §6.3's Android and iOS paths can sign in at all is still
+unknown until someone tries it on a device. That is a test, not a decision,
+which is why it is not a §14 question — but it is the one that could send §5
+back here.
 
 That is the whole list. The grant lifetime was on it and is now settled at
 thirty minutes for the reasons in §7.1; the platform choice was on it and is
 settled at §12.1; the front end was on it and is settled at §12.2 and §12.3.
 
-## 15. Deferred: the site authority key
+## 15. The site authority key
 
-**Status: tabled 2026-09-02. Not yet discussed, not yet decided.** This section
-is the agenda, not the answer.
+**Decided 2026-09-24, by scoping rather than by choosing.** This document does
+not say where an integrator should keep the site authority key. Custody depends
+on the deployment, and a specification that named one arrangement would be
+copied without the reasoning that produced it. What this section does state is
+everything an integrator needs before making that choice: the bound on what the
+key authorizes, what may be held by a different key, what this demonstrator does
+that a deployment should not copy, what changing the key costs, and the factors
+that bear on the decision.
 
-§4.4 says the demo holds a devnet key controlling nothing of value and moves
-on. §12.0 makes that more true than it was — the key is generated on the
-machine of whoever runs the copy, funded by a devnet airdrop, and shared with
-nobody. That is fine for the demo and useless to an integrator, who will hold a key
-that controls a real revenue stream against real readers' authorizations. The
-demo is the reference integration (§1), so it owes them a written answer rather
-than a shrug — and the answer belongs here, in the spec, rather than in a
-comment beside an environment variable.
+Every claim below was read from the program's own source and from this
+repository's `Provisioner`, on 2026-09-24, rather than recalled.
 
-What the discussion has to settle:
+### 15.1 What the key authorizes
 
-**What the key actually authorizes.** `meter_and_settle` is the only
-instruction it signs, and the program enforces that with `has_one = authority`.
-The bound on a compromise is therefore not "the treasury" but "every open
-contract, drawn to its limit" — the sol-pay README's point that the limit is
-trust rather than pacing, read from the attacker's side. The key cannot move
-money anywhere but the treasury named in the `Site` account, cannot change
-site pricing without `initialize_site`, and cannot touch a wallet that has not
-opened a contract. Stating the blast radius precisely is the first half of the
-work, because it is smaller than an integrator will assume and that changes
-what custody is proportionate.
+After setup, `meter_and_settle` is the only instruction the site authority
+signs. The program binds it with `has_one = authority` on the `Site` account.
 
-**Where the key lives.** Environment variable, file, KMS or HSM with the
-signing call remote, or a separate signing service the request path talks to.
-Each has a different answer to "who can read it" and a different cost in the
-per-request latency §7.3 already cares about.
+**The key does not sign the transfer.** The delegate on the reader's token
+account is the contract PDA, and the program signs as that PDA with the
+contract's own seeds inside the cross-program invocation. The authority's
+signature authorizes the *call*; the program authorizes the *movement*.
 
-**Whether the request path should hold it at all.** Metering is the one thing
-sol-pay makes synchronous with page delivery, which is what puts a signing key
-in a web-facing process. Whether that is necessary, or whether the meter can be
-enqueued and settled out of band without breaking the grant logic in §7.1, is a
-design question rather than an operational one.
+**The destination is fixed at initialization.** `meter_and_settle` constrains
+the treasury with `address = site.treasury`, recorded when the site was
+initialized. A compromised key cannot redirect a settlement to an account of the
+attacker's choosing.
 
-**Rotation.** The `Site` PDA is seeded by the authority address
-(`wasm-client/SPEC.md` §4.5), so rotating the authority changes the site
-address and orphans every existing contract, which is derived from it. That
-appears to make rotation a migration rather than a key swap. Confirm against
-the program before writing it down.
+**Each call is bounded twice**, by the contract's limit and by the reader's
+`delegated_amount`, whichever binds first. Neither is a number the authority
+sets after the fact: the reader agreed to both.
 
-**Separation.** The demo already splits the site authority from the faucet key
-(§4.4). Whether a real deployment wants further separation — per-environment
-keys, a distinct key for `initialize_site` that is not online at all — follows
-from the blast radius above.
+So the bound on a compromise is **every open contract of this site, drawn to its
+limit, into the treasury**. It is not the treasury's balance, and it is not any
+wallet on the chain. The key cannot reach a wallet that has never opened a
+contract with this site. It cannot open, renew or close a contract, because the
+reader signs all three. It cannot change the site's parameters, because the
+program has no instruction that changes them — `initialize_site` runs once
+against a PDA seeded by the authority, and nothing updates that account
+afterwards.
 
-**What to tell an integrator not to copy.** The demo's own arrangement, in one
-paragraph, marked as such.
+That bound is smaller than most integrators will assume, and the difference
+matters: custody proportionate to "the treasury can be emptied" is the wrong
+size for this risk in one direction, and custody proportionate to "it only
+meters" is the wrong size in the other.
+
+Anything the key can do beyond the above follows from the accounts a deployment
+hands it rather than from the program. That is §15.2.
+
+### 15.2 Separation
+
+**The treasury may be any token account of the mint.** `initialize_site`
+constrains it only with `treasury.mint == mint`; `meter_and_settle` then
+requires the exact address recorded. Nothing requires the treasury to belong to
+the authority. A deployment may point it at an account owned by a key that never
+goes online, so that the online key draws payments and a cold key spends them.
+
+**This demonstrator does not do that.** `Provisioner` derives the treasury as
+the authority's own associated token account for the mint, so one key both draws
+the payments and owns where they land. That is deliberate for a demonstrator set
+up from one screen with one funded key. It is not a property to inherit, and it
+is the single most valuable separation available to a deployment.
+
+**What the demonstrator does separate**: the mint authority is the faucet key
+rather than the site authority, and the mint carries no freeze authority. A
+deployment metering a token it does not issue holds no mint authority at all,
+which retires the question rather than answering it.
+
+Roles worth holding apart, each independently:
+
+- the owner of the treasury, per the first paragraph above;
+- the fee payer. A transaction may carry a fee-paying signer beside the
+  authority; this demonstrator uses the authority for both, so its key must hold
+  SOL and be online for that reason as well as for signing;
+- per-environment keys, so that a compromise in staging is not a compromise in
+  production.
+
+**One separation the program forecloses.** The `Site` PDA is seeded by the
+authority address, and `meter_and_settle` requires `has_one = authority`. The
+key that ran `initialize_site` is therefore the key that meters, permanently. A
+setup key held offline and a metering key held online are not available as two
+keys. This is the same constraint that makes §15.4 a migration.
+
+### 15.3 What not to copy from this demonstrator
+
+Stated plainly, because §1 makes this repository the reference integration and a
+reference is copied.
+
+The authority key is **generated inside a web request** by the setup screen, and
+written to `var/authority.json` in the Solana CLI's format. The same web process
+reads that file on every metered page view. The key **pays every fee**. It
+**owns the treasury** (§15.2). All of it sits on one machine, unencrypted, with
+its safety resting on the file's permissions and on the fact that it holds
+devnet play money.
+
+§4.4 says as much, and §12.0 makes it deliberate: one language runtime, no
+toolchain, clone and run. Every one of those choices is right for a demonstrator
+and wrong for a deployment holding a real revenue stream.
+
+**The one part worth copying** is the shape rather than the storage.
+`Newsprint\Chain\Keypair` is the only place in this repository that signs
+anything. The secret is wiped with `sodium_memzero` after use, and the wiped
+state is named rather than left representable, so a read after a wipe is a
+refusal instead of a silently empty signature. Confining signing to one class is
+what would make a different custody arrangement a change in one file.
+
+### 15.4 Rotation is a migration
+
+Confirmed against the program: the `Site` PDA is seeded `["site", authority]`,
+a contract is seeded `["contract", site, payer]`, and **no instruction transfers
+or replaces the site authority**.
+
+A new authority is therefore a new site address, and a new site address is a new
+contract address for every reader. What follows, in order:
+
+1. The existing contracts survive, owned by the old site. Only the old key can
+   settle them.
+2. Every reader's `approve` names the old contract PDA as delegate. The new site
+   cannot draw against it. Each reader must open a contract with the new site
+   and approve again.
+3. §8.3's delegate check compares the token account's delegate with *this*
+   site's contract PDA, so after a rotation every existing reader reads as
+   delegated elsewhere — to the site's own former self.
+4. Usage accrued and unsettled on the old contracts can be collected only by the
+   old key, or forgiven by the reader closing the old contract.
+5. Pricing does not carry. The new site is initialized fresh.
+
+So rotation is a migration with reader-visible steps, not an operational key
+swap. A deployment that expects to rotate should design that migration before it
+needs one. A deployment that cannot migrate should treat the key as permanent,
+and choose custody on that basis.
+
+**A lost key is the same event without the old key's cooperation.** The site can
+never settle again. Readers recover by closing their contracts, which forgives
+the residue and revokes the delegate. That is the demonstrator's expected way to
+die, and §4.4 accepts it; a deployment accepting it should say so on purpose.
+
+### 15.5 Factors in the decision, without a recommendation
+
+The arrangements available are familiar — an environment variable, a file, a KMS
+or HSM with the signing call remote, a separate signing service the request path
+talks to. This document ranks none of them. These are the factors that decide
+between them for a given deployment:
+
+- **Who can read the key at rest, against who can use it without reading it.**
+  This is the axis that separates a file or an environment variable from a KMS,
+  an HSM or a signing service, and it is usually the first one that matters.
+- **What a compromise of the web-facing process yields.** §15.1 bounds the
+  damage under every arrangement; the arrangements differ in whether the
+  attacker also walks away with the key itself.
+- **Latency on the request path.** §7.2 puts metering inside page delivery. A
+  charging view is six RPC calls, our own code is 5–140 ms of it, and 97% of the
+  page is waiting on the endpoint. A remote signing call adds one round trip to
+  a path already spending several. Whether that is acceptable is a deployment's
+  judgement, not this document's.
+- **A new way to be unavailable.** A remote signer can fail while the chain is
+  healthy. §8 describes what a refused charge does to the page; a custody choice
+  that can be down on its own makes that path reachable with nothing wrong on
+  chain.
+- **Fee payment.** The authority must sign, and something must hold SOL. Whether
+  those are the same key is a choice (§15.2), and it changes what has to be
+  online.
+- **Recovery and succession**, given §15.4. Who else can act if the holder is
+  unavailable, and what the plan is if the key is lost, are questions with no
+  on-chain answer.
+- **How many environments exist**, and whether any of them share a key.
+- **The value actually at risk**, which is §15.1's sum of open contracts' limits
+  — plus the treasury balance, if and only if the deployment copies §15.2's
+  arrangement rather than separating the treasury.
+- **Obligations this document does not cover.** Contractual or regulatory
+  custody requirements outrank everything above, and they vary by jurisdiction
+  and by counterparty.

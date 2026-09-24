@@ -234,11 +234,16 @@ that job skips.
 ## What is still open
 
 [SPEC.md §14](SPEC.md#14-questions-this-document-leaves-open) collects the
-questions this design leaves open, and
-[SPEC.md §15](SPEC.md#15-deferred-the-site-authority-key) the one thing
-deliberately deferred.
+questions this design left open, and closes the last of them. What remains
+there is a test rather than a decision: whether the mobile wallets offer
+`signIn` at all, which needs a device.
+
+[SPEC.md §15](SPEC.md#15-the-site-authority-key) states what the site authority
+key authorizes, what a deployment should not copy from this one, and what
+changing the key costs. Where to hold the key is left to the integrator on
+purpose, with the factors that bear on the choice written down.
 
 ## Licence
 
-Dual licensed under either of Apache License, Version 2.0 or the MIT license,
-at your option — matching sol-pay.
+Dual licensed under either of [Apache License, Version 2.0](LICENSE-APACHE)
+or the [MIT license](LICENSE-MIT), at your option — matching sol-pay.
