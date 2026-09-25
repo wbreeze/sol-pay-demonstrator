@@ -2,7 +2,7 @@
 title: Privacy
 slug: privacy
 created: 2026-09-04
-revised: 2026-09-17
+revised: 2026-09-25
 metered: false
 status: published
 ---
@@ -50,8 +50,8 @@ never leaves this server, feeds nothing, and is gone within thirty-five minutes.
 Each receipt also carries the payment's transaction id and one word for what
 became of it. The id is already public on the chain. The word exists because
 the article is shown as soon as the payment is sent, before the chain has
-confirmed it. The site checks afterwards and writes down what it found, and
-if a payment never goes through, you keep the article anyway.
+confirmed it. The site checks afterwards and writes down what it found. If a
+payment never goes through, you keep the article anyway.
 
 We do count how many times each article has been bought. That is a fact about
 the article, we would like to know it, and it says nothing about you — the
