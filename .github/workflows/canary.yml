@@ -201,8 +201,18 @@ jobs:
         run: rm -f var/authority.json
 
   report:
-    # One issue, reopened and updated rather than a new one every morning. A
-    # canary that files a fresh issue daily is a canary someone mutes in a week.
+    # One open issue per condition, its body replaced each morning rather than
+    # a new issue or another comment. A canary that files a fresh issue daily
+    # is a canary someone mutes in a week, and one that appends the same
+    # paragraph every morning is the same thing more slowly.
+    #
+    # **A closed issue is not reopened, on purpose.** `--state open` cannot see
+    # one, so closing this as deferred or "won't fix" buys one quiet morning
+    # and a fresh issue on the next. That is the intended behaviour: the
+    # condition is still true, and a canary keeps singing until it is addressed
+    # for real. Silencing it means moving the pin, or teaching
+    # `bin/upstream-drift` to accept an acknowledged version — not closing a
+    # tab.
     name: report
     needs: [devnet, drift]
     if: ${{ always() && github.event_name == 'schedule' }}
@@ -223,11 +233,26 @@ jobs:
           note() { # title, label, body-file
             local title="$1" label="$2" body="$3"
             gh label create "$label" --description 'opened by the canary workflow' --color 'ededed' 2>/dev/null || true
+
+            # Said in the body because the body changes under the reader: an
+            # issue opened three weeks ago carries this morning's run link.
+            {
+              echo
+              echo '---'
+              echo
+              echo "*Replaced by each scheduled run. This is the canary's current reading; the issue's own date is when the condition was first seen.*"
+            } >> "$body"
+
             local existing
             existing="$(gh issue list --state open --label "$label" --limit 1 --json number --jq '.[0].number // empty')"
             if [ -n "$existing" ]; then
-              gh issue comment "$existing" --body-file "$body"
-              echo "commented on #$existing"
+              # Replace, do not append: the conditions reported here are
+              # standing states rather than events, so yesterday's wording is
+              # not history, it is the same sentence again. An edit also sends
+              # no notification, which is the right volume for news that has
+              # not changed.
+              gh issue edit "$existing" --body-file "$body"
+              echo "updated #$existing"
             else
               gh issue create --title "$title" --label "$label" --body-file "$body"
             fi
