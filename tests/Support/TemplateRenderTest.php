@@ -1096,6 +1096,36 @@ final class TemplateRenderTest extends TestCase
         self::assertStringNotContainsString('beneath', $beside);
     }
 
+    /**
+     * A section link leaves the site only when it says it does.
+     *
+     * `target="_blank" rel="noreferrer noopener"` was unconditional while the
+     * only link in the panel went to the block explorer. The first link to
+     * one of this site's own screens would have opened it in a second tab,
+     * which is a thing to notice once and never again.
+     */
+    public function testOnlyAnExternalSectionLinkOpensElsewhere(): void
+    {
+        $away = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'The last transaction',
+            'rows' => [['page views', '1']],
+            'link' => ['href' => 'https://explorer.solana.com/tx/FKb3eeBw', 'text' => 'This transaction on chain', 'external' => true],
+        ]]]);
+
+        self::assertStringContainsString('target="_blank"', $away);
+        self::assertStringContainsString('rel="noreferrer noopener"', $away);
+
+        $here = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'This site, on chain',
+            'rows' => [['status', 'not provisioned']],
+            'link' => ['href' => '/setup', 'text' => 'Run first-run setup'],
+        ]]]);
+
+        self::assertStringContainsString('href="/setup"', $here);
+        self::assertStringNotContainsString('target="_blank"', $here);
+        self::assertStringNotContainsString('rel=', $here);
+    }
+
     public function testTheDeferredEventRowSpansTheMirroredColumn(): void
     {
         $html = $this->renderStrictly('inspector-sections', ['sections' => [[

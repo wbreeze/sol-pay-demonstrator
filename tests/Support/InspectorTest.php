@@ -337,6 +337,32 @@ final class InspectorTest extends TestCase
      * value, or the template renders it in a column beside `not provisioned`
      * and the panel grows a second anatomy for two rows.
      */
+    /**
+     * The unprovisioned alarm routes, as well as reporting.
+     *
+     * The sentence says what is missing; a reader meeting it on the foot of
+     * an article has nowhere to go from there. `index.php` and `meter.php`
+     * both link to first-run setup, but the panel is the only thing on every
+     * page, so it is the only one that reaches an operator wherever they
+     * noticed.
+     *
+     * **Carried as the section's `link`, not as markup in the sentence.** The
+     * third cell renders through `View::e`, so a tag in that string arrives
+     * on screen as a tag. The shape already had a `link` for the explorer.
+     */
+    public function testTheUnprovisionedAlarmLinksToSetup(): void
+    {
+        $unprovisioned = $this->section($this->inspector()->sections(), 'This site, on chain');
+
+        self::assertSame('/setup', $unprovisioned['link']['href'] ?? null);
+        self::assertStringContainsString('setup', strtolower($unprovisioned['link']['text'] ?? ''));
+
+        // Same site, so the template must not send it to a new tab. The flag
+        // is absent rather than false: a link says what it is, and the one
+        // that goes elsewhere is the one that has to say so.
+        self::assertArrayNotHasKey('external', $unprovisioned['link']);
+    }
+
     public function testTheAlarmStatesKeepTheirSentence(): void
     {
         $failed = $this->section($this->inspector()->sections(null, 'getMultipleAccounts: HTTP 429'), 'This site, on chain');

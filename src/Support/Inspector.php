@@ -48,7 +48,7 @@ final class Inspector
      * fetches when it is opened rather than on the request that made it. See
      * {@see lastTransaction()} for why that read is deferred.
      *
-     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string}, event?: string}>
+     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string, external?: bool}, event?: string}>
      */
     public function sections(?SiteState $state = null, ?string $error = null, ?PayerState $payer = null, ?MeterResult $result = null): array
     {
@@ -137,7 +137,7 @@ final class Inspector
      *
      * Order of first appearance, which is the order a reader met them in.
      *
-     * @param list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string}, event?: string}> $sections
+     * @param list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string, external?: bool}, event?: string}> $sections
      *
      * @return ?array{heading: string, names: list<array{value: string, alias: string, explorer: bool, note: ?string}>}
      */
@@ -171,7 +171,7 @@ final class Inspector
     }
 
     /**
-     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string}, event?: string}>
+     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string, external?: bool}, event?: string}>
      */
     private function build(?SiteState $state = null, ?string $error = null, ?PayerState $payer = null, ?MeterResult $result = null): array
     {
@@ -254,6 +254,14 @@ final class Inspector
                     'not provisioned',
                     'First-run setup has not created the mint, the treasury or the site account yet.',
                 ]],
+                // The sentence says what is missing and the link says where to
+                // fix it. `index.php` and `meter.php` both offer the route as
+                // well, and neither is on the page an operator is most likely
+                // to be reading when they notice -- the panel is on all of
+                // them. Carried here rather than in the sentence because the
+                // third cell renders through `View::e` and a tag in it would
+                // arrive on screen as a tag.
+                'link' => ['href' => '/setup', 'text' => 'Run first-run setup'],
             ];
             $sections[] = $this->configuredPrices($params);
 
@@ -370,7 +378,7 @@ final class Inspector
      *
      * @param array<string, array{alias: string, derivation: ?string}> $known every address this request can name
      *
-     * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string}, event?: string, instructions?: string, carry?: string}
+     * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string, external?: bool}, event?: string, instructions?: string, carry?: string}
      */
     private function lastTransaction(MeterResult $result, array $known): array
     {
@@ -454,6 +462,9 @@ final class Inspector
             'link' => [
                 'href' => 'https://explorer.solana.com/tx/'.rawurlencode($signature).'?cluster=devnet',
                 'text' => 'This transaction on chain',
+                // Said rather than guessed from the scheme: the template opens
+                // a second tab for this and for nothing else.
+                'external' => true,
             ],
             'event' => $signature,
             // Which instruction rows belong to which transaction, so a follow-up

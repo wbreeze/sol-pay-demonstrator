@@ -93,8 +93,8 @@ $awaiting = $result->awaiting();
     <p class="pending">
         Another site's approval has replaced this one on your token account, so
         the transfer was refused. A token account holds one delegate at a time.
-        <a href="/meter">Renewing re-approves</a> here, and takes that site's
-        permission away in turn.
+        <a href="/meter">Renewing re-approves</a> here, and takes away the
+        other site's permission.
     </p>
 <?php endif ?>
 <?php elseif (($solvency['allowance_short'] ?? 0) > 0): ?>
@@ -161,7 +161,7 @@ $awaiting = $result->awaiting();
     <p>
 <?php if ($result->earlier): ?>
         Served from a grant you already hold. The site asked the chain one
-        thing — whether the charge for it had landed — and charged nothing.
+        thing — whether the charge had landed — and charged nothing.
 <?php else: ?>
         Served from a grant you already hold. <strong>The chain was not
         touched.</strong>
@@ -172,7 +172,8 @@ $awaiting = $result->awaiting();
         The network turned its charge down after the article reached you, so
         it cost you nothing.
 <?php elseif ($result->chargeState === ChargeState::Unknown): ?>
-        Its charge never reached the network, so it cost you nothing.
+        The charge that bought this article never reached the network, so the
+        article cost you nothing.
 <?php endif ?>
     </p>
 <?php elseif ($result->outcome === MeterOutcome::Absorbed): ?>
@@ -252,8 +253,8 @@ $awaiting = $result->awaiting();
 <?php else: ?>
         Heads up: another site's approval has replaced this one on your token
         account, so a settle would be refused.
-        <a href="/meter">Renewing re-approves</a> here, and takes that site's
-        permission away in turn.
+        <a href="/meter">Renewing re-approves</a> here, and takes away the
+        other site's permission.
 <?php endif ?>
 <?php else: ?>
         Heads up: the amount you approved is short by

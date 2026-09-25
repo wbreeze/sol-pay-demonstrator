@@ -200,8 +200,8 @@ $contract = $meter['contract'];
 <?php else: ?>
     <p>
         Another site's approval has replaced this one on your token account, so
-        the transfer was refused. Renewing re-approves here, and takes that
-        site's permission away in turn.
+        the transfer was refused. Renewing re-approves here, and takes away
+        the other site's permission.
     </p>
 <?php endif ?>
     <p><a href="/meter">Renew the meter</a></p>

@@ -119,7 +119,7 @@ document.addEventListener('submit', async (event) => {
         // the meter answers — reload and read it.
         ready(form);
         if (failed) {
-            failed.textContent = `That did not finish: ${error.message}. `
+            failed.textContent = `The advance did not finish: ${error.message}. `
                 + 'It may still have gone through — reload and read the meter before advancing again.';
             failed.hidden = false;
         }

@@ -54,7 +54,7 @@ async function ask() {
     } catch (error) {
         const failed = pending.querySelector('[data-charge-failed]');
         if (failed && failed.isConnected) {
-            failed.textContent = `Could not check on it: ${error.message}. Open the article again to see where it stands.`;
+            failed.textContent = `Could not check on the charge: ${error.message}. Open the article again to see where it stands.`;
             failed.hidden = false;
         }
     }

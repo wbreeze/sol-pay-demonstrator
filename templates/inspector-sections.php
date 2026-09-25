@@ -113,9 +113,14 @@ use Newsprint\Support\View;
 <?php endif ?>
             </table>
 <?php if (isset($section['link'])): ?>
+<?php /* A second tab for a link that leaves this site, and for no other.
+         These attributes were unconditional while the only link in the panel
+         went to the block explorer, so the first one pointing at one of this
+         site's own screens would have opened it away from the page the reader
+         was standing on. The section says which kind it is; the template does
+         not infer it from the scheme. */ ?>
             <p class="section-link">
-                <a href="<?= View::e($section['link']['href']) ?>"
-                   rel="noreferrer noopener" target="_blank"><?= View::e($section['link']['text']) ?></a>
+                <a href="<?= View::e($section['link']['href']) ?>"<?= ($section['link']['external'] ?? false) ? ' rel="noreferrer noopener" target="_blank"' : '' ?>><?= View::e($section['link']['text']) ?></a>
             </p>
 <?php endif ?>
         </section>
