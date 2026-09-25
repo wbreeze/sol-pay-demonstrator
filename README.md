@@ -169,6 +169,68 @@ is not keeping.
 `bin/run-dev` runs no schedule. On a development copy the charge-time sweep is
 enough.
 
+## The endpoints
+
+What this server answers, and the one property worth knowing before reading
+any of it: **a GET never meters**
+([SPEC.md §7.1](SPEC.md#71-one-charge-per-article-not-per-request)). That is a
+property of the table rather than a habit of the handlers. `RouteTest` reads
+what every GET closure captured, and a handler that can charge has to have the
+metering factory in scope, so a route added tomorrow under a name nobody
+predicted is covered too.
+
+`EndpointDocsTest` keeps the tables below honest about which routes exist. It
+cannot keep them honest about what the routes do.
+
+### Pages a reader opens
+
+| route | what it is |
+| --- | --- |
+| `GET /` | the index — the metered pieces, newest first, with teasers (`SPEC.md` §6.1) |
+| `GET /a/{slug}` | the article, or the meter in its place. It cannot charge |
+| `GET /meter` | `manage_meter`: reachable at any time rather than only at the limit (`SPEC.md` §6) |
+| `GET /privacy` | a 301 to `/a/privacy`. `SPEC.md` §10.2 asks that the URL carry the page, not that a second handler render it |
+| `GET /setup` | first run, once per deployment (`SPEC.md` §12.0) |
+
+### The charging path
+
+Every one of these is a POST, and each answers with HTML.
+
+| route | what it is |
+| --- | --- |
+| `POST /a/{slug}` | the page view. The only route that can charge for an article (`SPEC.md` §7) |
+| `POST /a/{slug}/confirm` | what became of that charge, asked on a later request (`SPEC.md` §7.3) |
+| `POST /meter/advance` | seven views in one instruction, so the collection threshold is reached on purpose (`SPEC.md` §7.4) |
+| `POST /setup` | runs the provisioner once, and refuses a request that came from another site's page (`SPEC.md` §12.0) |
+
+### Called by the page's own scripts
+
+| route | what it is | answers with |
+| --- | --- | --- |
+| `POST /signin/challenge` | issues the `signInInput` the wallet signs (`SPEC.md` §5) | JSON |
+| `POST /signin/verify` | checks the signature and opens the session | JSON |
+| `POST /signout` | the session row and the cookie both go | 302 to `/` |
+| `POST /meter/prepare` | everything the wallet needs to open or renew a contract | JSON |
+| `POST /meter/opened` | whether it landed, answered from the contract account | JSON |
+| `POST /meter/close/prepare` | `close_and_revoke` — two instructions, no arguments (`SPEC.md` §10.4) | JSON |
+| `POST /meter/close/done` | the chain confirmed it, so `SPEC.md` §10.4's erasure runs | JSON |
+| `POST /faucet` | one grant per wallet, and the site signs this one (`SPEC.md` §4.3) | JSON |
+| `GET /inspector/panel` | the panel's sections for a page that read nothing (`SPEC.md` §9) | a fragment with `X-Fragment: 1`, a page without it |
+| `GET /inspector/event/{signature}` | one decoded event, on demand (`SPEC.md` §9) | JSON |
+
+### Operator-facing
+
+| route | what it is |
+| --- | --- |
+| `GET /health` | PHP version, the three extensions, and the age of the oldest expired row under `sweep`. Keyed to no reader, deliberately (`SPEC.md` §10.4) |
+| `GET /diagnostics/wallets` | a workbench rather than a screen — `SPEC.md` §6 lists five screens and this is none of them |
+| `POST /diagnostics/report` | writes one wallet report into `var/wallet-reports/` |
+
+An unknown path is a 404 rendered as a page. A stale link and a browser asking
+for `/favicon.ico` are ordinary things, and Slim's default for both is a stack
+trace in the log with a bare error page in the browser — which does not belong
+on a site whose whole argument is that you can read what it is doing.
+
 ## Continuous integration
 
 `.github/workflows/ci.yml`, on every push and pull request.
@@ -238,18 +300,6 @@ that spends is a scheduled job someone eventually turns off. It is available
 from the canary workflow's manual run, which reads the authority keypair from a
 `DEVNET_AUTHORITY_KEYPAIR` secret and deletes it afterwards; without the secret
 that job skips.
-
-## What is still open
-
-[SPEC.md §14](SPEC.md#14-questions-this-document-leaves-open) collects the
-questions this design left open, and closes the last of them. What remains
-there is a test rather than a decision: whether the mobile wallets offer
-`signIn` at all, which needs a device.
-
-[SPEC.md §15](SPEC.md#15-the-site-authority-key) states what the site authority
-key authorizes, what a deployment should not copy from this one, and what
-changing the key costs. Where to hold the key is left to the integrator on
-purpose, with the factors that bear on the choice written down.
 
 ## Licence
 
