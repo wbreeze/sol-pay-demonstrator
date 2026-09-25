@@ -2,13 +2,22 @@
 /**
  * @var list<\Newsprint\Setup\Step> $steps
  * @var bool $provisioned
+ * @var bool $refused whether the request was turned away before setup ran at
+ *                    all ({@see \Newsprint\Setup\SameOrigin}), which needs
+ *                    its own lede: *did not finish* and *did not start* are
+ *                    different things to have happened to an operator.
  */
 use Newsprint\Support\View;
 ?>
 <article class="piece">
-    <h1><?= $provisioned ? 'Provisioned' : 'Setup stopped' ?></h1>
+    <h1><?= !$refused && $provisioned ? 'Provisioned' : 'Setup stopped' ?></h1>
 
-<?php if ($provisioned): ?>
+<?php if ($refused): ?>
+    <p class="lede">
+        Setup did not run. The request did not come from a page on this site,
+        so nothing was created, nothing was signed and nothing was spent.
+    </p>
+<?php elseif ($provisioned): ?>
     <p class="lede">
         The mint, the treasury and the site account exist. The addresses are in
         <code>var/site.json</code> and in the inspector at the foot of this page.
@@ -37,9 +46,12 @@ use Newsprint\Support\View;
 <?php endforeach ?>
     </ol>
 
-<?php if ($provisioned): ?>
+<?php if (!$refused && $provisioned): ?>
     <p><a href="/">Go to the paper</a>.</p>
 <?php else: ?>
+<?php /* The button works from here even after a refusal, because pressing it
+         on this page is a same-origin POST — which is the whole of the
+         distinction being drawn. */ ?>
     <form method="post" action="/setup">
         <button type="submit">Try again</button>
     </form>

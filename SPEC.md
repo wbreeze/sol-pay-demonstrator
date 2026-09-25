@@ -1885,6 +1885,30 @@ open a terminal after the start command.
 It also earns its place as documentation. `initialize_site` is part of the
 library's published surface and has no worked example anywhere.
 
+**A page rather than a command costs one thing, and the cost is paid in the
+route.** Every other POST this site answers is guarded by the session cookie:
+§5's `SameSite=Lax` is not sent by a browser on a cross-site POST, so a forged
+request arrives anonymous with no reader to charge. §7.1 makes that argument
+where it matters most — *a cross-site page cannot spend a reader's money by
+posting a form here* — and `SessionCookieTest` pins the attribute the argument
+rests on. Setup runs before anybody has signed in. It carries no session, so a
+guard that works by withholding a cookie has nothing to withhold.
+
+The route therefore asks the question directly. `Sec-Fetch-Site` answers it
+wherever the browser sends that header, and a comparison of `Origin` against
+the request's own origin answers it otherwise. A POST from somebody else's page
+is refused before a provisioner is built, so it never opens an RPC connection.
+Neither header present means the request came from no browser at all — `curl`,
+or a command-line check — rather than from the page this refuses.
+
+**What the guard is worth, stated plainly.** On the shape this section decided,
+where each person runs their own copy as a local process, a forged POST
+provisions a site the operator was about to provision anyway and spends cents
+of devnet SOL. Nothing reaches whoever sent it. The reason to refuse it is the
+paragraph above: this screen is the only worked example of `initialize_site`
+anywhere, and an unauthenticated state-changing POST is not a thing to be an
+example of.
+
 ### 12.1 Server language, decided: PHP
 
 **Decided 2026-09-04: PHP, with Slim 4 as the framework.** The front end is

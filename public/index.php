@@ -38,6 +38,8 @@ use Newsprint\Metering\MeterMiddleware;
 use Newsprint\Metering\MeterOutcome;
 use Newsprint\Metering\MeterResult;
 use Newsprint\Setup\Provisioner;
+use Newsprint\Setup\SameOrigin;
+use Newsprint\Setup\Step;
 use Newsprint\Store\Database;
 use Newsprint\Store\Store;
 use Newsprint\Support\Inspector;
@@ -1348,6 +1350,21 @@ $app->get('/setup', function (Request $request, Response $response) use ($view, 
 });
 
 $app->post('/setup', function (Request $request, Response $response) use ($view, $shell, $page, $provisioner, $root): Response {
+    // The site's answer to a forged POST is `SameSite=Lax` on the session
+    // cookie (§5), and this is the one route with no session for it to be
+    // absent from. Refused here, before the provisioner is built, so a request
+    // from somebody else's page does not even open an RPC connection.
+    if (!SameOrigin::allows($request)) {
+        return $page($response, $shell('Setup stopped', $view->render('setup-ran', [
+            'steps' => [Step::blocked(
+                'request',
+                'This request did not come from a page on this site, so setup did not run. Open the setup screen and press the button there.',
+            )],
+            'provisioned' => Config::load($root)->isProvisioned(),
+            'refused' => true,
+        ])), 403);
+    }
+
     $steps = $provisioner()->run();
 
     // Re-read from disk: the provisioner wrote var/site.json as it went, and
@@ -1357,6 +1374,7 @@ $app->post('/setup', function (Request $request, Response $response) use ($view,
     return $page($response, $shell($provisioned ? 'Provisioned' : 'Setup stopped', $view->render('setup-ran', [
         'steps' => $steps,
         'provisioned' => $provisioned,
+        'refused' => false,
     ])));
 });
 
