@@ -698,14 +698,17 @@ final class Inspector
      * charges. Where the two disagree, the program is right and this is a bug.
      *
      * **What asking here saves is a round trip, and only sometimes a fee**
-     * (corrected 2026-09-14, and the note below was corrected with it). The
-     * endpoint simulates before it forwards, so a call the program would
-     * refuse is usually rejected there and never included — free, and about a
-     * second. A fee is charged when the transaction lands and *then* fails,
-     * which needs the state to move between that simulation and inclusion.
+     * (corrected 2026-09-14). The panel note that carried the same correction
+     * was removed the same day, so its prose is in
+     * `content/ReadingTheInspector.md` now, under *Preflight, for this
+     * request*. The endpoint simulates before it forwards, so a call the
+     * program would refuse is usually rejected there and never included —
+     * free, and about a second. A fee is charged when the transaction lands
+     * and *then* fails, which needs the state to move between that simulation
+     * and inclusion.
      * `Meter` carries the argument in full. It is also the site's fee and not
-     * the reader's, which the note says because a reader has no way to know
-     * it.
+     * the reader's, which that article says because a reader has no way to
+     * know it.
      *
      * `charge(1)` rather than `charge(n)` because §9 says so and because one
      * view is the unit the price is quoted in. §7.4's seven-view advance
