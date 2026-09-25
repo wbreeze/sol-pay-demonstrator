@@ -84,6 +84,62 @@ refactor, "a charging view must still be 6, and `/privacy` must still be 0"
 was worth more than the counts meant to fall: either one moving would have
 been a silent correctness fault rather than a slow page.
 
+**The wall-clock half is `bin/profile-pages`.** `X-Rpc-Calls` counts the calls.
+A count cannot say whether a slow page is our code or the endpoint, because one
+call against the public devnet endpoint moves by an order of magnitude across a
+day. The script times five things whose only difference is how many calls they
+make — a static asset, `/a/privacy`, `/health`, the article, and a
+`getLatestBlockhash` sent straight at devnet — then subtracts:
+
+| the subtraction | what it is |
+| --- | --- |
+| `median(/a/privacy) - median(static)` | our code, with no chain in it |
+| `median(/a/slug) - median(/a/privacy)` | the article's one chain read |
+| that, over `median(endpoint)` | calls the article really makes |
+
+The last row is the alarm. It should sit near 1.0, and drift upward means a
+route started reading the chain without anybody deciding that it should. The
+script needs a running server and the network, so it is the author's to run,
+and one run says nothing on its own — compare runs, not hours.
+
+**A subtraction it cannot resolve says so.** The first run after the baseline
+was repaired put the render at `0.000 s`, against a baseline whose own eight
+samples ranged over 2 ms — a difference well inside the noise of the numbers it
+came from, printed in the same shape as a measured one. A difference smaller
+than the spread of its two terms is now marked `(?)` and explained, not
+reported. That run is also why everything is in milliseconds: three decimals of
+a second had been rounding the render away before the subtraction ever
+happened.
+
+**The spread is the interquartile range, and the first attempt used `max -
+min`.** That was wrong twice in one rule, and the next run showed both. A
+static asset with a median of 0.54 ms and a minimum of 0.46 ms produced a floor
+of 3.19 ms, because one request in eight took 3.65 ms — so a single scheduling
+hiccup vetoed a difference between two otherwise steady medians. And the remedy
+the script printed beside the veto made it likelier: more samples is more
+chances at a long tail, so *raise `-n`* widens a range while it narrows a
+median. The arithmetic subtracts medians, so the floor belongs to the middle of
+the distribution rather than to its ends; under quartiles the same row's floor
+is about 0.09 ms and `-n` helps as the advice always claimed.
+
+The middle half is still conservative on purpose. It is the sample-to-sample
+variation rather than the standard error of the median, which would be smaller
+by roughly the root of the sample count. This is a tool for noticing that
+something moved, not for publishing a figure, and a floor that errs toward
+silence is the right kind of wrong.
+
+**It was promoted out of `var/` on 2026-09-25, and it came with a defect worth
+recording.** Its baseline was `/privacy`, which has been a 301 to `/a/privacy`
+since 2026-09-14 — §10.2 asks that the URL carry the page rather than that a
+second handler render it. A redirect does almost no work, so *our code* read
+near zero, and every millisecond of the real render was charged to the
+article's chain read instead. The row printed `!! http codes: 301 301 …` on
+every run for eleven days, directly above an arithmetic block that averaged it
+in regardless. **A guard that reports and continues is decoration.** A bad row
+now refuses the subtraction and exits 1, and the row's test was tightened at
+the same time: it passed when *any* sample was 200, so one good sample excused
+seven bad ones.
+
 ## A green run count is a claim about a machine
 
 `PRAGMA journal_mode = WAL` needs an exclusive lock, and SQLite does not

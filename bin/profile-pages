@@ -1,0 +1,313 @@
+#!/usr/bin/env bash
+# Where the page-load time actually goes. Measurement, not diagnosis.
+#
+# The question this answers is one question: how much of a slow /a/{slug} is
+# the public devnet endpoint, and how much is ours. It answers it by measuring
+# four things whose only difference is how many RPC calls they make.
+#
+#   a static asset  the dev router, no app at all                   0 RPC
+#   /a/privacy      a built page; the panel is deferred              0 RPC
+#   /health         one call, and reports which endpoint it used     1 RPC
+#   /a/{slug}       the metered path; metering must read the chain   1 RPC
+#   the endpoint    a getLatestBlockhash straight at devnet          1 RPC, no PHP
+#
+# The baseline is a page that renders and asks the chain nothing. That became
+# possible on 2026-09-09: the privacy page used to render the inspector inline,
+# and the inspector called `$read()`, so a page displaying nothing from the
+# chain still waited for one `getMultipleAccounts` -- 0.9 s of a 0.9 s page.
+# The panel is now deferred to first open on any request that did not otherwise
+# read. So the baseline minus the static asset is our own code with no chain in
+# it, measured rather than inferred.
+#
+# **The baseline is `/a/privacy`, and it is not `/privacy`.** On 2026-09-14 an
+# unmetered piece became servable at the ordinary slug and `/privacy` became a
+# 301 to it, which §10.2 wanted and this script did not notice: for eleven days
+# it timed a redirect and called the result "our code". A redirect does almost
+# no work, so the baseline read near zero and every millisecond of the actual
+# render was being charged to the article's chain read instead. The row said
+# `!! http codes: 301 301 ...` the whole time, under an arithmetic block that
+# went on averaging it.
+#
+# Which is why a bad row now stops the run. A guard that reports and continues
+# is decoration; this one refuses to do the subtraction.
+#
+# Read the result as arithmetic, not as a verdict:
+#
+#   median(static)                          = connection overhead, no app
+#   median(/a/privacy) - median(static)     = OUR CODE, with no chain in it
+#   median(/a/slug)    - median(/a/privacy) = the article's one chain read
+#   that, over median(endpoint)             = how many calls it really makes
+#
+# The second line is the one to watch over time: it is the render, honestly
+# isolated, and it should stay small. The fourth is the regression alarm -- it
+# should sit near 1.0, and a drift upward means a route started making calls
+# nobody decided to make.
+#
+# **A subtraction is only as good as the spread on its two terms**, so a
+# difference smaller than the larger of their interquartile ranges is marked
+# `(?)` and explained rather than printed as a small number. On 2026-09-25 the render
+# measured `0.000 s` against a baseline whose own samples ranged over 2 ms,
+# and that reads as *the render is free* when it means *this run could not see
+# the render*. Everything is reported in milliseconds for the same reason:
+# three decimals of a second rounds a 1.4 ms render and a 0.6 ms one to the
+# same `0.001`, and the difference between two such numbers is zero far more
+# often than it is small.
+#
+# NO METERING BY DEFAULT. curl sends no cookies, so /a/{slug} takes the
+# unidentified branch: it reads the chain, it does not settle and it spends
+# nothing. Pass -c <cookiejar> to measure the path a reader with a stored
+# wallet takes -- that one CAN advance the meter, and the script says so
+# before it does it.
+
+set -euo pipefail
+
+# Numbers here are C-locale numbers and every tool that touches them has to
+# agree. `curl -w` writes "0.766914" with a dot, always; but bash `printf`,
+# `awk` and `sort -n` all read LC_NUMERIC, so under a comma-decimal locale
+# (es_UY, de_DE, most of the world) printf rejects the value outright and --
+# quietly, which is worse -- `sort -n` stops sorting it, and the median this
+# script exists to report becomes whichever sample happened to land in the
+# middle. Pinning the numeric locale is the whole fix; it is not cosmetic.
+export LC_ALL=C
+
+BASE="${BASE:-http://localhost:8000}"
+SLUG="${SLUG:-first-transaction}"
+N="${N:-8}"
+RPC="${RPC:-https://api.devnet.solana.com}"
+COOKIES=""
+
+usage() {
+  cat <<USAGE
+usage: bin/profile-pages [-b base] [-s slug] [-n samples] [-r rpc-url] [-c cookiejar]
+
+  -b  base URL of the running dev server   (default $BASE)
+  -s  slug of a metered article            (default $SLUG)
+  -n  samples per target                   (default $N)
+  -r  RPC endpoint to time directly        (default $RPC)
+  -c  cookie jar, to measure the identified path (CAN ADVANCE THE METER)
+
+Start the server first, in another shell:  bin/run-dev
+USAGE
+}
+
+while getopts 'b:s:n:r:c:h' opt; do
+  case "$opt" in
+    b) BASE="$OPTARG" ;;
+    s) SLUG="$OPTARG" ;;
+    n) N="$OPTARG" ;;
+    r) RPC="$OPTARG" ;;
+    c) COOKIES="$OPTARG" ;;
+    h) usage; exit 0 ;;
+    *) usage; exit 2 ;;
+  esac
+done
+
+if [ -n "$COOKIES" ]; then
+  echo "!! -c given: /a/${SLUG} will be requested as an identified reader."
+  echo "!! That path can settle a charge. ${N} samples means ${N} page views."
+  printf '   continue? [y/N] '
+  read -r answer
+  case "$answer" in y|Y|yes) ;; *) echo 'stopped.'; exit 1 ;; esac
+fi
+
+# time_starttransfer is the number that matters: it is the server thinking.
+# time_total minus it is the body coming down the wire, which on localhost is
+# noise. Keeping both makes it visible that it IS noise rather than assumed.
+FMT='%{time_starttransfer} %{time_total} %{http_code} %{size_download}\n'
+
+samples=""   # reused; set by measure()
+BAD=""       # labels of rows that answered something other than 200
+
+measure() { # measure <label> <curl args...>
+  local label="$1"; shift
+  local ttfb total code size
+  local list=""
+  local codes=""
+  local sizes=""
+  local i
+  for ((i = 0; i < N; i++)); do
+    read -r ttfb total code size < <(curl -sS -o /dev/null -w "$FMT" "$@" || echo "0 0 000 0")
+    list="$list$ttfb"$'\n'
+    codes="$codes $code"
+    sizes="$sizes $size"
+  done
+  samples="$list"
+  report "$label" "$codes" "$sizes"
+}
+
+# This run's spread on the row just measured, which is what the arithmetic
+# compares a difference against before it believes one.
+#
+# **The interquartile range, and not `max - min`.** The range was the first
+# rule and it was the wrong one twice over. One long sample speaks for the
+# whole row: on 2026-09-25 a static asset whose median was 0.54 ms and whose
+# minimum was 0.46 ms produced a floor of 3.19 ms, because one request in
+# eight took 3.65 ms -- and that floor vetoed a difference between two
+# otherwise steady medians. Worse, the remedy this script printed alongside
+# the veto made it more likely: more samples is more chances at a long tail,
+# so `-n 32` widens a range while it narrows a median.
+#
+# The arithmetic subtracts medians, so the floor belongs to the middle of the
+# distribution rather than to its ends. The middle half is deliberately
+# conservative -- it is the sample-to-sample variation, not the standard error
+# of the median, which would be smaller by about the root of the sample count.
+# This is a tool for noticing that something moved, not for publishing a
+# figure, and a floor that errs toward silence is the right kind of wrong.
+jitter() {
+  printf '%s\n' "$SORTED_LAST" | awk '
+    function quantile(a, n, p,   h, lo) {
+      h = (n - 1) * p + 1
+      lo = int(h)
+      if (lo >= n) return a[n]
+      return a[lo] + (h - lo) * (a[lo + 1] - a[lo])
+    }
+    { a[NR] = $1 }
+    END {
+      # Under four samples there are no quartiles worth the name, so fall back
+      # to the range and let it be too strict rather than invent a quantile.
+      if (NR < 4) { printf "%.6f", a[NR] - a[1]; exit }
+      printf "%.6f", quantile(a, NR, 0.75) - quantile(a, NR, 0.25)
+    }'
+}
+
+report() { # report <label> <codes> <sizes>
+  local label="$1" codes="$2" sizes="$3"
+  local sorted min med max
+  sorted="$(printf '%s' "$samples" | grep -v '^$' | sort -n)"
+  min="$(printf '%s\n' "$sorted" | head -1)"
+  max="$(printf '%s\n' "$sorted" | tail -1)"
+  med="$(printf '%s\n' "$sorted" | awk '{a[NR]=$1} END {printf "%s", (NR%2) ? a[(NR+1)/2] : (a[NR/2]+a[NR/2+1])/2}')"
+  # Milliseconds, two decimals. `curl` reports time_starttransfer to six
+  # decimal places of a second and this used to print three, so a 1.4 ms render
+  # and a 0.6 ms one both came out as `0.001` -- and a subtraction between two
+  # rounded-to-1ms numbers is zero far more often than it is small. The rows
+  # here span three orders of magnitude, so one unit throughout beats a unit
+  # per row.
+  awk -v label="$label" -v mn="$min" -v md="$med" -v mx="$max" 'BEGIN {
+    printf "  %-28s  min %9.2f   med %9.2f   max %9.2f   spread %5.1fx\n",
+      label, mn * 1000, md * 1000, mx * 1000, (mn > 0) ? mx / mn : 0
+  }'
+  # A non-200 anywhere invalidates the row. Every sample has to be 200: the
+  # old test passed when *any* of them was, so one good sample excused seven
+  # bad ones.
+  local bad=0 code
+  for code in $codes; do
+    [ "$code" = '200' ] || bad=1
+  done
+  if [ "$bad" = 1 ]; then
+    printf '      !! http codes:%s\n' "$codes"
+    # Newline-separated: a label has spaces in it, so a space-joined list
+    # cannot be split back into rows.
+    BAD="$BAD$label"$'\n'
+  fi
+  MED_LAST="$med"
+  MIN_LAST="$min"
+  MAX_LAST="$max"
+  # The sorted samples come out too: the arithmetic below needs the middle of
+  # this row's distribution, which min and max cannot give it.
+  SORTED_LAST="$sorted"
+}
+
+echo
+echo "newsprint page-load profile"
+echo "  base      $BASE"
+echo "  article   /a/$SLUG"
+echo "  endpoint  $RPC"
+echo "  samples   $N each, time-to-first-byte in milliseconds"
+echo
+
+echo "the site:"
+measure "a static asset (0 RPC)" "$BASE/assets/site.css"
+MED_STATIC="$MED_LAST"; JIT_STATIC="$(jitter)"
+# The piece itself, not `/privacy`, which is a 301 to it -- see the header.
+measure "/a/privacy (0 RPC, deferred)" "$BASE/a/privacy"
+MED_PRIVACY="$MED_LAST"; JIT_PRIVACY="$(jitter)"
+measure "/health   (1 RPC)" "$BASE/health"
+MED_HEALTH="$MED_LAST"
+if [ -n "$COOKIES" ]; then
+  measure "/a/$SLUG (1 RPC, identified)" -b "$COOKIES" "$BASE/a/$SLUG"
+else
+  measure "/a/$SLUG (1 RPC, metering)" "$BASE/a/$SLUG"
+fi
+MED_ARTICLE="$MED_LAST"; JIT_ARTICLE="$(jitter)"
+
+echo
+echo "the endpoint, with no PHP in the way:"
+measure "getLatestBlockhash" \
+  -X POST -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"getLatestBlockhash","params":[{"commitment":"confirmed"}]}' \
+  "$RPC"
+MED_RPC="$MED_LAST"
+
+echo
+if [ -n "$BAD" ]; then
+  echo "the arithmetic: NOT COMPUTED."
+  echo "  These rows answered something other than 200 at least once:"
+  printf '%s' "$BAD" | grep -v '^$' | sed 's/^/    /'
+  echo "  A median over those is the time to produce that other answer, and"
+  echo "  every line below it would be a subtraction between different things."
+  echo "  Fix the route or the base URL and run it again."
+  echo
+  exit 1
+fi
+
+echo "the arithmetic:"
+awk -v st="$MED_STATIC" -v p="$MED_PRIVACY" -v h="$MED_HEALTH" -v a="$MED_ARTICLE" -v r="$MED_RPC" \
+    -v jst="$JIT_STATIC" -v jp="$JIT_PRIVACY" -v ja="$JIT_ARTICLE" 'BEGIN {
+  ours  = p - st
+  chain = a - p
+
+  # A difference is only as good as the jitter on the two numbers it came
+  # from. `max - min` over this run is that jitter, already in the rows above,
+  # and a difference smaller than the larger of the two is not a small
+  # difference -- it is one this run could not see. Saying `0.00` in the same
+  # shape as a measured number is the same fault as printing `!!` and carrying
+  # on: the script knows the figure is not trustworthy and hands it over
+  # looking exactly like one that is.
+  ours_floor  = (jst > jp) ? jst : jp
+  chain_floor = (ja > jp)  ? ja  : jp
+
+  printf "  connection floor (no app)        %9.2f ms\n", st * 1000
+  printf "  one RPC call, measured direct    %9.2f ms\n", r * 1000
+  printf "  /a/privacy - static              %9.2f ms   <- our code, no chain in it%s\n",
+    ours * 1000, (ours < ours_floor) ? "  (?)" : ""
+  printf "  /a/slug    - /a/privacy          %9.2f ms   (the article\047s chain read)%s\n",
+    chain * 1000, (chain < chain_floor) ? "  (?)" : ""
+  if (r > 0) printf "  that, in units of one RPC call   %9.2f calls\n", chain / r
+  print ""
+
+  if (ours < ours_floor) {
+    printf "  (?) BELOW RESOLUTION: our code came out at %.2f ms against %.2f ms of\n", ours * 1000, ours_floor * 1000
+    print  "      interquartile spread on the two rows it was subtracted from. That"
+    print  "      is not a measurement of a fast render. It is this run failing to"
+    print  "      see one. Raise -n: more samples tighten the quartiles, so the"
+    print  "      floor falls as the median steadies."
+  }
+  if (chain < chain_floor) {
+    printf "  (?) BELOW RESOLUTION: the chain read came out at %.2f ms against\n", chain * 1000
+    printf "      %.2f ms of interquartile spread. Do not read the calls figure\n", chain_floor * 1000
+    print  "      above it."
+  }
+
+  if (r > 0.400) {
+    printf "  READ: one call is %.2f s right now. SPEC 12.4 calls that weather,\n", r
+    print  "        and weather is not a defect. Compare runs, not hours."
+  }
+  if (ours > 0.100) {
+    print "  READ: our code is over 100 ms with no chain read in it. That is the"
+    print "        render, and it is worth looking at: the panel, the per-address"
+    print "        require, opcache under php -S."
+  }
+  if (r > 0 && chain / r > 1.5) {
+    printf "  READ: the article is making about %.1f calls where one is expected.\n", chain / r
+    print  "        Something is reading the chain that did not used to. Check that"
+    print  "        the inspector is still deferred and that the readers memoise."
+  }
+  if (r > 0 && chain / r < 0.5 && chain > 0) {
+    print "  READ: the article costs less than one call. Either a read was removed"
+    print "        or the endpoint moved between the two measurements."
+  }
+}'
+echo
+echo "run this a few times across the day. The endpoint moves by an order of"
+echo "magnitude hour to hour and a single run cannot tell you which hour you got."
