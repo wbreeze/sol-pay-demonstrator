@@ -136,6 +136,14 @@ a validator accepts the result, because no signature there is real, no
 blockhash was ever current, and nothing has paid a fee. This sends one System
 transfer and pays one.
 
+**The faucet behind the public endpoint refuses more often than it works.** Its
+refusal is generic: a depleted faucet, a per-address limit and a per-IP one all
+arrive as the same message. So `bin/devnet-smoke` prints `airdrop refused: …`
+and carries on, because the key it uses is kept in `var/` and may already hold
+SOL from an earlier run. When the key holds none, the script stops and prints
+two ways to fund it by hand — the web faucets, or `solana airdrop` against
+devnet. A tenth of a SOL is more than the run needs.
+
 Nothing under `var/` is committed: the SQLite file, the built content, and the
 devnet keypairs setup generates. They control nothing of value and the site
 says so.
