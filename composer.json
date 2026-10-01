@@ -14,7 +14,7 @@
         "slim/psr7": "^1.7",
         "slim/slim": "^4.15",
         "symfony/yaml": "^6.4 || ^7.0",
-        "wbreeze/sol-pay-client": "^0.1.2"
+        "wbreeze/sol-pay-client": "^0.2.0"
     },
     "require-dev": {
         "phpunit/phpunit": "^11.0"

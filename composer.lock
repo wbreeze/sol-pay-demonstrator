@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "24c7f768d85baf878531647e4c0c1d2d",
+    "content-hash": "971cd53a06f5247aba0e039fa6369c9c",
     "packages": [
         {
             "name": "dflydev/dot-access-data",
@@ -1463,19 +1463,20 @@
         },
         {
             "name": "wbreeze/sol-pay-client",
-            "version": "v0.1.2",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/wbreeze/sol-pay-php.git",
-                "reference": "2a56af86ba2882bda0af405e997968919ebdbc2d"
+                "reference": "7bb2824dd41e824c8530ff698bcc6aae87ff7971"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/wbreeze/sol-pay-php/zipball/2a56af86ba2882bda0af405e997968919ebdbc2d",
-                "reference": "2a56af86ba2882bda0af405e997968919ebdbc2d",
+                "url": "https://api.github.com/repos/wbreeze/sol-pay-php/zipball/7bb2824dd41e824c8530ff698bcc6aae87ff7971",
+                "reference": "7bb2824dd41e824c8530ff698bcc6aae87ff7971",
                 "shasum": ""
             },
             "require": {
+                "ext-sodium": "*",
                 "php": "^8.1"
             },
             "require-dev": {
@@ -1495,9 +1496,9 @@
             "homepage": "https://github.com/wbreeze/sol-pay",
             "support": {
                 "issues": "https://github.com/wbreeze/sol-pay-php/issues",
-                "source": "https://github.com/wbreeze/sol-pay-php/tree/v0.1.2"
+                "source": "https://github.com/wbreeze/sol-pay-php/tree/v0.2.0"
             },
-            "time": "2026-09-05T13:27:09+00:00"
+            "time": "2026-09-30T13:47:53+00:00"
         }
     ],
     "packages-dev": [
