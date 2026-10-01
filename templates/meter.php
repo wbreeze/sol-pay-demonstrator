@@ -7,11 +7,12 @@
  * next charge. There is no sign-in screen (SPEC §5.6): identifying happens
  * here, beside the money.
  *
- * **Setting a meter is being rebuilt for the fund design.** The browser key
- * and its proof (SPEC §5) and the setup scan (SPEC §6.3) replace the wallet
- * in the page, and until they land this panel says so rather than offering a
- * control that would not work. A browser that already holds a session still
- * meters, blocks and fails here as it will afterwards.
+ * **Setting a meter is being rebuilt for the fund design.** The setup scan
+ * (SPEC §6.3) replaces the wallet in the page, and until it lands this panel
+ * says so rather than offering a control that would not work. A browser that
+ * already holds a key and a meter proves the key here and is bound a session
+ * (SPEC §5.3), and a session meters, blocks and fails here as it will
+ * afterwards.
  *
  * @var array<string, mixed> $meter
  * @var array<string, int|string> $site
@@ -50,9 +51,31 @@ $onChain = $meter['meter'];
     </p>
 <?php endif ?>
     <p class="pending">
-        The meter is being rebuilt. Setting one up from this page will return
-        shortly; until then the ledes are free to read.
+        Setting up a meter from this page is being rebuilt, and will return
+        shortly. Until then the ledes are free to read.
     </p>
+    <?php /* §5.3: a browser that holds a key and a meter address proves the
+             key here, with no wallet, and the page reloads with a session.
+             The script fills this line when it has something to say. */ ?>
+    <p class="pending" data-key-bind role="status" hidden></p>
+<?php if ($meter['dev_key_trial']): ?>
+    <?php /* The development stand-in for setup (slice 2 of the fund design;
+             gone when the scan arrives). Shown only on loopback against
+             devnet, and only when `config/site.php` turns it on. */ ?>
+    <div class="dev" data-key-trial>
+        <p class="fine">
+            <strong>Development stand-in.</strong> This browser's key is
+            <code data-key-trial-key>…</code>. Renew a trial meter to it with
+            <code>bin/fund-trials hand 0 --key=&lt;that key&gt;</code>, and
+            paste the meter address it prints.
+        </p>
+        <form data-key-trial-form>
+            <label>Meter <input type="text" name="meter" size="44" autocomplete="off"></label>
+            <button type="submit" class="secondary">Hold this meter</button>
+            <span class="pending" data-key-trial-status role="status" hidden></span>
+        </form>
+    </div>
+<?php endif ?>
 
 <?php elseif ($meter['stage'] === 'failed'): ?>
     <?php /* §8.2. Under the fund design SPL's `InsufficientFunds` means one
@@ -123,6 +146,13 @@ $onChain = $meter['meter'];
 <?php if ($onChain !== null || $meter['stage'] === 'unreadable'): ?>
     <p class="fine">
         <a href="/meter">The meter</a> — what you have spent, and where it stands.
+<?php if ($onChain !== null): ?>
+        · <a href="/meter#close">close this meter</a>
+<?php endif ?>
     </p>
 <?php endif ?>
 </section>
+<?php if ($meter['provisioned'] && $meter['stage'] === 'anonymous'): ?>
+<?php /* §12.2: one small module, where the key has work to do. */ ?>
+<script type="module" src="/assets/key.js"></script>
+<?php endif ?>

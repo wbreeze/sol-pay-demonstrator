@@ -37,6 +37,8 @@ whose point is not obvious does not get deleted for looking strange.
 | an expiry that hides a row nobody deletes | `ChargeSweepsTest` for the charge-time sweep, `SweepScriptTest` for the scheduled one |
 | a GET route that can reach a `Meter` | `tests/Support/RouteTest.php`, which reads what each route's handler closed over rather than the names a textual check happens to know |
 | a second confirmation schedule anywhere | `ConfirmScheduleTest`, which asserts that only `Submitter` calls `signatureStatuses` |
+| a key proof accepted twice, replayed against the reader's fund | `tests/Auth/KeyProofTest.php` — the nonce is spent by being presented, whether the proof then passes or not |
+| the authority countersigning a close the key did not sign | `tests/Metering/MeterCloseTest.php` — the key's signature over the kept message, or no transaction |
 | a meter renewed to another device's key, still charged from this one | `tests/Chain/RequestReadTest.php` for the read that ends the session, `MeterStateTest` for what counts as holding the meter; `Meter` asks again inside the lock |
 | a page title and its heading drifting apart | `tests/Support/PageTitleTest.php`, for the two pages where one phrase is written twice |
 | a failure report carrying nothing about the failure | `tests/Support/FailureReportTest.php` — the challenge is recorded *before* the wallet call, because the call is what throws |

@@ -88,6 +88,17 @@ final class Config
         return $this->static['auth'];
     }
 
+    /**
+     * Development stand-ins, all off unless configured on. Absent from an
+     * older `config/site.php`, which reads as all off.
+     *
+     * @return array<string, bool>
+     */
+    public function development(): array
+    {
+        return $this->static['development'] ?? [];
+    }
+
     /** @return array<string, int> */
     public function metering(): array
     {

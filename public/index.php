@@ -15,11 +15,14 @@ declare(strict_types=1);
  */
 
 use Newsprint\Auth\Binding;
+use Newsprint\Auth\KeyProof;
 use Newsprint\Auth\Session;
+use Newsprint\Chain\Keypair;
 use Newsprint\Chain\ProgramEvent;
 use Newsprint\Chain\RequestRead;
 use Newsprint\Chain\Rpc;
 use Newsprint\Chain\RpcException;
+use Newsprint\Chain\SubmitStatus;
 use Newsprint\Chain\Submitter;
 use Newsprint\Content\Library;
 use Newsprint\Content\Piece;
@@ -32,6 +35,7 @@ use Newsprint\Metering\CloseFinisher;
 use Newsprint\Metering\Decision;
 use Newsprint\Metering\Meter;
 use Newsprint\Metering\MeterMiddleware;
+use Newsprint\Metering\MeterClose;
 use Newsprint\Metering\MeterOutcome;
 use Newsprint\Metering\MeterResult;
 use Newsprint\Setup\Provisioner;
@@ -46,6 +50,10 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Exception\HttpNotFoundException;
 use Slim\Factory\AppFactory;
 use SolPay\Core\BlockedKind;
+use SolPay\Core\DecodeException;
+use SolPay\Core\Fund;
+use SolPay\Core\Meter as OnChainMeter;
+use SolPay\Core\PayError;
 use SolPay\Core\Units;
 
 require __DIR__.'/../vendor/autoload.php';
@@ -267,6 +275,37 @@ $followUpFactory = static function () use ($config, $rpcFactory, $store): Charge
 };
 
 /**
+ * The development stand-in for getting a meter into this browser before setup
+ * exists (fund design, slice 2; removed when slice 3's scan lands). The panel
+ * shows this browser's public key, `bin/fund-trials hand` renews a trial
+ * meter to it, and the page is told the meter's address. The key never
+ * leaves the browser, so the affordance moves nothing a reader's setup would
+ * not.
+ *
+ * Gated as SPEC §12.6 gates the development wallet: off unless configured on,
+ * and refused unless the request comes from a loopback address and the RPC
+ * endpoint is devnet's.
+ */
+$devKeyTrial = static function (Request $request) use ($config): bool {
+    $remote = (string) ($request->getServerParams()['REMOTE_ADDR'] ?? '');
+
+    return (bool) ($config->development()['key_trial'] ?? false)
+        && in_array($remote, ['127.0.0.1', '::1'], true)
+        && str_contains((string) parse_url($config->rpcUrl(), PHP_URL_HOST), 'devnet');
+};
+
+/**
+ * One meter account, as the chain holds it now, or null when there is none.
+ * For the key proof (SPEC §5.2), which reads the meter a browser names before
+ * any session says which meter that is.
+ */
+$readMeter = static function (string $address) use ($rpcFactory): ?OnChainMeter {
+    $account = $rpcFactory()->multipleAccounts([$address])[0];
+
+    return $account === null ? null : OnChainMeter::decode($account['data']);
+};
+
+/**
  * Everything the meter panel draws, in the units the reader sees.
  *
  * There is no sign-in screen (SPEC §5.6). sol-pay's state diagram has no
@@ -279,7 +318,7 @@ $followUpFactory = static function () use ($config, $rpcFactory, $store): Charge
  * the preflight can block on, `limit` and `expired`, then `failed` when the
  * chain refused a charge the preflight let through.
  */
-$meterVars = static function (Request $request, ?MeterResult $result = null) use ($reads, $config): array {
+$meterVars = static function (Request $request, ?MeterResult $result = null) use ($reads, $config, $store, $devKeyTrial): array {
     $params = $config->siteParams();
     $read = $reads($request);
     $state = $read->site();
@@ -306,6 +345,10 @@ $meterVars = static function (Request $request, ?MeterResult $result = null) use
         'step_views' => (int) $config->metering()['demo_step_views'],
         // Filled in below when there is a meter to ask about.
         'solvency' => null,
+        // SPEC §10.4 qualification 3: closing costs the reader the articles
+        // they hold, and they are told how many before they click.
+        'live_grants' => 0,
+        'dev_key_trial' => $devKeyTrial($request),
     ];
 
     if ($read->binding() === null) {
@@ -360,6 +403,7 @@ $meterVars = static function (Request $request, ?MeterResult $result = null) use
         'expiry' => gmdate('Y-m-d H:i', $onChain->expiry).' UTC',
     ];
     $panel['items_remaining'] = $meter->itemsRemaining();
+    $panel['live_grants'] = $store()->liveGrantCount($meter->meterAddress);
 
     $blocked = $meter->blocked($now);
     $panel['stage'] = match ($blocked?->kind) {
@@ -851,6 +895,168 @@ $app->get('/meter', function (Request $request, Response $response) use ($view, 
         },
         'site' => $siteVars($reads($request)),
     ]), $reads($request)));
+});
+
+/**
+ * SPEC §5.2, step 1: a nonce for a key proof, 32 random bytes, stored with the
+ * time it was issued. Nothing about the browser is recorded with it.
+ */
+$app->post('/key/nonce', function (Request $request, Response $response) use ($json, $store, $config): Response {
+    return $json($response, ['nonce' => $store()->issueNonce((int) $config->auth()['nonce_ttl_s'])])
+        ->withHeader('Cache-Control', 'no-store');
+});
+
+/**
+ * SPEC §5.2, step 3, and §5.3: a browser that holds a key and a meter address
+ * proves the key, and the server binds a session to that meter. No wallet.
+ *
+ * The page sends the meter's address, the nonce and the signature. It does
+ * not send its key: the meter names the key, and the signature is checked
+ * against that. See {@see KeyProof} for the order of the checks.
+ */
+$app->post('/key/prove', function (Request $request, Response $response) use ($json, $store, $config, $readMeter, $finishClose): Response {
+    if (!$config->isProvisioned()) {
+        return $json($response, ['message' => 'this site is not provisioned'], 409);
+    }
+
+    $body = json_decode((string) $request->getBody(), true);
+    $meter = is_array($body) ? (string) ($body['meter'] ?? '') : '';
+    $nonce = is_array($body) ? (string) ($body['nonce'] ?? '') : '';
+    $signature = base64_decode(is_array($body) ? (string) ($body['signature'] ?? '') : '', true);
+    if (preg_match('/^[1-9A-HJ-NP-Za-km-z]{32,44}$/', $meter) !== 1 || $signature === false) {
+        return $json($response, ['message' => 'that is not a meter address and a signature'], 400);
+    }
+
+    // The origin the browser is looking at, which is what the page signed.
+    $uri = $request->getUri();
+    $origin = $uri->getScheme().'://'.$uri->getAuthority();
+
+    try {
+        $proven = (new KeyProof($store(), $config->provisioned()['site'], $readMeter))
+            ->check($meter, $nonce, $origin, $signature);
+    } catch (RpcException|DecodeException $e) {
+        return $json($response, ['message' => 'the meter could not be read: '.$e->getMessage()], 502);
+    }
+
+    if (!$proven instanceof Binding) {
+        return $json($response, ['message' => $proven->sentence(), 'reason' => $proven->value], 403);
+    }
+
+    // A close of this meter may have landed since the server last looked.
+    // Finish that erasure first, so the new session starts after it rather
+    // than being swept away by it on the next request. A meter the proof just
+    // read is there, so in practice this finds nothing to erase; it is here
+    // for the order, which `LateCloseWiringTest` holds.
+    $finishClose($proven->meter);
+
+    $old = Session::idFrom($request);
+    if ($old !== null) {
+        $store()->destroySession($old);
+    }
+    $id = $store()->createSession($proven, (int) $config->auth()['session_ttl_s']);
+
+    return Session::issue($json($response, ['ok' => true, 'meter' => $proven->meter]), $id, Session::isSecure($request));
+});
+
+/**
+ * SPEC §5.4, step 1: compile `close_meter` for this session's key to sign,
+ * keep it against the session, and hand the page its bytes.
+ *
+ * The rent returns to the wallet the fund names, so the fund is read for its
+ * `reader`. The blockhash is fetched here, immediately before the page signs.
+ */
+$app->post('/meter/close/prepare', function (Request $request, Response $response) use ($json, $reads, $store, $config, $rpcFactory): Response {
+    $id = Session::idFrom($request);
+    $meter = $reads($request)->meter();
+    $held = $reads($request)->binding();
+    if ($id === null || $held === null || $meter === null || $meter->meter === null) {
+        return $json($response, ['message' => 'this browser holds no meter here'], 409);
+    }
+
+    try {
+        $rpc = $rpcFactory();
+        $fund = $rpc->multipleAccounts([$held->fund])[0];
+        if ($fund === null) {
+            return $json($response, ['message' => 'the fund this meter draws on is not there'], 409);
+        }
+        $message = MeterClose::compose(
+            $config->program(),
+            $config->provisioned()['site'],
+            $held->fund,
+            Fund::decode($fund['data'])->reader,
+            $held->key,
+            Keypair::load($config->keypairPath('authority'))->address,
+            $rpc->latestBlockhash()['blockhash'],
+        );
+    } catch (RpcException|DecodeException $e) {
+        return $json($response, ['message' => 'the chain could not be read: '.$e->getMessage()], 502);
+    }
+
+    $store()->keepCloseMessage($id, $message);
+
+    return $json($response, ['message' => base64_encode($message)])->withHeader('Cache-Control', 'no-store');
+});
+
+/**
+ * SPEC §5.4, steps 3 and 4: the page returns the kept message's signature.
+ * The server checks it against the session's key, adds the authority's
+ * signature, sends, and erases its record of the meter (§10.4).
+ *
+ * The order is the reverse of the metering path's. Here the site waits for the
+ * chain **before** deleting anything, because a purge on the strength of an
+ * unconfirmed close would erase a reader whose meter is still open and still
+ * spending. The evidence is the account: the meter is gone. When it is still
+ * there, nothing is deleted and a note is left, so that a later request can
+ * finish the erasure once the close lands (`$finishClose`).
+ */
+$app->post('/meter/close', function (Request $request, Response $response) use ($json, $reads, $store, $config, $rpcFactory, $meterExists): Response {
+    $id = Session::idFrom($request);
+    $held = $reads($request)->binding();
+    $message = $id === null ? null : $store()->closeMessage($id);
+    if ($id === null || $held === null || $message === null) {
+        return $json($response, ['message' => 'there is no close waiting to be signed; start again'], 409);
+    }
+
+    $body = json_decode((string) $request->getBody(), true);
+    $signature = base64_decode(is_array($body) ? (string) ($body['signature'] ?? '') : '', true);
+    $authority = Keypair::load($config->keypairPath('authority'));
+    $wire = $signature === false ? null : MeterClose::assemble($message, $held->key, $signature, $authority);
+    if ($wire === null) {
+        return $json($response, ['message' => 'that is not this browser key\'s signature of the close'], 400);
+    }
+
+    $outcome = Submitter::fromConfig($rpcFactory(), $config)->sendWire($wire);
+    if ($outcome->status === SubmitStatus::Failed) {
+        // §8.2: `Unauthorized` is the key on this device not being the
+        // meter's, because another device renewed it. The session ends.
+        if ($outcome->cause?->payError === PayError::Unauthorized) {
+            $store()->endSessions($held);
+        }
+
+        return $json($response, ['message' => 'the close was refused: '.$outcome->detail], 409);
+    }
+
+    // The account is the evidence, not the signature.
+    if ($meterExists($held->meter) !== false) {
+        $store()->recordPendingClose($held->meter, (string) $outcome->signature, (int) $config->auth()['session_ttl_s']);
+
+        return $json($response, [
+            'ok' => false,
+            'pending' => true,
+            'signature' => $outcome->signature,
+            'message' => 'sent, and the meter is still on chain; this site will forget it once the close lands',
+        ], 202);
+    }
+
+    // §10.4. Sessions, grants, the lock row and any note go; the faucet
+    // ledger survives for the published reason.
+    $erased = $store()->eraseMeter($held->meter);
+
+    return Session::clear($json($response, [
+        'ok' => true,
+        'signature' => $outcome->signature,
+        'erased' => $erased,
+    ]), Session::isSecure($request));
 });
 
 /**

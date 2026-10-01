@@ -282,6 +282,7 @@ function fixtures(string $tree): array
         'meter' => ['address' => $METER, 'limit' => '0.5', 'used' => '0.42', 'paid' => '0.28', 'unpaid' => '0.14', 'expiry' => '2026-10-02 12:00 UTC'],
         'provisioned' => true,
         'result' => null, 'page_price' => '0.01', 'step_views' => 7, 'advanced' => null, 'solvency' => null,
+        'live_grants' => 2, 'dev_key_trial' => false,
     ];
 
     // How far a fund holding 0.21 less `$short` is from a settle of 0.21.
@@ -371,6 +372,7 @@ function fixtures(string $tree): array
     $f['meter-unreadable'] = $m(['stage' => 'unreadable', 'meter' => null]);
     $f['meter-anonymous'] = $m(['stage' => 'anonymous', 'meter' => null]);
     $f['meter-anonymous-ended'] = $m(['stage' => 'anonymous', 'ended' => true, 'meter' => null]);
+    $f['meter-anonymous-dev'] = $m(['stage' => 'anonymous', 'dev_key_trial' => true, 'meter' => null]);
     $f['meter-failed-short'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', SolPay\Core\Cause::of($program, $program->tokenProgram, 1), $shortfall(80000), null)]);
     $f['meter-failed-other'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', null, $shortfall(0), null)]);
     $f['meter-limit'] = $m(['stage' => 'limit']);
@@ -408,6 +410,7 @@ function fixtures(string $tree): array
     $f['manage-open'] = $manage();
     $f['manage-blocked'] = $manage(['blocked' => 'LimitReached']);
     $f['manage-no-items'] = $manage(['items_remaining' => null]);
+    $f['manage-no-grants'] = $manage(['live_grants' => 0]);
 
     // First run, and the page it redirects to.
     $f['setup-error'] = ['setup', ['status' => $status(), 'error' => 'connection refused', 'site' => $site, 'setup' => []]];

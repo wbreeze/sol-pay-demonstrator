@@ -109,6 +109,15 @@ return [
         'session_ttl_s' => 43_200, // twelve hours
     ],
 
+    // Development stand-ins. Each is refused unless the request comes from a
+    // loopback address and the RPC endpoint is devnet's (SPEC §12.6).
+    'development' => [
+        // Slice 2 of the fund design, until slice 3's scan replaces it: the
+        // panel shows this browser's public key and takes a meter address, so
+        // that `bin/fund-trials hand` can put a trial meter into a browser.
+        'key_trial' => false,
+    ],
+
     // SPEC §7.1 and §7.4. Both are policy numbers with no chain meaning.
     'metering' => [
         'grant_ttl_s' => 1_800, // thirty minutes

@@ -78,6 +78,31 @@ final class Store
     }
 
     /**
+     * Keep the `close_meter` message compiled for this session, until the
+     * page returns it signed (SPEC §5.4). A second prepare replaces the first,
+     * so only the newest message can be signed and sent.
+     */
+    public function keepCloseMessage(string $id, string $message): void
+    {
+        $this->pdo->prepare('UPDATE sessions SET close_message = ? WHERE id = ?')
+            ->execute([base64_encode($message), $id]);
+    }
+
+    /** The message `keepCloseMessage()` kept for a live session, or null. */
+    public function closeMessage(string $id): ?string
+    {
+        $stmt = $this->pdo->prepare('SELECT close_message FROM sessions WHERE id = ? AND expires_at > ?');
+        $stmt->execute([$id, $this->now()]);
+        $kept = $stmt->fetchColumn();
+        if (!is_string($kept)) {
+            return null;
+        }
+        $message = base64_decode($kept, true);
+
+        return $message === false ? null : $message;
+    }
+
+    /**
      * End every session that holds this meter under this key (SPEC §5.3).
      *
      * By meter and key rather than by session id, because the read that finds

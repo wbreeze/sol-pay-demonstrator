@@ -100,7 +100,8 @@ final class ChargeFaultTest extends TestCase
     {
         $root = dirname(__DIR__, 2);
         $submitter = (string) file_get_contents($root.'/src/Chain/Submitter.php');
-        self::assertStringContainsString('->sendTransaction($wire, $fault->skipsPreflight())', $submitter);
+        self::assertStringContainsString('return $this->sendWire($wire, $wait, $fault->skipsPreflight());', $submitter);
+        self::assertStringContainsString('->sendTransaction($wire, $skipPreflight)', $submitter);
         self::assertStringContainsString('$fault === ChargeFault::NeverLand', $submitter);
 
         $meter = (string) file_get_contents($root.'/src/Metering/Meter.php');

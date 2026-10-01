@@ -338,8 +338,14 @@ which answers whether a signature is valid and nothing else.
      not;
    - the signature is valid for the key the meter names
      (`Proof::verifyKey`, with the meter fetched from the chain);
-   - the meter's `site` is this site;
-   - the meter has not expired.
+   - the meter's `site` is this site.
+
+**An expired meter still binds**, decided 2026-10-01. A session on an
+expired meter can charge nothing. Every charge checks the expiry before it
+is sent (§7.3), and the program refuses `Expired` besides. What the session
+can do is open `manage_meter` and close the meter, as §5.5 promises.
+Refusing the proof would leave a reader whose session ended with the browser
+no way to close an expired meter.
 
 A proof accepted twice can be replayed by whoever copies it, and each article
 the replayer reads is charged to the reader's fund. Only the site's nonce store
@@ -366,11 +372,12 @@ A session is bound by a proof in three places:
 
 **The chain ends sessions, not a timer alone.** The metering path reads the
 meter on every charge anyway (§7). Each read also checks that the meter still
-names the session's key and has not expired. When another device renews the
-meter to its own key, this device's session ends at its next read, with no
-message between the two devices. `bin/fund-trials renew` showed the chain
-half on 2026-09-30: after a renewal, the old key's proof was refused and the
-new key's accepted.
+names the session's key. An expired meter blocks the charge and keeps the
+session, so that the meter can still be closed (§5.2). When another device
+renews the meter to its own key, this device's session ends at its next read,
+with no message between the two devices. `bin/fund-trials renew` showed the
+chain half on 2026-09-30: after a renewal, the old key's proof was refused and
+the new key's accepted.
 
 **Why the proof binds a session rather than every request.** Signing each
 charge would need a fresh nonce per page view and a script on every read, and

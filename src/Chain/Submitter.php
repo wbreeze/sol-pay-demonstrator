@@ -61,8 +61,18 @@ final class Submitter
 
         $wire = Tx::wire($message, MessageSigner::signatures($message, $signers));
 
+        return $this->sendWire($wire, $wait, $fault->skipsPreflight());
+    }
+
+    /**
+     * Send a transaction already signed, by keys this site does not all hold:
+     * the key-signed close (SPEC §5.4), which the page signs and the authority
+     * countersigns. Same simulation, same confirmation schedule.
+     */
+    public function sendWire(string $wire, bool $wait = true, bool $skipPreflight = false): Outcome
+    {
         try {
-            $signature = $this->rpc->sendTransaction($wire, $fault->skipsPreflight());
+            $signature = $this->rpc->sendTransaction($wire, $skipPreflight);
         } catch (RpcException $e) {
             return Outcome::failed(null, $e->failure);
         }

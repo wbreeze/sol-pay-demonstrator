@@ -193,13 +193,15 @@ Every one of these is a POST, and each answers with HTML.
 
 ### Called by the page's own scripts
 
-The routes that identified a reader by wallet, opened and closed a contract,
-and ran the faucet for a signed-in wallet went with the delegate design. The
-key proof, the setup scan, the key-signed close and the faucet form arrive as
-the fund design is built (`SPEC.md` §4.3, §5, §6.3).
+The key proof and the key-signed close are the page's. Setup by a scan and
+the faucet form arrive as the fund design is built (`SPEC.md` §4.3, §6.3).
 
 | route | what it is | answers with |
 | --- | --- | --- |
+| `POST /key/nonce` | a nonce for a key proof, forgotten at its first use (`SPEC.md` §5.2) | JSON |
+| `POST /key/prove` | checks a key proof against the meter it names, and binds a session (`SPEC.md` §5.3) | JSON, and the cookie |
+| `POST /meter/close/prepare` | compiles `close_meter` for this browser's key to sign (`SPEC.md` §5.4) | JSON |
+| `POST /meter/close` | countersigns and sends the close, then `SPEC.md` §10.4's erasure | JSON, and the cookie cleared |
 | `GET /inspector/panel` | the panel's sections for a page that read nothing (`SPEC.md` §9) | a fragment with `X-Fragment: 1`, a page without it |
 | `GET /inspector/event/{signature}` | one decoded event, on demand (`SPEC.md` §9) | JSON |
 

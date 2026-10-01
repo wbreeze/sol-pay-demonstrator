@@ -113,8 +113,12 @@ final class Database
      * are kept, because neither is reader data that the redesign changes. The
      * faucet ledger duplicates a public fact and must survive (§10.4
      * qualification 4), and the purchase counts are facts about articles.
+     *
+     * Version 3 (slice 2) adds `sessions.close_message`: the `close_meter`
+     * message the server compiled, kept until the page returns it signed
+     * (SPEC §5.4). A version-2 file gains the column and loses nothing.
      */
-    public const VERSION = 2;
+    public const VERSION = 3;
 
     public static function migrate(PDO $pdo): void
     {
@@ -134,8 +138,13 @@ final class Database
                 return;
             }
 
-            self::fromDelegateDesign($pdo);
-            self::create($pdo);
+            $current = (int) $pdo->query('PRAGMA user_version')->fetchColumn();
+            if ($current < 2) {
+                self::fromDelegateDesign($pdo);
+                self::create($pdo);
+            } else {
+                self::addColumn($pdo, 'sessions', 'close_message', 'TEXT');
+            }
             $pdo->exec('PRAGMA user_version = '.self::VERSION);
             $pdo->exec('COMMIT');
         } catch (\Throwable $e) {
@@ -190,7 +199,10 @@ final class Database
                 fund       TEXT NOT NULL,
                 key        TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL
+                expires_at INTEGER NOT NULL,
+                -- §5.4. The close the server compiled for this session's
+                -- key to sign, base64, until it comes back signed.
+                close_message TEXT
             );
             CREATE INDEX IF NOT EXISTS sessions_meter ON sessions (meter);
 
@@ -269,6 +281,13 @@ final class Database
                 purchases INTEGER NOT NULL DEFAULT 0
             );
         SQL);
+    }
+
+    private static function addColumn(PDO $pdo, string $table, string $column, string $definition): void
+    {
+        if (!self::hasColumn($pdo, $table, $column)) {
+            $pdo->exec("ALTER TABLE {$table} ADD COLUMN {$column} {$definition}");
+        }
     }
 
     private static function hasColumn(PDO $pdo, string $table, string $column): bool

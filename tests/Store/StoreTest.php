@@ -346,4 +346,48 @@ final class StoreTest extends TestCase
         Database::migrate($pdo);
         self::assertTrue($store->faucetGranted('PAYRfig'), 'and a second open changes nothing');
     }
+
+    /**
+     * SPEC §5.4: the close the server compiled waits on the session for the
+     * page's signature, and only the newest one can be signed.
+     */
+    public function testTheCloseMessageWaitsOnItsSession(): void
+    {
+        $store = $this->store();
+        $id = $store->createSession($this->binding(), 3_600);
+        self::assertNull($store->closeMessage($id));
+
+        $store->keepCloseMessage($id, "\x02first");
+        $store->keepCloseMessage($id, "\x02second");
+        self::assertSame("\x02second", $store->closeMessage($id), 'a second prepare replaces the first');
+
+        $other = $store->createSession($this->binding('MPDAcat'), 3_600);
+        self::assertNull($store->closeMessage($other), 'and it is this session\'s alone');
+
+        $this->now += 3_600;
+        self::assertNull($store->closeMessage($id), 'not past the session\'s time');
+    }
+
+    /** A version-2 file, as slice 1 left it, gains the column and keeps its rows. */
+    public function testAVersionTwoDatabaseGainsTheCloseMessage(): void
+    {
+        $pdo = new \PDO('sqlite::memory:', null, null, [
+            \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+            \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+        ]);
+        $pdo->exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, meter TEXT NOT NULL, fund TEXT NOT NULL, key TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)');
+        $pdo->exec('CREATE TABLE faucet_ledger (address TEXT PRIMARY KEY, granted_at INTEGER NOT NULL, signature TEXT)');
+        $pdo->exec("INSERT INTO sessions VALUES ('s', 'MPDAfig', 'FPDAfig', 'BKEYfig', {$this->now}, {$this->now} + 3600)");
+        $pdo->exec("INSERT INTO faucet_ledger VALUES ('RDRfig', {$this->now}, 'sig')");
+        $pdo->exec('PRAGMA user_version = 2');
+
+        Database::migrate($pdo);
+        $store = new Store($pdo, fn (): int => $this->now);
+
+        self::assertSame(Database::VERSION, (int) $pdo->query('PRAGMA user_version')->fetchColumn());
+        self::assertSame('MPDAfig', $store->bindingForSession('s')?->meter, 'the session survives');
+        self::assertTrue($store->faucetGranted('RDRfig'));
+        $store->keepCloseMessage('s', 'message');
+        self::assertSame('message', $store->closeMessage('s'));
+    }
 }

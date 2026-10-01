@@ -20,14 +20,20 @@ declare(strict_types=1);
  *   bin/fund-trials open [N]        the setup transaction for fund N, composed as the server would compose it
  *   bin/fund-trials wrong [N]       open_fund on an index already in use, sent anyway
  *   bin/fund-trials renew [N]       renew fund N's meter to a new browser key, then prove with old and new
+ *   bin/fund-trials hand [N] --key=K   renew fund N's meter to a browser's key K, and print the meter's address
  *   bin/fund-trials proof [N]       a key proof against fund N's meter, with the current key
  *   bin/fund-trials meter [N] [K]   meter_and_settle for K items (default 1) against fund N's meter
  *   bin/fund-trials close [N]       sign out: close_meter signed by the key, the fee paid by the authority
  *   bin/fund-trials empty [N]       withdraw everything from fund N and close it
  *   bin/fund-trials scan [WALLET]   derive all 256 funds of a wallet in DEMO and fetch them
  *
- * N is the fund index and defaults to 0. `open` takes three options, each
- * in base units or seconds:
+ * `hand` is the development stand-in of slice 2 of the fund design, gone when
+ * setup's scan arrives. K is the public key a browser shows when
+ * `development.key_trial` is on; the browser holds the secret half, so `hand`
+ * proves nothing itself. Paste the address it prints into that browser.
+ *
+ * N is the fund index and defaults to 0. `open`, `renew` and `hand` take three
+ * options, each in base units or seconds:
  *
  *   --deposit=<base units>   default: the site's minimum limit, or what the
  *                            reader holds if that is less. A deposit larger
@@ -251,7 +257,7 @@ final class FundTrials
     {
         $key = Keypair::loadOrCreate($this->keyPath($index));
 
-        return $this->setUp($this->readerKey(), $index, $key, $options, 'open');
+        return $this->setUp($this->readerKey(), $index, $key->address, $options, 'open', $key);
     }
 
     /**
@@ -306,7 +312,7 @@ final class FundTrials
         self::line('new key', $new->address);
 
         $options += ['deposit' => '0'];
-        $status = $this->setUp($reader, $index, $new, $options, 'renew');
+        $status = $this->setUp($reader, $index, $new->address, $options, 'renew', $new);
         if ($status !== 0) {
             return $status;
         }
@@ -316,6 +322,37 @@ final class FundTrials
         $newAccepted = $this->prove($index, $new);
 
         return (!$oldAccepted && $newAccepted) ? 0 : 1;
+    }
+
+    /**
+     * The development stand-in: renew fund N's meter, or open one, naming a
+     * key a browser made. The secret half never leaves that browser, so this
+     * proves nothing; the browser proves its own key when it is given the
+     * meter's address, which is printed last.
+     *
+     * @param array<string, string> $options
+     */
+    public function hand(int $index, array $options): int
+    {
+        $key = (string) ($options['key'] ?? '');
+        if (preg_match('/^[1-9A-HJ-NP-Za-km-z]{32,44}$/', $key) !== 1) {
+            echo "hand needs --key=<the browser's public key, base58>\n";
+
+            return 2;
+        }
+
+        $options += ['deposit' => '0'];
+        unset($options['key']);
+        $status = $this->setUp($this->readerKey(), $index, $key, $options, 'hand', null);
+        if ($status !== 0) {
+            return $status;
+        }
+
+        [, , , $meterAddress] = $this->readFundAndMeter($this->readerKey()->address, $index);
+        echo "\nmeter       {$meterAddress}\n";
+        echo "            paste this into the browser whose key it now names\n";
+
+        return 0;
     }
 
     /** A key proof with the current key, against the meter as the chain holds it now. */
@@ -508,11 +545,13 @@ final class FundTrials
 
     /**
      * Compose, print and send the setup transaction. Shared by `open`, which
-     * keeps the fund's current key, and `renew`, which names a new one.
+     * keeps the fund's current key, `renew`, which names a new one, and
+     * `hand`, which names a browser's. The proof that follows needs the key's
+     * secret, so `hand`, which has none, passes null and skips it.
      *
      * @param array<string, string> $options
      */
-    private function setUp(Keypair $reader, int $index, Keypair $key, array $options, string $verb): int
+    private function setUp(Keypair $reader, int $index, string $key, array $options, string $verb, ?Keypair $proveWith): int
     {
         $site = $this->siteAccount();
         $mint = $this->addresses['mint'];
@@ -541,7 +580,7 @@ final class FundTrials
         self::line('reader', $reader->address);
         self::line('fund', "{$fundAddress} (index {$index}): ".($fund === null ? 'absent' : "present, {$fund->meters} meter(s) open"));
         self::line('meter', "{$meterAddress}: ".($meter === null ? 'absent' : 'present, key '.$meter->key));
-        self::line('key', $key->address);
+        self::line('key', $key);
 
         /** @var list<Instruction> $instructions */
         $instructions = [];
@@ -561,10 +600,10 @@ final class FundTrials
         }
 
         if ($meter === null) {
-            $instructions[] = Ix::openMeter($this->program, $this->addresses['site'], $reader->address, $fundAddress, $key->address, $limit, $expiry);
+            $instructions[] = Ix::openMeter($this->program, $this->addresses['site'], $reader->address, $fundAddress, $key, $limit, $expiry);
             $plan[] = 'open_meter';
         } else {
-            $instructions[] = Ix::renewMeter($this->program, $this->addresses['site'], $reader->address, $fundAddress, $key->address, $limit, $expiry);
+            $instructions[] = Ix::renewMeter($this->program, $this->addresses['site'], $reader->address, $fundAddress, $key, $limit, $expiry);
             $plan[] = 'renew_meter';
         }
 
@@ -598,9 +637,13 @@ final class FundTrials
         self::line('spent', self::sol($spent).' in all, from the reader\'s SOL');
         $this->printReaderBalances($reader->address);
 
+        if ($proveWith === null) {
+            return 0;
+        }
+
         echo "\n";
 
-        return $this->prove($index, $key) ? 0 : 1;
+        return $this->prove($index, $proveWith) ? 0 : 1;
     }
 
     /**
@@ -799,6 +842,7 @@ exit(match ($command) {
     'open' => $trials->open($index, $options),
     'wrong' => $trials->wrong($index),
     'renew' => $trials->renew($index, $options),
+    'hand' => $trials->hand($index, $options),
     'proof' => $trials->proof($index),
     'meter' => $trials->meter($index, (int) ($positional[2] ?? 1)),
     'close' => $trials->close($index),

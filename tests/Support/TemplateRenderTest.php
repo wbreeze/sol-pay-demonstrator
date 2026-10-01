@@ -101,6 +101,8 @@ final class TemplateRenderTest extends TestCase
             'step_views' => 7,
             'advanced' => null,
             'solvency' => null,
+            'live_grants' => 2,
+            'dev_key_trial' => false,
         ];
     }
 
@@ -270,27 +272,55 @@ final class TemplateRenderTest extends TestCase
     }
 
     /**
-     * The panel for a browser with no session, while setting a meter is being
-     * rebuilt (fund design, slice 1). It says so, rather than offering a
-     * control that would not work, and when the read has just ended a session
-     * it says why the meter is gone from this browser (SPEC §5.3).
+     * The panel for a browser with no session (fund design, slice 2). Setting
+     * up is being rebuilt and says so, with nothing to press that would not
+     * work. A browser that holds a key and a meter binds from here, so the
+     * key's script is loaded and has a line to speak on. And when the read has
+     * just ended a session, the panel says why the meter is gone from this
+     * browser (SPEC §5.3).
      */
-    public function testTheAnonymousPanelSaysTheMeterIsBeingRebuilt(): void
+    public function testTheAnonymousPanelBindsAHeldKeyAndOffersNothingElse(): void
     {
-        $plain = self::said($this->renderStrictly('meter', [
+        $plain = $this->renderStrictly('meter', [
             'meter' => $this->panel(['stage' => 'anonymous', 'meter' => null, 'items_remaining' => null]),
             'site' => $this->site(),
-        ]));
-        self::assertStringContainsString('The meter is being rebuilt.', $plain);
-        self::assertStringNotContainsString('session with it has ended', $plain);
+        ]);
+        self::assertStringContainsString('is being rebuilt', self::said($plain));
+        self::assertStringNotContainsString('session with it has ended', self::said($plain));
         self::assertStringNotContainsString('<button', $plain, 'nothing to press that would not work');
-        self::assertStringNotContainsString('<script', $plain);
+        self::assertMatchesRegularExpression('/<p class="pending" data-key-bind role="status" hidden><\/p>/', $plain);
+        self::assertStringContainsString('<script type="module" src="/assets/key.js"></script>', $plain);
+        self::assertStringNotContainsString('data-key-trial', $plain, 'the development stand-in is off unless turned on');
 
         $ended = self::said($this->renderStrictly('meter', [
             'meter' => $this->panel(['stage' => 'anonymous', 'ended' => true, 'meter' => null, 'items_remaining' => null]),
             'site' => $this->site(),
         ]));
         self::assertStringContainsString('renewed from another device, which then holds it', $ended);
+
+        // A session's stages have no key work to do on the article.
+        self::assertStringNotContainsString('key.js', $this->renderStrictly('meter', ['meter' => $this->panel(), 'site' => $this->site()]));
+    }
+
+    /**
+     * The development stand-in, when it is on: the key's line, filled by the
+     * script, and the form that takes a meter address. What the script looks
+     * for is what the template renders.
+     */
+    public function testTheDevelopmentStandInRendersWhatKeyJsLooksFor(): void
+    {
+        $html = $this->renderStrictly('meter', [
+            'meter' => $this->panel(['stage' => 'anonymous', 'meter' => null, 'items_remaining' => null, 'dev_key_trial' => true]),
+            'site' => $this->site(),
+        ]);
+        $script = (string) file_get_contents(dirname(__DIR__, 2).'/public/assets/key.js');
+
+        self::assertStringContainsString('bin/fund-trials hand 0', $html);
+        foreach (['data-key-trial-key', 'data-key-trial-form', 'data-key-trial-status', 'data-key-bind'] as $hook) {
+            self::assertStringContainsString($hook, $html, $hook.' in the template');
+            self::assertStringContainsString('['.$hook.']', $script, $hook.' in key.js');
+        }
+        self::assertMatchesRegularExpression('/<input[^>]*name="meter"/', $html, 'key.js reads the field by name');
     }
 
     /** §8.2's `Expired`, which the delegate design never had. */
@@ -578,10 +608,64 @@ final class TemplateRenderTest extends TestCase
 
         $open = self::said($this->renderStrictly('manage-meter', ['stage' => 'open'] + $common));
         self::assertStringContainsString('2026-10-02 12:00 UTC', $open, 'the expiry is on the page');
-        self::assertStringContainsString('being rebuilt', $open, 'and the missing controls are said to be missing');
+        self::assertStringContainsString('Renewing the meter is being rebuilt', $open, 'and the missing control is said to be missing');
 
         $ended = self::said($this->renderStrictly('manage-meter', ['stage' => 'anonymous', 'ended' => true] + $common));
         self::assertStringContainsString('session with it has ended', $ended);
+        self::assertStringContainsString('data-key-bind', $ended, 'a browser holding a key binds from this page too');
+    }
+
+    /**
+     * SPEC §5.4 and §10.4: the close, with its disclosures **before** the
+     * button. Each could change the decision, so each is asserted to come
+     * first: the residue forgiven, the grants lost and how many, the faucet
+     * row that survives, and the line the chain gains.
+     */
+    public function testTheCloseSaysWhatItCostsBeforeTheButton(): void
+    {
+        $html = $this->renderStrictly('manage-meter', ['stage' => 'open', 'site' => $this->site()] + $this->panel(['live_grants' => 3]));
+        $said = self::said($html);
+
+        $button = strpos($html, 'data-close-meter');
+        self::assertIsInt($button);
+        foreach ([
+            'is <strong>forgiven</strong>',
+            '3 live right now',
+            '<strong>Those articles stop being served</strong>',
+            'faucet ledger row survives</strong>',
+            'Closed { meter, forgiven }',
+        ] as $disclosure) {
+            $at = strpos($said, $disclosure);
+            self::assertIsInt($at, $disclosure);
+            self::assertLessThan(strpos($said, 'data-close-meter'), $at, $disclosure.' comes before the button');
+        }
+
+        // Hidden until the script runs, because the key is the script's.
+        self::assertMatchesRegularExpression('/<button[^>]*data-close-meter[^>]*hidden/', $html);
+        self::assertStringContainsString('<noscript>', $html);
+        self::assertStringContainsString('<script type="module" src="/assets/key.js"></script>', $html);
+
+        $none = self::said($this->renderStrictly('manage-meter', ['stage' => 'open', 'site' => $this->site()] + $this->panel(['live_grants' => 0])));
+        self::assertStringContainsString('none are live right now', $none);
+
+        // The panel on the article links to it.
+        self::assertStringContainsString('href="/meter#close"', $this->renderStrictly('meter', ['meter' => $this->panel(['stage' => 'limit']), 'site' => $this->site()]));
+    }
+
+    /** What key.js looks for on the meter page, against what the page renders. */
+    public function testKeyJsLooksForWhatTheMeterPageRenders(): void
+    {
+        $html = $this->renderStrictly('manage-meter', ['stage' => 'open', 'site' => $this->site()] + $this->panel());
+        $script = (string) file_get_contents(dirname(__DIR__, 2).'/public/assets/key.js');
+
+        foreach (['data-close-meter', 'data-close-status', 'data-close-controls'] as $hook) {
+            self::assertStringContainsString($hook, $html);
+            self::assertStringContainsString('['.$hook.']', $script);
+        }
+        foreach (["'/key/nonce'", "'/key/prove'", "'/meter/close/prepare'", "'/meter/close'"] as $route) {
+            self::assertStringContainsString($route, $script);
+            self::assertStringContainsString("\$app->post({$route}", (string) file_get_contents(dirname(__DIR__, 2).'/public/index.php'));
+        }
     }
 
     /**

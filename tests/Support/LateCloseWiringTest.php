@@ -15,14 +15,41 @@ use PHPUnit\Framework\TestCase;
  * closures. Textual, like {@see SafeMethodTest} and
  * {@see FrontControllerTest}.
  *
- * Three places under the delegate design, and one today: `$binding` asks the
- * finisher before any route sees the session. The other two arrive with the
- * routes they belong to (fund design, slice 2): the key-signed close leaves a
- * note on the path that deletes nothing, and the key proof asks the finisher
- * before it binds a session. Their checks come back with them.
+ * 1. The key-signed close leaves a note on the path that deletes nothing.
+ * 2. `$binding` asks the finisher before any route sees the session.
+ * 3. The key proof asks the finisher before it binds a session.
  */
 final class LateCloseWiringTest extends TestCase
 {
+    public function testTheCloseRouteLeavesANoteWhenItDeletesNothing(): void
+    {
+        $body = $this->between("\$app->post('/meter/close',", "\n});\n");
+
+        $check = strpos($body, '$meterExists($held->meter) !== false');
+        $note = strpos($body, 'recordPendingClose(');
+        $pending = strpos($body, "'pending' => true");
+        $erase = strpos($body, 'eraseMeter(');
+
+        self::assertIsInt($check, 'the route reads the meter account after the send');
+        self::assertIsInt($note, 'the route records a pending close');
+        self::assertIsInt($pending);
+        self::assertIsInt($erase);
+        self::assertTrue($check < $note && $note < $pending, 'the note is written on the path that answers "pending"');
+        self::assertLessThan($erase, $pending, 'and that path returns before anything is erased');
+    }
+
+    public function testTheKeyProofFinishesAnEarlierCloseBeforeBindingASession(): void
+    {
+        $body = $this->between("\$app->post('/key/prove'", "\n});\n");
+
+        $finish = strpos($body, '$finishClose(');
+        $create = strpos($body, 'createSession(');
+
+        self::assertIsInt($finish, 'the proof route calls the finisher');
+        self::assertIsInt($create);
+        self::assertLessThan($create, $finish);
+    }
+
     public function testTheSessionLookupAsksTheFinisherFirst(): void
     {
         $body = $this->between('$binding = static function (Request $request)', "\n};\n");
