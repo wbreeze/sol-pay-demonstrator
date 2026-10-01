@@ -30,8 +30,9 @@ authority.
 
 `var/` is gitignored and holds the keypairs setup generated — authority, mint
 and faucet — as Solana CLI JSON. **They exist nowhere else.** Losing that
-directory means the site above can never settle again, and readers recover by
-closing their contracts, which forgives the residue and revokes the delegate.
+directory means the site above can never settle again. Readers recover by
+closing their meters, which forgives the residue and returns the rent. Their
+funds are untouched, because a fund does not depend on the site.
 
 That is the accepted ending. `SPEC.md` §4.4 says the demo holds a devnet key
 controlling nothing of value, §15.4 states what rotation would cost, and
@@ -51,13 +52,13 @@ deployment, and nothing about this site's own accounts.
 | `collection_threshold` | 0.10 DEMO — settles on the tenth view |
 | `min_limit` | 0.50 DEMO — fifty views |
 | mint | `DEMO`, six decimals, mint authority the faucet key, no freeze authority |
-| faucet grant | 0.60 DEMO + 0.05 SOL, once per wallet |
-| faucet reserve | 250,000,000 lamports, which funds four visitors |
+| faucet grant | 0.60 DEMO + 0.01 SOL, once per address (0.05 SOL until 2026-10-01) |
+| faucet reserve | 250,000,000 lamports, which funds about twenty visitors at 0.01 SOL |
 | `demo_step_views` | 7 — below the threshold, so the advance settles intermittently |
 | `grant_ttl_s` | 1,800 — thirty minutes |
 | `sweep_every_s` | 300 — with the grant's thirty, the thirty-five the privacy page promises |
 | `charge_settle_s` | 120 |
-| `close_settle_s` | 180 — longer, because the reader's wallet dialog sits inside its window and the charge's does not |
+| `close_settle_s` | 180 — set when the reader's wallet signed the close. Under the fund design the browser key signs it within a second (`SPEC.md` §5.4), so this can come down to the charge's |
 | `confirm_attempts` / `confirm_spacing_ms` | 6 asks, 2,000 ms apart |
 
 ## The program's events
@@ -68,7 +69,14 @@ carrying `sha256("event:<Name>")[..8]`, then Borsh. Decoded by
 trusting the copy below.
 
 ```
-Metered { contract: Pubkey, page_views: u32, used: u64, paid: u64, transferred: u64 }   1e8e96a17c2e1d7e
-Renewed { contract: Pubkey, limit: u64, carried: u64 }                                  8bfcd923492a0757
-Closed  { contract: Pubkey, forgiven: u64 }                                             321f579b87dcc3ef
+Metered { meter: Pubkey, items: u32, used: u64, paid: u64, transferred: u64 }   1e8e96a17c2e1d7e
+Renewed { meter: Pubkey, limit: u64, carried: u64, expiry: i64 }                8bfcd923492a0757
+Closed  { meter: Pubkey, forgiven: u64 }                                        321f579b87dcc3ef
 ```
+
+The names, and so the discriminators, are unchanged from the delegate design.
+The fields are not: sol-pay 0.2.0 renamed `contract` to `meter` and
+`page_views` to `items`, and added `expiry` to `Renewed`. Until
+`ProgramEvent` follows, it refuses every `Renewed` event, which is now eight
+bytes longer than the layout it expects, and it reads the other two correctly
+under the old field names.

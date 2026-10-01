@@ -58,10 +58,6 @@ and the argument for it. In the order that builds:
 1. [How to read the inspector](content/ReadingTheInspector.md) — the panel at
     the foot of every page, section by section: what each one says, and what
     the site had to do to be able to say it.
-1. [The permission nobody shows you](content/TheDelegate.md) — setting a limit
-   grants a permission, and most wallets never display it. A site that meters
-   this way should point at the account where the permission lives, so the
-   reader can look without the site in between.
 1. [What the limit promises](content/WhatTheLimitPromises.md) — a limit is not
    a reading budget. The site signs every charge alone and can charge up to the
    limit whenever it likes. The limit is the most the reader can lose.
@@ -77,14 +73,6 @@ and the argument for it. In the order that builds:
    failed charge returns a number that does not say which program raised it.
    The answer is in the transaction logs, and so is the reader's wallet address
    and spending.
-1. [The approval that quietly replaces another](content/OneDelegate.md) — a
-   token account has room for exactly one delegate. Authorizing a second site
-   from the same account takes the first site's permission away, and nothing
-   fails until that site next tries to collect.
-1. [Three wallets, one name, and a refusal that wasn't true](content/ThreePhantoms.md)
-    — this site told a perfectly good wallet that it did not support a feature
-    the wallet was advertising. The site had thrown it away and kept a
-    different one with the same name.
 1. [The first transaction, and the one that counted](content/FirstEverOnChain.md)
    — a validator accepted the first transaction this site's server ever built.
    The library's specification had already written down what would count as

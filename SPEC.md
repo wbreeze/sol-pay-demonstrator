@@ -213,7 +213,8 @@ renewal, deposit or wallet-signed close costs a fee alone, and closing returns
 the rent. So 0.01 covers a first setup, a second fund or a second device's
 setup, and hundreds of fees besides. The grant under the delegate design was
 0.05, about thirteen times a setup. At 0.01, the faucet key's reserve of
-0.25 SOL funds about twenty readers rather than about five. Proposed (§14).
+0.25 SOL funds about twenty readers rather than about five. Decided
+2026-10-01.
 
 **Nothing is behind a click.** Before the reader submits the form, the screen
 says which address will receive what, that it is once per address, that none
@@ -407,13 +408,18 @@ not honour.
 Measured on devnet, 2026-09-30: a close costs the site 0.000010 SOL, which
 is two base fees for two signatures.
 
-**The control is on the meter panel and on `manage_meter`, at any time**,
-labelled for what it does: *close this meter*. Decided 2026-10-01. A separate
-"forget me" control, dropping the session and keeping the meter, is not
-offered. The key would stay in IndexedDB, and the next visit to the site would
-bind a new session from it (§5.3), so such a control would undo itself. A
-reader on a machine they do not own chooses a short expiry at setup (§6.3) and
-closes the meter when done.
+**Closing the meter is how a reader makes the site forget them**, decided
+2026-10-01. The browser key is invisible to the reader. What the reader can see
+is the meter, so closing it is the action a reader thinks of as "forget me",
+and it is the one that does forget them (§10.4). The control is on the meter
+panel and on `manage_meter`, at any time, labelled for what it does: *close
+this meter*. There is no separate control that drops the session and keeps
+the meter. The key would stay in IndexedDB, and the next visit would bind a
+new session from it (§5.3).
+
+The exposure on a machine the reader does not own is taught where it is
+decided: in the expiry choice at setup (§6.3), not in a control the reader
+would have to remember to use.
 
 ### 5.5 Walking away
 
@@ -547,10 +553,14 @@ barriers to reach the delegate design carried all sat on a wallet in the page.
 1. **The panel asks** for a limit, an expiry, a deposit and a fund index
    (§6.4). It states the price per article, the minimum limit, and what the
    reader's wallet will pay in rent and fees, before anything is signed. The
-   expiry is a choice among a few, never a date to type: *an hour* (a machine
-   the reader does not own), *a day*, *a week*, *thirty days*. Decided
-   2026-10-01; the four values and the default of *a day* are proposed
-   (§14).
+   expiry is a choice among a few, never a date to type, each with a line of
+   guidance, decided 2026-10-01:
+   - *an hour*: for a machine the reader does not own. After the hour, the
+     key left in that browser opens nothing;
+   - *a day*, the default: one sitting, with room to come back;
+   - *a week*: the reader's own device;
+   - *thirty days*: the reader's own device, read often. The panel says that
+     until then, anyone who uses this browser can read on this meter.
 2. **The page makes its key** if it has none (§5.1), and posts the key and
    the four answers. The server records a **pending setup**: a random id, the
    session it belongs to, the key and the answers. It lives ten minutes.
@@ -1326,7 +1336,9 @@ shows that the browser half is optional for a site whose server speaks PHP.
 
 **The setup QR code is rendered on the server as inline SVG**, by a Composer
 library, so that the page loads no QR script and makes no request for an
-image. Decided 2026-10-01: reliable, and it goes inline.
+image. Decided 2026-10-01: reliable, and it goes inline. Which library is
+chosen when the work reaches it. The risk that none serves is accepted as
+low.
 
 ### 12.3 The transaction request
 
@@ -1423,11 +1435,10 @@ declined: it waits until a real wallet has to be tried (§13.4).
 - **A Lightsail instance**, or any small VM with a persistent disk, running
   PHP-FPM so that §7.2's lock is exercised by real concurrency, and
   `bin/sweep` from cron.
-- **TLS from an AWS-managed certificate**, validated by DNS in Route 53 and
-  renewed automatically, decided 2026-10-01 for reliability. An AWS-managed
-  certificate cannot be installed on the instance itself, so it ends TLS at a
-  Lightsail load balancer in front of the instance. The load balancer costs
-  more than the instance does; §14 holds the cheaper alternatives.
+- **TLS with automatic renewal and DNS in Route 53.** How exactly is settled
+  when the deployment is built. It is a scripted deployment, and temporary, so
+  an AWS-managed certificate behind a load balancer would be more than it
+  needs (§14).
 - **A deploy is a push**, then one script that pulls, installs and reloads, in
   about a minute.
 
@@ -1542,27 +1553,18 @@ already ratified carry their date where they are made.
 
 **Proposed, not yet ratified:**
 
-1. **The SOL grant of 0.01** (§4.3), down from 0.05.
-2. **The four expiries and the default** (§6.3): an hour, a day, a week and
-   thirty days, defaulting to a day.
-3. **Closing a meter with the wallet** (§5.5): a scan that closes an
+1. **Closing a meter with the wallet** (§5.5): a scan that closes an
    abandoned meter, signed by the reader, offered on the panel when there is
    no session.
-4. **Where TLS ends on the hosted instance** (§12.6). An AWS-managed
-   certificate needs a Lightsail load balancer, at $18 a month against the
-   instance's $5 (prices of 2026-10-01). Two cheaper routes keep Route 53 in
-   charge of validation:
-   - Caddy on the instance, with a Let's Encrypt certificate renewed through a
-     DNS challenge answered in Route 53. Free, and automatic once the
-     instance has permission to edit the zone.
-   - An exportable public certificate from AWS Certificate Manager, at $15 a
-     domain a year, installed on the instance. Renewal is automatic, but the
-     renewed certificate has to be reinstalled each time.
-5. **Which Composer library renders the QR code** (§12.2).
 
-**Open:**
+**Open, and deferred to the hosted deployment:**
 
-6. **What a real wallet does** (§13.4), until the hosted instance exists.
+2. **What a real wallet does** (§13.4).
+3. **Where TLS ends on the hosted instance** (§12.6). Two routes keep Route 53
+   doing the validation without a load balancer: Caddy on the instance, with
+   a Let's Encrypt certificate renewed through a DNS challenge answered in
+   Route 53; or an exportable certificate from AWS Certificate Manager,
+   installed on the instance and reinstalled at each renewal.
 
 ## 15. The site authority key
 

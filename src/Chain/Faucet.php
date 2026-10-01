@@ -12,7 +12,7 @@ use SolPay\Core\CauseKind;
 use SolPay\Core\Ids;
 
 /**
- * SPEC §4.3: 0.60 DEMO and 0.05 SOL, once per wallet, paid by the site.
+ * SPEC §4.3: 0.60 DEMO and 0.01 SOL, once per wallet, paid by the site.
  *
  * The site signs this one, not the reader — which is why it is not a wallet
  * interaction and does not belong in the meter panel's two-step flow. The

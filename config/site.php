@@ -73,7 +73,10 @@ return [
     // balance_short walkthrough unreachable and quietly deletes one of the
     // two failure modes the demo exists to show.
     'faucet' => [
-        'sol_lamports' => 50_000_000, // 0.05 SOL
+        // 0.01 SOL since 2026-10-01. A first setup under the fund design costs
+        // the reader 0.003886 SOL, most of it rent that comes back on close
+        // (SPEC §4.3); 0.05 was thirteen times that.
+        'sol_lamports' => 10_000_000, // 0.01 SOL
         'demo_base_units' => 600_000, // 0.60 DEMO
     ],
 
@@ -82,9 +85,9 @@ return [
     'setup' => [
         'airdrop_lamports' => 1_000_000_000,        // 1 SOL; devnet's faucet refuses more often than it works
         'authority_minimum_lamports' => 300_000_000, // enough for setup's transactions and a long session of metering
-        'faucet_reserve_lamports' => 250_000_000,    // four visitors: §4.3's 0.05 SOL each, plus the rent on a
-                                                     // 165-byte token account and a fee. bin/devnet-canary
-                                                     // computes it; this comment used to say five.
+        'faucet_reserve_lamports' => 250_000_000,    // about twenty visitors: §4.3's 0.01 SOL each, plus the rent
+                                                     // on a 165-byte token account and a fee. bin/devnet-canary
+                                                     // computes it rather than trusting this comment.
     ],
 
     // SPEC §5. Sign In With Solana, required with no fallback: a wallet
