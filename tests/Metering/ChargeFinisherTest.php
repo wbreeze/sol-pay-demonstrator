@@ -36,7 +36,7 @@ final class ChargeFinisherTest extends TestCase
     protected function setUp(): void
     {
         $this->store = new Store(Database::open(':memory:'), fn (): int => $this->now);
-        $this->store->recordGrant('PAYRfig', 'article-one', 1_800, 'sigone', ChargeState::Pending);
+        $this->store->recordGrant('MPDAfig', 'article-one', 1_800, 'sigone', ChargeState::Pending);
     }
 
     public function testNoGrantIsNoAnswerAndNoQuestion(): void
@@ -76,7 +76,7 @@ final class ChargeFinisherTest extends TestCase
 
         self::assertSame(ChargeState::Refused, $found['charge'] ?? null);
         self::assertSame(ChargeState::Refused, $this->charge());
-        self::assertNotNull($this->store->liveGrant('PAYRfig', 'article-one'), 'the reader keeps the article');
+        self::assertNotNull($this->store->liveGrant('MPDAfig', 'article-one'), 'the reader keeps the article');
     }
 
     public function testNoAnswerInsideTheWindowStaysPending(): void
@@ -97,7 +97,7 @@ final class ChargeFinisherTest extends TestCase
 
         self::assertSame(ChargeState::Unknown, $found['charge'] ?? null);
         self::assertSame(ChargeState::Unknown, $this->charge());
-        self::assertNotNull($this->store->liveGrant('PAYRfig', 'article-one'));
+        self::assertNotNull($this->store->liveGrant('MPDAfig', 'article-one'));
     }
 
     /** The endpoint's silence is not the chain's: nothing is decided on it, however late. */
@@ -106,7 +106,7 @@ final class ChargeFinisherTest extends TestCase
         $this->now += 10 * self::SETTLE_S;
 
         $found = (new ChargeFinisher($this->store, self::SETTLE_S))->finish(
-            'PAYRfig',
+            'MPDAfig',
             'article-one',
             function (string $signature): Outcome {
                 $this->asked += 1;
@@ -127,11 +127,11 @@ final class ChargeFinisherTest extends TestCase
      */
     public function testNewsAboutAnOlderChargeIsNotWrittenOntoANewerOne(): void
     {
-        self::assertFalse($this->store->settleCharge('PAYRfig', 'article-one', 'sigold', ChargeState::Refused));
+        self::assertFalse($this->store->settleCharge('MPDAfig', 'article-one', 'sigold', ChargeState::Refused));
         self::assertSame(ChargeState::Pending, $this->charge());
 
-        self::assertTrue($this->store->settleCharge('PAYRfig', 'article-one', 'sigone', ChargeState::Confirmed));
-        self::assertFalse($this->store->settleCharge('PAYRfig', 'article-one', 'sigone', ChargeState::Refused), 'and only once');
+        self::assertTrue($this->store->settleCharge('MPDAfig', 'article-one', 'sigone', ChargeState::Confirmed));
+        self::assertFalse($this->store->settleCharge('MPDAfig', 'article-one', 'sigone', ChargeState::Refused), 'and only once');
         self::assertSame(ChargeState::Confirmed, $this->charge());
     }
 
@@ -140,7 +140,7 @@ final class ChargeFinisherTest extends TestCase
     {
         $seen = null;
         (new ChargeFinisher($this->store, self::SETTLE_S))->finish(
-            'PAYRfig',
+            'MPDAfig',
             'article-one',
             static function (string $signature) use (&$seen): Outcome {
                 $seen = $signature;
@@ -156,7 +156,7 @@ final class ChargeFinisherTest extends TestCase
     private function finish(string $article, Outcome $answer): ?array
     {
         return (new ChargeFinisher($this->store, self::SETTLE_S))->finish(
-            'PAYRfig',
+            'MPDAfig',
             $article,
             function (string $signature) use ($answer): Outcome {
                 $this->asked += 1;
@@ -168,6 +168,6 @@ final class ChargeFinisherTest extends TestCase
 
     private function charge(): ?ChargeState
     {
-        return $this->store->liveGrant('PAYRfig', 'article-one')['charge'] ?? null;
+        return $this->store->liveGrant('MPDAfig', 'article-one')['charge'] ?? null;
     }
 }

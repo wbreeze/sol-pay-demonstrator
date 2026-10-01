@@ -76,7 +76,7 @@ Closed  { meter: Pubkey, forgiven: u64 }                                        
 
 The names, and so the discriminators, are unchanged from the delegate design.
 The fields are not: sol-pay 0.2.0 renamed `contract` to `meter` and
-`page_views` to `items`, and added `expiry` to `Renewed`. Until
-`ProgramEvent` follows, it refuses every `Renewed` event, which is now eight
-bytes longer than the layout it expects, and it reads the other two correctly
-under the old field names.
+`page_views` to `items`, and added `expiry` to `Renewed`. `ProgramEvent`
+follows them since slice 1 of the fund design. Before that it refused every
+`Renewed` event, which was eight bytes longer than the layout it expected, and
+read the other two under the old field names.

@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace Newsprint\Metering;
 
+use Newsprint\Auth\Binding;
 use Newsprint\Content\Piece;
 
 /**
  * SPEC §7.5, and it is one function on purpose.
  *
- * `wasm-client/SPEC.md` §4.4 warns that a contract is not a viewer type, and
- * that keying access off "has a contract" eventually charges a subscriber for
+ * `wasm-client/SPEC.md` §4.4 warns that a meter is not a viewer type, and
+ * that keying access off "has a meter" eventually charges a subscriber for
  * something their subscription already covers. This demo has no subscriptions,
  * so it cannot demonstrate the coexistence — but the decision point exists
  * anyway, in one named place, returning true for every article here.
@@ -29,7 +30,7 @@ final class Decision
      * implementation of this needs both and a function that takes only the
      * article teaches the wrong shape.
      */
-    public static function shouldMeter(Piece $piece, ?string $wallet): bool
+    public static function shouldMeter(Piece $piece, ?Binding $reader): bool
     {
         // Unmetered content — the privacy page, anything §10.1 marks free —
         // never reaches the chain regardless of who is reading.

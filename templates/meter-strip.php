@@ -16,7 +16,7 @@ use Newsprint\Metering\MeterOutcome;
 use Newsprint\Support\View;
 
 $symbol = View::e((string) $meter['symbol']);
-$contract = $meter['contract'];
+$onChain = $meter['meter'];
 $advanced = $meter['advanced'] ?? null;
 $solvency = $meter['solvency'] ?? null;
 
@@ -46,11 +46,11 @@ $awaiting = $result->awaiting();
 <section class="meter-strip">
 <?php if ($advanced !== null): ?>
     <?php /* Shown once, from the redirect, and not stored — see the advance
-             route for why a per-wallet log of these would be a claim on the
+             route for why a per-meter log of these would be a claim on the
              privacy page.
 
              Every outcome is reported, including the ones that changed
-             nothing. A settle that fails leaves the contract exactly as it
+             nothing. A settle that fails leaves the meter exactly as it
              was, so a button that stays silent looks like a button that did
              not work. */ ?>
 <?php if ($advanced['outcome'] === MeterOutcome::Failed): ?>
@@ -62,54 +62,26 @@ $awaiting = $result->awaiting();
         <?= View::e((string) $advanced['views']) ?> views — and the transfer
         was refused.
     </p>
-<?php if (($solvency['balance_short'] ?? 0) > 0): ?>
+<?php if (($solvency['short'] ?? 0) > 0): ?>
     <p class="pending">
-        Your balance is short by
-        <?= View::e((string) $solvency['balance_short_demo']) ?> <?= $symbol ?>.
+        Your fund is short by
+        <?= View::e((string) $solvency['short_demo']) ?> <?= $symbol ?>.
         This is §13.2's walkthrough rather than a fault: the faucet is stingy on
-        purpose so that a depleted balance is reachable.
+        purpose so that a depleted fund is reachable.
         <a href="/meter">The meter</a> shows where you stand.
     </p>
-<?php elseif (($solvency['delegate_is_ours'] ?? true) === false): ?>
-    <?php /* Checked before the allowance rather than after it. SPL clears the
-             delegate the moment the approved amount is spent to zero, so a
-             revoked account usually reports `allowance_short > 0` as well —
-             and "the amount you approved no longer covers it" is the wrong
-             account of an approval that is *gone*. Checked last, it was also
-             checked never: a revoke that left `delegated_amount` standing
-             produced no paragraph at all, which is how this was found.
-
-             The account holds one delegate, so there are two ways to arrive
-             here and they read differently to a reader: the field is empty, or
-             it names somebody else. */ ?>
-<?php if (($meter['delegate'] ?? null) === null): ?>
-    <p class="pending">
-        This site is no longer a delegate on your token account, so the
-        transfer was refused — the approval was revoked, or SPL cleared it
-        when the approved amount reached zero.
-        <a href="/meter">Renewing re-approves</a>.
-    </p>
-<?php else: ?>
-    <p class="pending">
-        Another site's approval has replaced this one on your token account, so
-        the transfer was refused. A token account holds one delegate at a time.
-        <a href="/meter">Renewing re-approves</a> here, and takes away the
-        other site's permission.
-    </p>
 <?php endif ?>
-<?php elseif (($solvency['allowance_short'] ?? 0) > 0): ?>
+<?php elseif ($advanced['outcome'] === MeterOutcome::Blocked && $meter['stage'] === 'expired'): ?>
     <p class="pending">
-        The amount you approved no longer covers it — short by
-        <?= View::e((string) $solvency['allowance_short_demo']) ?> <?= $symbol ?>.
-        <a href="/meter">Renewing re-approves</a>.
+        <strong>The meter has expired</strong>, so nothing was sent and nothing
+        was charged. <a href="/meter">The meter</a> shows where it stands.
     </p>
-<?php endif ?>
 <?php elseif ($advanced['outcome'] === MeterOutcome::Blocked): ?>
     <p class="pending">
         <strong>The advance would have passed your limit</strong>, so nothing
         was sent and nothing was charged — the meter refuses the whole call
         rather than metering part of it.
-        <a href="/meter">Raise the limit, or close it</a>.
+        <a href="/meter">The meter</a> shows where it stands.
     </p>
 <?php elseif ($advanced['outcome'] === MeterOutcome::Unreadable): ?>
     <p class="pending">The endpoint did not answer. Nothing was sent.</p>
@@ -211,12 +183,12 @@ $awaiting = $result->awaiting();
     </p>
 <?php endif ?>
 
-<?php if ($contract !== null && !$awaiting): ?>
+<?php if ($onChain !== null && !$awaiting): ?>
     <p class="fine">
-        used <?= View::e((string) $contract['used']) ?>
-        · settled <?= View::e((string) $contract['paid']) ?>
-        · carried <?= View::e((string) $contract['unpaid']) ?>
-        · <?= View::e((string) $meter['views_remaining']) ?> views left
+        used <?= View::e((string) $onChain['used']) ?>
+        · settled <?= View::e((string) $onChain['paid']) ?>
+        · carried <?= View::e((string) $onChain['unpaid']) ?>
+        · <?= View::e((string) $meter['items_remaining']) ?> views left
         · <a href="/meter">the meter</a>
     </p>
 <?php endif ?>
@@ -228,9 +200,9 @@ $awaiting = $result->awaiting();
     </p>
 <?php endif ?>
 
-<?php /* Asked before the click, not only after it: `can_meter` is a limit
-         check and cannot see a short balance, because the payment happens
-         inside a CPI that SPL refuses. The button is still offered — watching
+<?php /* Asked before the click, not only after it: `can_meter` checks the
+         expiry and the limit and cannot see a short fund, because the payment
+         happens inside a CPI that SPL refuses. The button is still offered — watching
          it fail is a legitimate thing to want from a demo — but not silently.
          **And after the click too, unless the click already said it.** The
          gate used to be `advanced === null`, so one successful advance
@@ -240,28 +212,11 @@ $awaiting = $result->awaiting();
          the one case that did not get it. See `$reported` at the top. */ ?>
 <?php if ($solvency !== null && !$solvency['clear'] && !$reported && !$awaiting): ?>
     <p class="pending">
-<?php if ($solvency['balance_short'] > 0): ?>
         Heads up: the next advance would try to move
         <?= View::e((string) $solvency['would_move']) ?> <?= $symbol ?>
-        and your balance is short by
-        <?= View::e((string) $solvency['balance_short_demo']) ?>.
+        and your fund is short by
+        <?= View::e((string) $solvency['short_demo']) ?>.
         It will be refused, and nothing will be charged.
-<?php elseif (!($solvency['delegate_is_ours'] ?? true)): ?>
-<?php if (($meter['delegate'] ?? null) === null): ?>
-        Heads up: this site is no longer a delegate on your token account, so a
-        settle would be refused. <a href="/meter">Renewing re-approves</a>.
-<?php else: ?>
-        Heads up: another site's approval has replaced this one on your token
-        account, so a settle would be refused.
-        <a href="/meter">Renewing re-approves</a> here, and takes away the
-        other site's permission.
-<?php endif ?>
-<?php else: ?>
-        Heads up: the amount you approved is short by
-        <?= View::e((string) $solvency['allowance_short_demo']) ?>
-        <?= $symbol ?> of what the next advance would move.
-        <a href="/meter">Renewing re-approves</a>.
-<?php endif ?>
     </p>
 <?php endif ?>
 

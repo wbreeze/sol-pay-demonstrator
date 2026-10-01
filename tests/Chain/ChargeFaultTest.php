@@ -105,7 +105,7 @@ final class ChargeFaultTest extends TestCase
 
         $meter = (string) file_get_contents($root.'/src/Metering/Meter.php');
         self::assertSame(1, substr_count($meter, 'ChargeFault::fromEnvironment('), 'one place reads the variable');
-        self::assertStringContainsString('$this->meter($wallet, $state, 1, false, ChargeFault::fromEnvironment(', $meter);
-        self::assertStringContainsString('$this->meter($wallet, $state, $pageViews, true)', $meter, 'the advance sends as it always did');
+        self::assertStringContainsString('$this->meter($binding, $state, 1, false, ChargeFault::fromEnvironment(', $meter);
+        self::assertStringContainsString('$this->meter($binding, $state, $items, true)', $meter, 'the advance sends as it always did');
     }
 }

@@ -30,13 +30,11 @@ use Newsprint\Support\View;
 <header class="masthead">
     <a class="wordmark" href="/">Newsprint</a>
     <p class="tagline">Reading without leaving profiles of your principles.</p>
-<?php /* §5 asks that a site which can charge you say who it thinks you are.
-         It said so here, in the masthead, and that was the wrong place: a
-         name and a sign-out link across every page is the furniture of an
-         account, and this site has no accounts. What it has is one wallet
-         address held for one visit, and the only page where that fact does
-         any work is the meter — which shows the address, and offers to
-         forget it. So §5 is answered there instead of everywhere. */ ?>
+<?php /* §5.6: identity is shown on the meter, not in the masthead. A name
+         and a way out across every page is the furniture of an account, and
+         this site has no accounts. What it has is a cookie, a row naming one
+         meter, and a meter on a public chain, and the only page where that
+         fact does any work is the meter — which shows it, and closes it. */ ?>
 </header>
 
 <main>

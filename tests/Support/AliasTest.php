@@ -16,7 +16,7 @@ use PHPUnit\Framework\TestCase;
 final class AliasTest extends TestCase
 {
     private const SITE = 'F8UDAGgxVTm8Vmh4RmskpMBCFqhRvuTqbDxDCj8UMedL';
-    private const PAYER = '163aJWGmry7Q2gWjtxmTbdC7NGFc7FecSN1gfpNUgRt';
+    private const FUND = '163aJWGmry7Q2gWjtxmTbdC7NGFc7FecSN1gfpNUgRt';
 
     public function testTheSameAddressAlwaysDrawsTheSameSyllable(): void
     {
@@ -29,11 +29,11 @@ final class AliasTest extends TestCase
     public function testTheSyllableFollowsTheAddressAndNotTheRole(): void
     {
         $asSite = Alias::for(Alias::SITE, self::SITE);
-        $asPayer = Alias::for(Alias::PAYER, self::SITE);
+        $asFund = Alias::for(Alias::FUND, self::SITE);
 
         self::assertSame(
             substr($asSite, strlen(Alias::SITE)),
-            substr($asPayer, strlen(Alias::PAYER)),
+            substr($asFund, strlen(Alias::FUND)),
             'one address, one syllable, whatever role it is playing',
         );
     }
@@ -41,8 +41,8 @@ final class AliasTest extends TestCase
     public function testDifferentAddressesUsuallyDiffer(): void
     {
         self::assertNotSame(
-            Alias::for(Alias::PAYER, self::SITE),
-            Alias::for(Alias::PAYER, self::PAYER),
+            Alias::for(Alias::FUND, self::SITE),
+            Alias::for(Alias::FUND, self::FUND),
         );
     }
 
@@ -75,8 +75,8 @@ final class AliasTest extends TestCase
 
     public function testItIsAPrefixAndAThreeLetterSyllable(): void
     {
-        $alias = Alias::for(Alias::CONTRACT, self::PAYER);
+        $alias = Alias::for(Alias::METER, self::FUND);
 
-        self::assertSame(1, preg_match('/^CPDA[a-z]{3}$/', $alias), $alias);
+        self::assertSame(1, preg_match('/^MPDA[a-z]{3}$/', $alias), $alias);
     }
 }

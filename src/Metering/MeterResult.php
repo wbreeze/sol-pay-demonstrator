@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace Newsprint\Metering;
 
-use Newsprint\Chain\PayerState;
+use Newsprint\Chain\MeterState;
 use SolPay\Core\Blocked;
 use SolPay\Core\Cause;
 use SolPay\Core\Instruction;
-use SolPay\Core\Shortfall;
 
 /**
  * What the metering decision came to, for one request.
@@ -26,18 +25,17 @@ final class MeterResult
         public readonly ?Blocked $blocked = null,
         /** Why the chain said no, after it was. */
         public readonly ?Cause $cause = null,
-        /** Which constraint on the token account is short (§8.2's ambiguity). */
-        public readonly ?Shortfall $shortfall = null,
         /**
-         * Whether this site's contract was the delegate on the reader's token
-         * account when the charge was refused. Null where the question was not
-         * asked, which is every outcome that did not read the account.
+         * How far the fund's token account is short of what the refused
+         * settle would have moved, in base units (`Shortfall::of`). Zero when
+         * it covered it and the refusal was something else; null where the
+         * account was not there to ask.
          *
-         * Separate from the shortfall's own `delegatePresent`, which answers
-         * `delegate !== null` and is therefore true of another site's delegate
-         * as well as of this one's.
+         * One number where the delegate design needed three: with no
+         * allowance, SPL's `InsufficientFunds` means only that the fund holds
+         * less than the unpaid total (SPEC §8.2).
          */
-        public readonly ?bool $delegateIsContract = null,
+        public readonly ?int $shortfall = null,
         public readonly string $detail = '',
         /** What this call would charge, in base units. */
         public readonly int $charge = 0,
@@ -47,7 +45,8 @@ final class MeterResult
          * reports it afterwards; null when that read did not answer.
          */
         public readonly ?bool $settles = false,
-        public readonly int $pageViews = 1,
+        /** How many items the instruction metered: one for an article, seven for §7.4's control. */
+        public readonly int $items = 1,
         /**
          * The instructions this call built, exactly as `SolPay\Core\Ix`
          * returned them, for SPEC §9's last section.
@@ -70,8 +69,8 @@ final class MeterResult
          * The accounts the decision was made from, on the outcomes that sent
          * nothing — and null on every outcome that sent something.
          *
-         * `meter()` reads the contract and the reader's token account to
-         * decide, and the request then renders from those same two accounts.
+         * `meter()` reads the meter and the fund's token account to decide,
+         * and the request then renders from those same two accounts.
          * Where no transaction went out, the read that decided is still the
          * truth when the page is drawn, and reading it again is a second
          * ~500 ms round trip for the same bytes. Measured 2026-09-09: the
@@ -87,7 +86,7 @@ final class MeterResult
          * would show a reader stale arithmetic that looks exactly like fresh
          * arithmetic.
          */
-        public readonly ?PayerState $payer = null,
+        public readonly ?MeterState $state = null,
         /**
          * What became of the charge the article is served on — the grant's own
          * record, or `Pending` on the request that has just sent it.
@@ -132,9 +131,9 @@ final class MeterResult
      * request that predicted it — that request's answer is gone, and a value
      * the browser sent back would be the reader's word for it.
      */
-    public static function confirmedLater(string $signature, ?bool $settles, int $pageViews = 1): self
+    public static function confirmedLater(string $signature, ?bool $settles, int $items = 1): self
     {
-        return new self(MeterOutcome::Metered, signature: $signature, detail: 'confirmed after the article was served', settles: $settles, pageViews: $pageViews, earlier: true);
+        return new self(MeterOutcome::Metered, signature: $signature, detail: 'confirmed after the article was served', settles: $settles, items: $items, earlier: true);
     }
 
     /** An earlier request's charge, still without an answer — or never going to have one. */
@@ -153,9 +152,9 @@ final class MeterResult
     }
 
     /** @param list<Instruction> $instructions */
-    public static function metered(string $signature, int $charge, bool $settles, int $pageViews = 1, array $instructions = []): self
+    public static function metered(string $signature, int $charge, bool $settles, int $items = 1, array $instructions = []): self
     {
-        return new self(MeterOutcome::Metered, signature: $signature, detail: 'confirmed', charge: $charge, settles: $settles, pageViews: $pageViews, instructions: $instructions);
+        return new self(MeterOutcome::Metered, signature: $signature, detail: 'confirmed', charge: $charge, settles: $settles, items: $items, instructions: $instructions);
     }
 
     /**
@@ -163,42 +162,56 @@ final class MeterResult
      * The site absorbs the cheaper of two asymmetric errors.
      */
     /** @param list<Instruction> $instructions */
-    public static function unconfirmed(string $signature, int $charge, bool $settles, int $pageViews = 1, array $instructions = []): self
+    public static function unconfirmed(string $signature, int $charge, bool $settles, int $items = 1, array $instructions = []): self
     {
-        return new self(MeterOutcome::Unconfirmed, signature: $signature, detail: 'sent; not confirmed inside the window', charge: $charge, settles: $settles, pageViews: $pageViews, instructions: $instructions, chargeState: ChargeState::Pending);
+        return new self(MeterOutcome::Unconfirmed, signature: $signature, detail: 'sent; not confirmed inside the window', charge: $charge, settles: $settles, items: $items, instructions: $instructions, chargeState: ChargeState::Pending);
     }
 
-    /** The preflight refused before anything was signed — `can_meter` said no. */
-    public static function blocked(Blocked $blocked, int $charge, ?PayerState $payer = null): self
+    /**
+     * The preflight refused before anything was signed: `Expired` or
+     * `LimitReached`, in the program's order.
+     */
+    public static function blocked(Blocked $blocked, int $charge, ?MeterState $state = null, int $items = 1): self
     {
-        return new self(MeterOutcome::Blocked, blocked: $blocked, detail: (string) $blocked, charge: $charge, payer: $payer);
+        return new self(MeterOutcome::Blocked, blocked: $blocked, detail: (string) $blocked, charge: $charge, items: $items, state: $state);
     }
 
     /** The chain refused. */
     /** @param list<Instruction> $instructions */
-    public static function failed(string $detail, ?Cause $cause, ?Shortfall $shortfall, ?string $signature = null, array $instructions = [], ?bool $delegateIsContract = null): self
+    public static function failed(string $detail, ?Cause $cause, ?int $shortfall, ?string $signature = null, array $instructions = [], int $items = 1): self
     {
         return new self(
             MeterOutcome::Failed,
             signature: $signature,
             cause: $cause,
             shortfall: $shortfall,
-            delegateIsContract: $delegateIsContract,
             detail: $detail,
+            items: $items,
             instructions: $instructions,
         );
     }
 
-    /**
-     * The endpoint did not answer, or there was nothing to meter against.
-     * Nothing was sent and nothing is owed.
-     *
-     * The payer is carried when there is one — "this reader has no contract"
-     * is a conclusion drawn *from* a successful read, not a failure to read.
-     */
-    public static function unreadable(string $detail, ?PayerState $payer = null): self
+    /** The endpoint did not answer. Nothing was sent and nothing is owed. */
+    public static function unreadable(string $detail): self
     {
-        return new self(MeterOutcome::Unreadable, detail: $detail, payer: $payer);
+        return new self(MeterOutcome::Unreadable, detail: $detail);
+    }
+
+    /**
+     * The read inside the lock found that the meter no longer binds the
+     * session: it is gone, or it names another browser's key (SPEC §5.3).
+     * Nothing was sent. The caller ends the session, and the reader is
+     * offered `set_meter`.
+     *
+     * Checked inside the lock as well as in front of it, because a renewal
+     * from another device can land between the two reads, and the program
+     * would still accept the charge: `meter_and_settle` is the authority's
+     * alone and does not ask about the key. Whether this browser may still
+     * draw on the meter is the site's question, so the site asks it last.
+     */
+    public static function unbound(MeterState $state): self
+    {
+        return new self(MeterOutcome::Unbound, detail: 'the meter no longer answers to this browser\'s key', state: $state);
     }
 
     /**
@@ -207,7 +220,7 @@ final class MeterResult
      * Distinct from `serves()`, and the difference is `Failed`: a refused
      * charge serves nothing and still moved the chain far enough that `used`,
      * `paid` and the carried residue must be read again before they are shown.
-     * {@see \Newsprint\Chain\RequestRead::invalidatePayer()} is the caller.
+     * {@see \Newsprint\Chain\RequestRead::invalidateMeter()} is the caller.
      */
     public function sent(): bool
     {

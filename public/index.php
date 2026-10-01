@@ -8,21 +8,18 @@ declare(strict_types=1);
  *
  * SPEC §12.1's caveat applies to the dev server and is worth knowing before
  * trusting a green test run: `php -S` is single-process by default, so it
- * satisfies §7.2's per-payer serialization for free and therefore *masks* the
+ * satisfies §7.2's per-meter serialization for free and therefore *masks* the
  * defect §7.2 exists to prevent. Set PHP_CLI_SERVER_WORKERS, or use a real
- * SAPI, before concluding the two-browsers-one-wallet test passes.
+ * SAPI, before concluding that two overlapping requests on one meter charge
+ * once.
  */
 
+use Newsprint\Auth\Binding;
 use Newsprint\Auth\Session;
-use Newsprint\Auth\SignInException;
-use Newsprint\Auth\SignInInput;
-use Newsprint\Auth\Verifier;
-use Newsprint\Chain\Faucet;
 use Newsprint\Chain\ProgramEvent;
 use Newsprint\Chain\RequestRead;
 use Newsprint\Chain\Rpc;
 use Newsprint\Chain\RpcException;
-use Newsprint\Chain\SubmitStatus;
 use Newsprint\Chain\Submitter;
 use Newsprint\Content\Library;
 use Newsprint\Content\Piece;
@@ -48,7 +45,7 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Exception\HttpNotFoundException;
 use Slim\Factory\AppFactory;
-use SolPay\Core\Shortfall;
+use SolPay\Core\BlockedKind;
 use SolPay\Core\Units;
 
 require __DIR__.'/../vendor/autoload.php';
@@ -91,72 +88,73 @@ $rpcFactory = static function () use ($config): Rpc {
 };
 
 /**
- * SPEC §10.4: finish an erasure whose close landed after `POST
- * /meter/close/done` stopped waiting. See {@see CloseFinisher}.
+ * SPEC §10.4 qualification 2: finish an erasure whose close landed after the
+ * close route stopped waiting. See {@see CloseFinisher}.
  *
- * True when this call erased the reader. With no pending close for the
- * wallet, the answer is one indexed read and no chain call. With one, a fresh
- * read of the payer's accounts decides, and that read is made once per wallet
- * per request, since `$wallet` is asked more than once.
+ * True when this call erased the meter's record. With no pending close for
+ * the meter, the answer is one indexed read and no chain call. With one, a
+ * fresh read of the meter account decides, and that read is made once per
+ * meter per request, since `$binding` is asked more than once.
  */
-$finishClose = static function (string $address) use ($store, $config, $rpcFactory): bool {
+$meterExists = static function (string $meter) use ($rpcFactory): ?bool {
+    try {
+        return $rpcFactory()->accountExists($meter);
+    } catch (RpcException) {
+        return null;
+    }
+};
+
+$finishClose = static function (string $meter) use ($store, $config, $meterExists): bool {
     static $answered = [];
 
-    if (!array_key_exists($address, $answered)) {
+    if (!array_key_exists($meter, $answered)) {
         $finisher = new CloseFinisher($store(), (int) $config->metering()['close_settle_s']);
-        $erased = $finisher->finish(
-            $address,
-            static fn (): ?bool => (new RequestRead($config, $rpcFactory(), $address))->payer()?->hasContract(),
-        );
-        $answered[$address] = $erased !== null;
+        $erased = $finisher->finish($meter, static fn (): ?bool => $meterExists($meter));
+        $answered[$meter] = $erased !== null;
     }
 
-    return $answered[$address];
+    return $answered[$meter];
 };
 
 /**
- * The viewer-to-wallet map (§5), which is the integrator's one obligation and
- * here is a cookie and a row. Null means no paying wallet is stored for this
- * browser, which is the ordinary state of every public page on this site.
+ * The viewer-to-meter map (§5.3), which is the integrator's one obligation
+ * and here is a cookie and a row. Null means this browser holds no session,
+ * which is the ordinary state of every public page on this site.
  *
- * Also null when the wallet's close has just been found to have landed: the
- * erasure runs here, before any route sees the wallet, so no route can act for
- * a reader who has asked to be forgotten.
+ * Also null when the meter's close has just been found to have landed: the
+ * erasure runs here, before any route sees the session, so no route can act
+ * for a reader who has asked to be forgotten.
  */
-$wallet = static function (Request $request) use ($store, $finishClose): ?string {
+$binding = static function (Request $request) use ($store, $finishClose): ?Binding {
     $id = Session::idFrom($request);
-    $address = $id === null ? null : $store()->walletForSession($id);
+    $found = $id === null ? null : $store()->bindingForSession($id);
 
-    if ($address !== null && $finishClose($address)) {
+    if ($found !== null && $finishClose($found->meter)) {
         return null;
     }
 
-    return $address;
+    return $found;
 };
 
 /**
  * Everything this request knows about the chain, read once.
  *
- * SPEC §12.4 asks for exactly this — "fetch the `Site`, `Contract` and payer
- * token account **in one round trip**" — and until 2026-09-10 the code did it
- * in two, because {@see RequestRead} did not exist and the site read and the
- * payer read were separate closures that happened to run in that order. A HAR
- * that morning put the median round trip at 1242 ms, so the second one was not
- * a rounding error.
+ * SPEC §6.2's diagram reads the site's three accounts, the meter and the
+ * fund's token account in one round trip. Until 2026-09-10 the delegate
+ * design's equivalent took two, because the site read and the reader's read
+ * were separate closures that happened to run in that order. A HAR that
+ * morning put the median round trip at 1242 ms, so the second one was not a
+ * rounding error.
  *
- * `find_contract` from sol-pay's state diagram lives in there now, beside the
- * site read it used to follow. Note what still makes a returning reader work:
- * the contract address is *derived* from the site and the wallet, so a reader
- * who authorized last week and arrives today with an empty cookie jar
- * identifies once and lands on the contract they already have. The session was
- * only ever the map to it, and the site remembers nothing else. That
- * derivation is also why the two reads could be merged at all — neither of the
- * payer's addresses was ever waiting on the site *account*.
- *
- * The wallet is settled before the object is built, from the cookie and the
+ * The session is settled before the object is built, from the cookie and the
  * store, which costs no round trip. That is what lets one call cover five
- * accounts instead of three: the request knows who is reading before it knows
- * anything about the chain.
+ * accounts instead of three: the request knows which meter it holds before it
+ * knows anything about the chain.
+ *
+ * **The read ends the session when the chain says to** (§5.3). A meter that is
+ * gone, or that names another browser's key, ends every session under the
+ * old key at the read that finds it. `RequestRead` asks on every read, and
+ * this is where its answer reaches the store.
  *
  * Three by-reference variables and three closures used to live here. One of
  * them, `$stateAlreadyRead`, was written `function` rather than `fn` because an
@@ -168,12 +166,19 @@ $wallet = static function (Request $request) use ($store, $finishClose): ?string
  * again for every request**, which is true of `php -S` and of PHP-FPM and is
  * not true of a worker SAPI that boots once. This object holds a *reader's*
  * accounts, so there the staleness would be one reader shown another's
- * contract. SPEC §12.1's second caveat says it properly.
+ * meter. SPEC §12.1's second caveat says it properly.
  */
-$reads = static function (Request $request) use ($config, $rpcFactory, $wallet): RequestRead {
+$reads = static function (Request $request) use ($config, $rpcFactory, $binding, $store): RequestRead {
     static $reads = null;
 
-    return $reads ??= new RequestRead($config, $rpcFactory(), $wallet($request));
+    return $reads ??= new RequestRead(
+        $config,
+        $rpcFactory(),
+        $binding($request),
+        static function (Binding $ended) use ($store): void {
+            $store()->endSessions($ended);
+        },
+    );
 };
 
 $panel = new Inspector($config);
@@ -201,20 +206,19 @@ $panel = new Inspector($config);
  * article's GET shell defers the panel like `/privacy` does, and the POST's
  * answer replaces it — see `assets/read-on.js`.)
  *
- * `$payer` and `$result` are checked too, belt and braces: either one means a
- * caller has request-scoped data the deferred route could not reconstruct.
+ * `$result` is checked too: it means a caller has request-scoped data the
+ * deferred route could not reconstruct.
  */
 $inspector = static function (?RequestRead $reads, ?MeterResult $result = null) use ($panel): ?array {
-    // One condition where there were three. `$payer !== null` used to be
-    // checked beside this, belt and braces, and it was always implied: reading
-    // a payer goes through the same object as reading the site, so a request
-    // holding one has read. `$reads === null` is the shape of a page that
-    // never asked for the object at all.
+    // One condition where there were three. A meter read goes through the
+    // same object as the site read, so a request holding one has read.
+    // `$reads === null` is the shape of a page that never asked for the
+    // object at all.
     if ($reads === null || (!$reads->hasRead() && $result === null)) {
         return null;
     }
 
-    return $panel->sections($reads->site(), $reads->error(), $reads->payer(), $result);
+    return $panel->sections($reads->site(), $reads->error(), $reads->meter(), $result);
 };
 
 /**
@@ -231,24 +235,13 @@ $siteVars = static function (RequestRead $reads) use ($params, $decimals): array
     return [
         'symbol' => (string) $params['symbol'],
         'decimals' => $d,
-        'page_price_demo' => Units::fromBaseUnits($state?->site->pagePrice ?? (int) $params['page_price'], $d),
+        'page_price_demo' => Units::fromBaseUnits($state?->site->itemPrice ?? (int) $params['page_price'], $d),
         'min_limit_demo' => Units::fromBaseUnits($state?->site->minLimit ?? (int) $params['min_limit'], $d),
         'threshold_demo' => Units::fromBaseUnits($state?->site->collectionThreshold ?? (int) $params['collection_threshold'], $d),
         'from_chain' => $state !== null,
     ];
 };
 
-/**
- * Everything the meter panel draws, in the units the reader sees.
- *
- * The panel replaces the sign-in screen entirely (2026-09-07). sol-pay's state
- * diagram has no sign-in node: `identified` is a choice, not a screen, and
- * "viewer not identified" goes straight to `set_meter`. A separate sign-in
- * page also reads as identification for tracking, which is precisely the thing
- * this site exists to argue against — the identification here is real but
- * narrow, and putting it inside the meter is what makes the narrowness
- * visible.
- */
 /**
  * SPEC §7's decision, assembled. Built lazily: a request that is not going
  * to meter should not construct an RPC client and load a keypair to find
@@ -273,62 +266,54 @@ $followUpFactory = static function () use ($config, $rpcFactory, $store): Charge
     return new ChargeFollowUp($config, $rpc, Submitter::fromConfig($rpc, $config), $store());
 };
 
-$meterVars = static function (Request $request, ?MeterResult $result = null) use ($reads, $config, $store): array {
+/**
+ * Everything the meter panel draws, in the units the reader sees.
+ *
+ * There is no sign-in screen (SPEC §5.6). sol-pay's state diagram has no
+ * sign-in node: `identified` is a choice, not a screen, and "viewer not
+ * identified" goes straight to `set_meter`. Identifying happens inside the
+ * panel, where the money is about to move, and that is what keeps its
+ * narrowness visible.
+ *
+ * The stages: `anonymous` (no session), `unreadable`, `metered`, and the two
+ * the preflight can block on, `limit` and `expired`, then `failed` when the
+ * chain refused a charge the preflight let through.
+ */
+$meterVars = static function (Request $request, ?MeterResult $result = null) use ($reads, $config): array {
     $params = $config->siteParams();
     $read = $reads($request);
     $state = $read->site();
     $decimals = $state?->mintDecimals ?? (int) $params['decimals'];
-    $faucet = $config->faucet();
+    $itemPrice = $state?->site->itemPrice ?? (int) $params['page_price'];
 
     $panel = [
-        'wallet' => $read->wallet(),
         'stage' => 'anonymous',
+        // The read found the meter gone or renewed to another key, and ended
+        // the session (§5.3). The panel says so rather than offering a
+        // returning reader a setup as though nothing had happened.
+        'ended' => $read->ended(),
         'symbol' => (string) $params['symbol'],
         'decimals' => $decimals,
         'balance' => '0',
         'limit_floor' => Units::fromBaseUnits((int) $params['min_limit'], $decimals),
-        'views_remaining' => null,
+        'items_remaining' => null,
         'blocked' => null,
-        'contract' => null,
-        'faucet' => [
-            'demo' => Units::fromBaseUnits((int) $faucet['demo_base_units'], $decimals),
-            'sol' => rtrim(rtrim(number_format((int) $faucet['sol_lamports'] / 1_000_000_000, 9, '.', ''), '0'), '.'),
-            'available' => false,
-        ],
+        'meter' => null,
         'provisioned' => $config->isProvisioned(),
-        // The Wallet Standard chain identifier, handed to the panel so the
-        // browser can tell a wallet that speaks it from a same-named sibling
-        // the same extension registered for another network.
-        'chain' => (string) $config->auth()['chain_id'],
-        // So the panel can load the wasm client before the reader clicks.
-        // Both libraries are fetched while they are choosing a limit, which
-        // takes the download out of the window between the blockhash and the
-        // wallet dialog — the window §6.3 says is the one that expires.
-        'program' => $config->program()->id,
-        'token_program' => $config->program()->tokenProgram,
         // What the metering step did, when there was one (§7).
         'result' => $result,
-        'page_price' => Units::fromBaseUnits((int) $params['page_price'], $decimals),
+        'page_price' => Units::fromBaseUnits($itemPrice, $decimals),
         'step_views' => (int) $config->metering()['demo_step_views'],
-        // Filled in below when there is a contract to diagnose against.
+        // Filled in below when there is a meter to ask about.
         'solvency' => null,
-        // The delegate on the reader's token account, and whether it is this
-        // site's contract. Asked outside `solvency` because `set_meter` has no
-        // contract to diagnose against and still needs the answer: a token
-        // account holds one delegate, so authorizing here takes another site's
-        // permission away, and the reader is told before the wallet asks.
-        'delegate' => null,
-        'delegate_is_ours' => false,
     ];
 
-    if ($panel['wallet'] === null) {
+    if ($read->binding() === null) {
         return $panel;
     }
 
-    $panel['faucet']['available'] = !$store()->faucetGranted($panel['wallet']);
-
-    $payer = $read->payer();
-    if ($payer === null) {
+    $meter = $read->meter();
+    if ($meter === null || $meter->meter === null) {
         // The chain could not be read. An unmetered page owes it nothing, so
         // the article still serves and the panel says what happened (§9's
         // "a failed read does not take the site down" — which stops being
@@ -338,75 +323,65 @@ $meterVars = static function (Request $request, ?MeterResult $result = null) use
         return $panel;
     }
 
-    $panel['balance'] = Units::fromBaseUnits($payer->balance(), $payer->decimals);
-    $panel['limit_floor'] = Units::fromBaseUnits($payer->limitFloor(), $payer->decimals);
-    $panel['delegate'] = $payer->funds?->delegate;
-    $panel['delegate_is_ours'] = $payer->delegateIsContract();
+    $now = time();
+    $onChain = $meter->meter;
 
-    if ($payer->hasContract()) {
-        $contract = $payer->contract;
+    // **What would stop the next settle, asked before it is attempted.**
+    //
+    // The preflight answers questions about the expiry and the limit. It
+    // knows nothing about whether the fund can pay, because the payment
+    // happens inside a `transfer_checked` CPI and SPL is the one that refuses
+    // (§8.2). Nothing stops the site reading the fund's balance before, and
+    // the difference to a reader is between a button that fails and a button
+    // that says why it would.
+    //
+    // The amount asked about is what a settle would move: the residue
+    // already carried, plus what the demo control is about to add. And only
+    // when the control would settle at all: an advance that stays under the
+    // collection threshold moves nothing, so a short fund cannot refuse it.
+    $step = (int) $config->metering()['demo_step_views'];
+    $wouldMove = $meter->wouldMove($step);
+    $short = $meter->shortOfSettling($step);
+    $panel['solvency'] = [
+        'would_move' => Units::fromBaseUnits($wouldMove, $decimals),
+        'short' => $short,
+        'short_demo' => Units::fromBaseUnits($short, $decimals),
+        'clear' => $short === 0,
+    ];
 
-        // **What would stop the next settle, asked before it is attempted.**
-        //
-        // `can_meter` answers a question about the *limit* — whether `used`
-        // plus the charge stays under what the reader authorized. It knows
-        // nothing about whether the reader can actually pay, because the
-        // payment happens inside a `transfer_checked` CPI and SPL is the one
-        // that refuses. §8.2 describes reading the token account *after* that
-        // refusal; nothing stops the site reading it before, and the
-        // difference to a reader is between a button that fails and a button
-        // that says why it would.
-        //
-        // The amount asked about is what a settle would move: the residue
-        // already carried, plus what the demo control is about to add.
-        $step = (int) $config->metering()['demo_step_views'];
-        $wouldMove = $contract->unpaid() + (int) $params['page_price'] * $step;
-        $shortfall = $payer->funds === null ? null : Shortfall::diagnose($payer->funds, $wouldMove);
-        $panel['solvency'] = $shortfall === null ? null : [
-            'would_move' => Units::fromBaseUnits($wouldMove, $decimals),
-            'balance_short' => $shortfall->balanceShort,
-            'balance_short_demo' => Units::fromBaseUnits($shortfall->balanceShort, $decimals),
-            'allowance_short' => $shortfall->allowanceShort,
-            'allowance_short_demo' => Units::fromBaseUnits($shortfall->allowanceShort, $decimals),
-            // Not `$shortfall->delegatePresent`, which is true of any
-            // delegate, including one another site's `approve` installed.
-            'delegate_is_ours' => $payer->delegateIsContract(),
-            'clear' => $shortfall->isClear() && $payer->delegateIsContract(),
-        ];
-        $panel['contract'] = [
-            'address' => $payer->contractAddress,
-            'limit' => Units::fromBaseUnits($contract->limit, $payer->decimals),
-            'used' => Units::fromBaseUnits($contract->used, $payer->decimals),
-            'paid' => Units::fromBaseUnits($contract->paid, $payer->decimals),
-            'unpaid' => Units::fromBaseUnits($contract->unpaid(), $payer->decimals),
-        ];
-        $panel['views_remaining'] = $payer->viewsRemaining();
+    $panel['balance'] = Units::fromBaseUnits($meter->balance(), $decimals);
+    $panel['limit_floor'] = Units::fromBaseUnits($meter->limitFloor(), $decimals);
+    $panel['meter'] = [
+        'address' => $meter->meterAddress,
+        'limit' => Units::fromBaseUnits($onChain->limit, $decimals),
+        'used' => Units::fromBaseUnits($onChain->used, $decimals),
+        'paid' => Units::fromBaseUnits($onChain->paid, $decimals),
+        'unpaid' => Units::fromBaseUnits($onChain->unpaid(), $decimals),
+        'expiry' => gmdate('Y-m-d H:i', $onChain->expiry).' UTC',
+    ];
+    $panel['items_remaining'] = $meter->itemsRemaining();
 
-        $blocked = $payer->blocked();
-        $panel['stage'] = $blocked === null ? 'metered' : 'limit';
-        $panel['blocked'] = $blocked === null ? null : (string) $blocked;
+    $blocked = $meter->blocked($now);
+    $panel['stage'] = match ($blocked?->kind) {
+        null => 'metered',
+        BlockedKind::Expired => 'expired',
+        default => 'limit',
+    };
+    $panel['blocked'] = $blocked === null ? null : (string) $blocked;
 
-        // §8: every branch that leaves the happy path early is a screen, so
-        // what the chain actually said outranks what the preflight predicted.
-        if ($result !== null) {
-            $panel['stage'] = match ($result->outcome) {
-                MeterOutcome::Blocked => 'limit',
-                MeterOutcome::Failed => 'failed',
-                MeterOutcome::Unreadable => 'unreadable',
-                default => 'metered',
-            };
-            if ($result->blocked !== null) {
-                $panel['blocked'] = (string) $result->blocked;
-            }
+    // §8: every branch that leaves the happy path early is a screen, so
+    // what the chain actually said outranks what the preflight predicted.
+    if ($result !== null) {
+        $panel['stage'] = match ($result->outcome) {
+            MeterOutcome::Blocked => $result->blocked?->kind === BlockedKind::Expired ? 'expired' : 'limit',
+            MeterOutcome::Failed => 'failed',
+            MeterOutcome::Unreadable => 'unreadable',
+            default => 'metered',
+        };
+        if ($result->blocked !== null) {
+            $panel['blocked'] = (string) $result->blocked;
         }
-
-        return $panel;
     }
-
-    // Identified, no contract. §4.3's faucet is the branch before `set_meter`,
-    // because `approve_checked` against a token account that does not exist
-    // fails at the runtime and the reader would never learn why.
-    $panel['stage'] = $payer->isFunded() ? 'set-meter' : 'unfunded';
 
     return $panel;
 };
@@ -509,21 +484,21 @@ $articleContent = static function (Request $request, Library $library, Piece $pi
  * SPEC §7.1: **a GET never meters** (2026-09-11). Charging is the POST below.
  *
  * This route answers one of three ways, and decides which without asking the
- * chain anything — the wallet comes from the cookie and the store, and the
- * grant is a row:
+ * chain anything — the session's meter comes from the cookie and the store,
+ * and the grant is a row:
  *
  * - **A reader holding a live grant** gets the article, whole. §7.1 says a
  *   request that finds a live grant is served without touching the chain, and
  *   the decision here does not; the one read on this page is the meter strip's
  *   arithmetic, which claim 7 says must come from an account.
- * - **A reader the site could charge** — a wallet, a metered piece, no grant —
+ * - **A reader the site could charge** — a session, a metered piece, no grant —
  *   gets the *shell*: the lede, and a form that posts to this same URL. It is
  *   rendered from nothing but the content index, so it arrives in the time it
  *   takes to send it, and `assets/read-on.js` posts the form at once and puts
  *   the answer where the form was. The three to ten seconds of validator that
  *   used to pass with the old page on screen now pass with the new one, saying
  *   what it is waiting for. Without JavaScript the form is a button.
- * - **Anybody else** — no wallet, an unmetered piece, a copy not set up — gets
+ * - **Anybody else** — no session, an unmetered piece, a copy not set up — gets
  *   the lede and the meter, exactly as before.
  *
  * The shell does not know whether the POST will charge, set a meter, or stop
@@ -531,7 +506,7 @@ $articleContent = static function (Request $request, Library $library, Piece $pi
  * So it claims nothing the chain would have to answer — not even the price,
  * which comes from the `Site` account and arrives with the rest.
  */
-$app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $articleContent, $reads, $wallet, $store, $config, $followUpFactory): Response {
+$app->get('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $articleContent, $reads, $binding, $store, $config, $followUpFactory): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -571,11 +546,11 @@ $app->get('/a/{slug}', function (Request $request, Response $response, array $ar
         ])));
     }
 
-    $address = $wallet($request);
+    $held = $binding($request);
     $result = null;
 
-    if ($address !== null && $config->isProvisioned() && Decision::shouldMeter($piece, $address)) {
-        $grant = $store()->liveGrant($address, $piece->slug);
+    if ($held !== null && $config->isProvisioned() && Decision::shouldMeter($piece, $held)) {
+        $grant = $store()->liveGrant($held->meter, $piece->slug);
         if ($grant === null) {
             // No `$reads`: the inspector is deferred exactly as it is on
             // `/privacy`, and the POST's answer fills it.
@@ -593,7 +568,7 @@ $app->get('/a/{slug}', function (Request $request, Response $response, array $ar
         // settled either way costs nothing here, which is every grant after
         // its first minute or so.
         $result = $grant['charge'] === ChargeState::Pending
-            ? ($followUpFactory()->report($address, $piece->slug, false) ?? MeterResult::granted($grant['charge']))
+            ? ($followUpFactory()->report($held->meter, $piece->slug, false) ?? MeterResult::granted($grant['charge']))
             : MeterResult::granted($grant['charge']);
     }
 
@@ -624,7 +599,7 @@ $app->get('/a/{slug}', function (Request $request, Response $response, array $ar
  * values read on this request, and a cached copy would be the server's memory
  * answering for the chain.
  */
-$articlePost = $app->post('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $articleContent, $inspector, $reads, $wallet, $followUpFactory): Response {
+$articlePost = $app->post('/a/{slug}', function (Request $request, Response $response, array $args) use ($view, $shell, $page, $contentDir, $articleContent, $inspector, $reads, $followUpFactory): Response {
     if (!Library::isBuilt($contentDir)) {
         return $page($response, $shell('Nothing built', $view->render('not-built')), 503);
     }
@@ -650,12 +625,12 @@ $articlePost = $app->post('/a/{slug}', function (Request $request, Response $res
     // once, as the GET does. Found in the capture with JavaScript off: the
     // resubmitted form said "the chain was not touched" over a grant whose
     // charge had not been checked.
-    $address = $wallet($request);
-    if ($result !== null && $result->outcome === MeterOutcome::Granted && $result->awaiting() && $address !== null) {
-        $result = $followUpFactory()->report($address, $piece->slug, false) ?? $result;
+    $held = $reads($request)->binding();
+    if ($result !== null && $result->outcome === MeterOutcome::Granted && $result->awaiting() && $held !== null) {
+        $result = $followUpFactory()->report($held->meter, $piece->slug, false) ?? $result;
         if (!$result->awaiting()) {
             // The middleware read the accounts before this answer existed.
-            $reads($request)->invalidatePayer();
+            $reads($request)->invalidateMeter();
         }
     }
 
@@ -693,7 +668,7 @@ $articlePost = $app->post('/a/{slug}', function (Request $request, Response $res
  * Only as a fragment. Without JavaScript nothing sends this, and the reader's
  * reload — `GET /a/{slug}`, which asks once — does the same job.
  */
-$app->post('/a/{slug}/confirm', function (Request $request, Response $response, array $args) use ($view, $contentDir, $articleContent, $inspector, $wallet, $reads, $followUpFactory): Response {
+$app->post('/a/{slug}/confirm', function (Request $request, Response $response, array $args) use ($view, $contentDir, $articleContent, $inspector, $binding, $reads, $followUpFactory): Response {
     $slug = (string) $args['slug'];
     if ($request->getHeaderLine('X-Fragment') !== '1') {
         return $response->withStatus(303)->withHeader('Location', '/a/'.rawurlencode($slug));
@@ -705,8 +680,8 @@ $app->post('/a/{slug}/confirm', function (Request $request, Response $response, 
         return $response->withStatus(404);
     }
 
-    $address = $wallet($request);
-    $result = $address === null ? null : $followUpFactory()->report($address, $piece->slug, true);
+    $held = $binding($request);
+    $result = $held === null ? null : $followUpFactory()->report($held->meter, $piece->slug, true);
     if ($result === null) {
         // No reader, or no grant for this article: nothing was bought, so
         // there is nothing to confirm. The page keeps what it has.
@@ -716,7 +691,7 @@ $app->post('/a/{slug}/confirm', function (Request $request, Response $response, 
     // The chain has answered, or the window has closed. Either way nothing on
     // this request has read the accounts yet, so the strip's read below is
     // the first and comes after the answer.
-    $reads($request)->invalidatePayer();
+    $reads($request)->invalidateMeter();
 
     $response->getBody()->write(
         $articleContent($request, $library, $piece, $result)
@@ -757,7 +732,7 @@ $articlePost->add(new MeterMiddleware(
  * it is the same instruction the site would send if the reader had read seven
  * articles, which is exactly why it belongs in a demonstration of the API.
  */
-$app->post('/meter/advance', function (Request $request, Response $response) use ($view, $contentDir, $articleContent, $inspector, $wallet, $reads, $store, $config, $meterFactory): Response {
+$app->post('/meter/advance', function (Request $request, Response $response) use ($view, $contentDir, $articleContent, $inspector, $reads, $store, $config, $meterFactory): Response {
     // A form and a redirect, and — since 2026-09-11 — a fragment when the
     // page asks for one, which is the same bargain the article makes: the
     // browser gets the answer without a second request, and a browser without
@@ -766,36 +741,39 @@ $app->post('/meter/advance', function (Request $request, Response $response) use
     $slug = (string) ($body['slug'] ?? '');
     $back = $slug === '' ? '/' : '/a/'.rawurlencode($slug);
 
-    $address = $wallet($request);
+    $held = $reads($request)->binding();
     $state = $reads($request)->site();
     $result = null;
 
-    if ($address !== null && $state !== null) {
-        $result = $meterFactory()->advance($address, $state, (int) $config->metering()['demo_step_views']);
+    // The meter is read before the advance as well as inside it: the read is
+    // what asks whether this session still holds the meter (§5.3), and a
+    // session it ends has nothing to advance.
+    if ($held !== null && $state !== null && $reads($request)->meter() !== null) {
+        $result = $meterFactory()->advance($held, $state, (int) $config->metering()['demo_step_views']);
 
         // The *state* is not passed back through the URL — the article page
-        // re-reads the contract anyway, so a refusal arrives as §8.2's screen
+        // re-reads the meter anyway, so a refusal arrives as §8.2's screen
         // rather than as a message about a screen. The **signature** is,
         // because it is the one thing the page cannot re-derive and the site
         // deliberately does not keep.
         //
         // Not stored, and that is the point: §10.4 enumerates this site's
         // stores and says a table added here is a claim on the privacy page.
-        // A per-wallet log of metering transactions is precisely the reading
+        // A per-meter log of metering transactions is precisely the reading
         // history the rest of this design exists to avoid holding, so the
         // signature is handed to the reader once and forgotten. It is public
         // on chain either way; what would be new is *this site* keeping it.
         // **The outcome comes back too, and it has to.** The original version
         // carried only a signature, on the reasoning that the article page
-        // re-reads the contract and a refusal would show up in the fresh
+        // re-reads the meter and a refusal would show up in the fresh
         // preflight. That is true of `LimitReached` and false of everything
-        // else: a settle that fails leaves the contract exactly as it was, so
+        // else: a settle that fails leaves the meter exactly as it was, so
         // the re-read says all is well and the click appears to have done
         // nothing at all. `can_meter` is a *limit* check, not a solvency one —
         // §8.2 is explicit that a short balance surfaces from inside the
         // transfer CPI and nowhere earlier.
         $back .= '?advance='.rawurlencode($result->outcome->value)
-            .'&views='.$result->pageViews;
+            .'&views='.$result->items;
         if ($result->signature !== null) {
             $back .= '&tx='.rawurlencode($result->signature)
                 .($result->settles ? '&settled=1' : '');
@@ -804,10 +782,10 @@ $app->post('/meter/advance', function (Request $request, Response $response) use
         // §7.2's lock has read these accounts more recently than this request
         // did, and a transaction has moved them. Same two answers as the
         // article's middleware, for the same reason (§2's claim 7).
-        if ($result->payer !== null) {
-            $reads($request)->adopt($result->payer);
+        if ($result->state !== null) {
+            $reads($request)->adopt($result->state);
         } elseif ($result->sent()) {
-            $reads($request)->invalidatePayer();
+            $reads($request)->invalidateMeter();
         }
     }
 
@@ -829,10 +807,11 @@ $app->post('/meter/advance', function (Request $request, Response $response) use
         // about the article itself. So the article renders from the grant and
         // the advance renders as the advance — including when it was refused,
         // where the reader keeps the body they already paid for.
-        $granted = $address !== null && $store()->liveGrant($address, $piece->slug) !== null;
+        $held = $reads($request)->binding();
+        $granted = $held !== null && $store()->liveGrant($held->meter, $piece->slug) !== null;
         $advanced = $result === null ? null : [
             'outcome' => $result->outcome,
-            'views' => $result->pageViews,
+            'views' => $result->items,
             'signature' => $result->signature,
             'settled' => $result->settles,
         ];
@@ -851,440 +830,27 @@ $app->post('/meter/advance', function (Request $request, Response $response) use
 });
 
 /**
- * SPEC §5, without the screen §5 imagined (2026-09-07). Identifying is three
- * round trips inside the meter panel, and the order is what makes the
- * verifier possible: the server issues fields, the *wallet* builds and signs a
- * message from them, and the server reads back what was actually signed. There
- * is no step in which the server compares the bytes to bytes it composed,
- * because it composed none — which is the property §5 takes on knowingly when
- * it requires `signIn` with no fallback.
- *
- * There is no `GET /signin`. sol-pay's state diagram has no sign-in node —
- * `identified` is a <<choice>>, and "viewer not identified" goes straight to
- * `set_meter` — and a page whose only purpose is to collect an identity reads
- * as identification for tracking, which is the thing this site argues against.
- * The identification here is real but narrow, and it happens inside the panel
- * that is about to spend the reader's money, where its narrowness is visible.
- */
-$app->post('/signin/challenge', function (Request $request, Response $response) use ($json, $store, $config): Response {
-    $auth = $config->auth();
-    $uri = $request->getUri();
-
-    // The domain the wallet will put in the message is the one the browser is
-    // looking at, which is the authority — host and port — and not the
-    // configured URL. Behind a reverse proxy this is only right if the proxy
-    // sets Host; §6.3's HTTPS requirement is where that starts to matter.
-    $issued = $store()->issueSignIn(
-        static fn (string $nonce): array => SignInInput::issue(
-            domain: $uri->getAuthority(),
-            uri: (string) $uri->withPath('/signin')->withQuery('')->withFragment(''),
-            chainId: (string) $auth['chain_id'],
-            statement: (string) $auth['statement'],
-            nonce: $nonce,
-            now: time(),
-            ttlSeconds: (int) $auth['challenge_ttl_s'],
-        )->toArray(),
-        (int) $auth['challenge_ttl_s'],
-    );
-
-    return $json($response, ['input' => $issued['input']]);
-});
-
-$app->post('/signin/verify', function (Request $request, Response $response) use ($json, $store, $config, $finishClose): Response {
-    $body = json_decode((string) $request->getBody(), true);
-    if (!is_array($body)) {
-        return $json($response, ['message' => 'unreadable request'], 400);
-    }
-
-    $nonce = (string) ($body['nonce'] ?? '');
-    $address = (string) ($body['address'] ?? '');
-    $signedMessage = base64_decode((string) ($body['signedMessage'] ?? ''), true);
-    $signature = base64_decode((string) ($body['signature'] ?? ''), true);
-
-    if ($nonce === '' || $address === '' || $signedMessage === false || $signature === false) {
-        return $json($response, ['message' => 'incomplete sign-in'], 400);
-    }
-
-    // Spent first. A verifier that checks the message and only then marks the
-    // nonce used has a window in which the same signature is accepted twice.
-    $issuedJson = $store()->consumeSignIn($nonce);
-    if ($issuedJson === null) {
-        return $json($response, ['message' => 'that sign-in request has expired or was already used; ask for another'], 400);
-    }
-
-    $decoded = json_decode($issuedJson, true);
-    if (!is_array($decoded) || !isset($decoded['nonce'])) {
-        return $json($response, ['message' => 'that sign-in request is unusable; ask for another'], 400);
-    }
-
-    try {
-        (new Verifier())->verify(
-            SignInInput::fromArray($decoded),
-            $address,
-            $signedMessage,
-            $signature,
-            time(),
-        );
-    } catch (SignInException $e) {
-        // The nonce is already spent, deliberately: a failed verification does
-        // not hand back a challenge to try again against.
-        return $json($response, ['message' => $e->getMessage(), 'reason' => $e->reason], 400);
-    }
-
-    // A close from this wallet may have landed since the server last looked.
-    // Finish that erasure first, so the new session starts after it rather
-    // than being swept away by it on the next request.
-    $finishClose($address);
-
-    $id = $store()->createSession($address, (int) $config->auth()['session_ttl_s']);
-
-    // No redirect: the panel is on the page the reader is already reading.
-    return Session::issue($json($response, ['ok' => true, 'wallet' => $address]), $id, Session::isSecure($request));
-});
-
-/**
- * Forget the paying wallet: the session row and the cookie go, and nothing on
- * chain is touched. §10.4 does this as part of closing a contract, and a
- * reader who wants only the browser end of the §5 mapping dropped — a shared
- * machine, a second wallet, a change of mind before authorizing — is owed it
- * without a transaction.
- *
- * The one caller is the meter (`templates/forget-wallet.php`), which is also
- * where the difference between this and closing is spelled out. It was in the
- * masthead once; see the note in `templates/layout.php` for why it left.
- */
-$app->post('/signout', function (Request $request, Response $response) use ($store): Response {
-    $id = Session::idFrom($request);
-    if ($id !== null) {
-        $store()->destroySession($id);
-    }
-
-    return Session::clear($response->withStatus(302)->withHeader('Location', '/'), Session::isSecure($request));
-});
-
-/**
- * `set_meter` → `authorize`, step two. The server hands over everything the
- * browser needs to build the pair of instructions and compile the message, and
- * fetches the blockhash **here**, immediately before the handoff.
- *
- * That timing is §6.3's point about mobile: a blockhash has to survive an
- * application switch, and one fetched when the page rendered has already spent
- * part of its life. The reader taking thirty seconds in their wallet is the
- * normal case, not the edge one.
- */
-$app->post('/meter/prepare', function (Request $request, Response $response) use ($json, $wallet, $reads, $config, $rpcFactory): Response {
-    $address = $wallet($request);
-    if ($address === null) {
-        return $json($response, ['message' => 'identify first'], 401);
-    }
-
-    $state = $reads($request)->site();
-    if ($state === null) {
-        return $json($response, ['message' => 'this site is not provisioned'], 409);
-    }
-
-    $payer = $reads($request)->payer();
-    if ($payer === null) {
-        return $json($response, ['message' => 'the endpoint did not answer; nothing was signed'], 502);
-    }
-
-    $body = json_decode((string) $request->getBody(), true);
-    $requested = is_array($body) ? (string) ($body['limit'] ?? '') : '';
-
-    try {
-        $limit = Units::toBaseUnits($requested, $payer->decimals);
-    } catch (\Throwable $e) {
-        return $json($response, ['message' => 'that is not an amount'], 400);
-    }
-
-    // The program enforces this and would refuse the transaction, but a reader
-    // should not have to open a wallet dialog to be told a number is too
-    // small (§4.2, and the diagram's "enforce minimum on limit amount" which
-    // sits in `set_meter`, before `authorize`).
-    $floor = $payer->limitFloor();
-    if ($limit < $floor) {
-        return $json($response, [
-            'message' => 'the smallest limit you can set is '.Units::fromBaseUnits($floor, $payer->decimals),
-        ], 400);
-    }
-
-    $addresses = $config->provisioned();
-    $program = $config->program();
-    $blockhash = $rpcFactory()->latestBlockhash();
-
-    return $json($response, [
-        'action' => $payer->hasContract() ? 'renew' : 'open',
-        'programAddress' => $program->id,
-        'tokenProgram' => $program->tokenProgram,
-        'site' => $state->address,
-        'mint' => $addresses['mint'],
-        'payer' => $payer->wallet,
-        'payerTokenAccount' => $payer->tokenAccount,
-        'contract' => $payer->contractAddress,
-        'decimals' => $payer->decimals,
-        // u64 as a string. A JS number loses precision above 2^53 and a
-        // payment library that silently truncates is not one anybody can
-        // audit — the wasm client crosses these as BigInt for the same reason.
-        'limit' => (string) $limit,
-        'allowance' => (string) $payer->requiredAllowance($limit),
-        'blockhash' => $blockhash['blockhash'],
-        'lastValidBlockHeight' => $blockhash['lastValidBlockHeight'] ?? null,
-        'chain' => (string) $config->auth()['chain_id'],
-    ]);
-});
-
-/**
- * The wallet signed and sent it; this is the server finding out whether it
- * landed.
- *
- * The signature is not taken as proof of anything. What is checked is the
- * chain: the contract account this site derives for this reader now exists and
- * says what it should. A signature the browser reports is a claim; an account
- * is a fact.
- */
-$app->post('/meter/opened', function (Request $request, Response $response) use ($json, $wallet, $reads, $rpcFactory, $config): Response {
-    $address = $wallet($request);
-    if ($address === null) {
-        return $json($response, ['message' => 'identify first'], 401);
-    }
-
-    $body = json_decode((string) $request->getBody(), true);
-    $signature = is_array($body) ? (string) ($body['signature'] ?? '') : '';
-    if ($signature === '') {
-        return $json($response, ['message' => 'no signature'], 400);
-    }
-
-    // The wallet sent it; the site only asks whether it landed, on the same
-    // schedule as everything else (`Submitter::confirm`).
-    $outcome = Submitter::fromConfig($rpcFactory(), $config)->confirm($signature);
-    if ($outcome->status === SubmitStatus::Failed) {
-        return $json($response, ['message' => 'the transaction landed and failed'], 409);
-    }
-    $confirmed = $outcome->status === SubmitStatus::Confirmed;
-
-    // The wallet's `approve_and_open` has landed by now, so anything this
-    // request read before the poll is out of date. It read nothing — the
-    // read below is this route's first — and saying so anyway is what keeps
-    // that true if someone later adds an earlier one.
-    $reads($request)->invalidatePayer();
-
-    $payer = $reads($request)->payer();
-    if ($payer !== null && $payer->hasContract()) {
-        return $json($response, ['ok' => true, 'confirmed' => $confirmed]);
-    }
-
-    // §7.3's shape: sent, not confirmed inside the window, and the account is
-    // not there yet. Not an error and not a success — the reader reloads and
-    // the chain answers.
-    return $json($response, [
-        'ok' => false,
-        'pending' => true,
-        'message' => 'sent, but the contract is not on chain yet; reload in a moment',
-    ], 202);
-});
-
-/**
  * `manage_meter` (§6). Reachable at any time, not only at the limit — decided
- * 2026-09-02, reversing an earlier decision, because a reader who has
- * authorized a site to draw from their wallet may reasonably expect to find,
- * at any moment and without exhausting anything first, a page that says what
- * they have spent and offers a way out. Making them hit a limit to reach the
- * exit is not a defensible product, whatever the state diagram omits.
+ * 2026-09-02, reversing an earlier decision, because a reader who has let a
+ * site draw on their fund may reasonably expect to find, at any moment and
+ * without exhausting anything first, a page that says what they have spent and
+ * offers a way out. Making them hit a limit to reach the exit is not a
+ * defensible product, whatever the state diagram omits.
+ *
+ * The figures come from the same `$meterVars` the article's panel draws, so
+ * the two screens cannot describe one meter two ways.
  */
-$app->get('/meter', function (Request $request, Response $response) use ($view, $shell, $page, $wallet, $reads, $store, $config, $siteVars): Response {
-    $address = $wallet($request);
-    if ($address === null) {
-        return $page($response, $shell('The meter', $view->render('manage-meter', [
-            'stage' => 'anonymous',
-            'site' => $siteVars($reads($request)),
-        ]), $reads($request)));
-    }
-
-    $payer = $reads($request)->payer();
-    $state = $reads($request)->site();
-    $params = $config->siteParams();
-    $decimals = $payer?->decimals ?? ($state?->mintDecimals ?? (int) $params['decimals']);
-
-    if ($payer === null) {
-        return $page($response, $shell('The meter', $view->render('manage-meter', [
-            'stage' => 'unreadable',
-            'site' => $siteVars($reads($request)),
-        ]), $reads($request)));
-    }
-
-    if (!$payer->hasContract()) {
-        return $page($response, $shell('The meter', $view->render('manage-meter', [
-            'stage' => 'no-contract',
-            'site' => $siteVars($reads($request)),
-            'wallet' => $address,
-        ]), $reads($request)));
-    }
-
-    $contract = $payer->contract;
-    $blocked = $payer->blocked();
+$app->get('/meter', function (Request $request, Response $response) use ($view, $shell, $page, $reads, $siteVars, $meterVars): Response {
+    $vars = $meterVars($request);
 
     return $page($response, $shell('The meter', $view->render('manage-meter', [
-        'stage' => 'open',
+        ...$vars,
+        'stage' => match ($vars['stage']) {
+            'anonymous', 'unreadable' => $vars['stage'],
+            default => 'open',
+        },
         'site' => $siteVars($reads($request)),
-        'wallet' => $address,
-        'chain' => (string) $config->auth()['chain_id'],
-        'program' => $config->program()->id,
-        'token_program' => $config->program()->tokenProgram,
-        'symbol' => (string) $params['symbol'],
-        'contract' => [
-            'address' => $payer->contractAddress,
-            'limit' => Units::fromBaseUnits($contract->limit, $decimals),
-            'used' => Units::fromBaseUnits($contract->used, $decimals),
-            'paid' => Units::fromBaseUnits($contract->paid, $decimals),
-            'unpaid' => Units::fromBaseUnits($contract->unpaid(), $decimals),
-        ],
-        'views_remaining' => $payer->viewsRemaining(),
-        'blocked' => $blocked === null ? null : (string) $blocked,
-        'limit_floor' => Units::fromBaseUnits($payer->limitFloor(), $decimals),
-        'balance' => Units::fromBaseUnits($payer->balance(), $decimals),
-        // The delegate, which is the whole of what authorizing gave away, and
-        // which a wallet will show a balance without ever mentioning.
-        'token_account' => $payer->tokenAccount,
-        'delegate' => $payer->funds?->delegate,
-        'approved' => Units::fromBaseUnits($payer->funds?->delegatedAmount ?? 0, $decimals),
-        // §10.4 qualification 2: the reader is told what closing costs them
-        // *before* they click, and told the true number rather than "an
-        // article".
-        'live_grants' => $store()->liveGrantCount($address),
     ]), $reads($request)));
-});
-
-/**
- * `close_and_revoke`, prepared. Two instructions and no arguments — there is
- * nothing to choose, which is why this endpoint takes no body.
- */
-$app->post('/meter/close/prepare', function (Request $request, Response $response) use ($json, $wallet, $reads, $config, $rpcFactory): Response {
-    $address = $wallet($request);
-    if ($address === null) {
-        return $json($response, ['message' => 'identify first'], 401);
-    }
-
-    $state = $reads($request)->site();
-    $payer = $reads($request)->payer();
-    if ($state === null || $payer === null) {
-        return $json($response, ['message' => 'the endpoint did not answer; nothing was signed'], 502);
-    }
-    if (!$payer->hasContract()) {
-        return $json($response, ['message' => 'there is no contract to close'], 409);
-    }
-
-    $program = $config->program();
-    $blockhash = $rpcFactory()->latestBlockhash();
-
-    return $json($response, [
-        'action' => 'close',
-        'programAddress' => $program->id,
-        'tokenProgram' => $program->tokenProgram,
-        'site' => $state->address,
-        'payer' => $payer->wallet,
-        'payerTokenAccount' => $payer->tokenAccount,
-        'contract' => $payer->contractAddress,
-        // SPL `revoke` clears whatever delegate is set, so a close that always
-        // revoked would take another site's permission with it. The browser
-        // picks `close_contract` alone when the delegate is not ours.
-        'delegate' => $payer->funds?->delegate,
-        'delegateIsContract' => $payer->delegateIsContract(),
-        'blockhash' => $blockhash['blockhash'],
-        'lastValidBlockHeight' => $blockhash['lastValidBlockHeight'] ?? null,
-        'chain' => (string) $config->auth()['chain_id'],
-    ]);
-});
-
-/**
- * The chain confirmed it; now §10.4 runs.
- *
- * The order matters and it is the reverse of the metering path's. Here the
- * site waits for the chain **before** deleting anything, because a purge on
- * the strength of an unconfirmed transaction would erase a reader whose
- * contract is still open and still spending. The proof is the account: the
- * contract PDA is gone, which no report from a browser could establish.
- */
-$app->post('/meter/close/done', function (Request $request, Response $response) use ($json, $wallet, $reads, $rpcFactory, $store, $config): Response {
-    $address = $wallet($request);
-    if ($address === null) {
-        return $json($response, ['message' => 'identify first'], 401);
-    }
-
-    $body = json_decode((string) $request->getBody(), true);
-    $signature = is_array($body) ? (string) ($body['signature'] ?? '') : '';
-    if ($signature === '') {
-        return $json($response, ['message' => 'no signature'], 400);
-    }
-
-    // The signature only says when to look (`two-orderings`); the account
-    // read below is the evidence. Same schedule as everything else.
-    $outcome = Submitter::fromConfig($rpcFactory(), $config)->confirm($signature);
-    if ($outcome->status === SubmitStatus::Failed) {
-        return $json($response, ['message' => 'the transaction landed and failed; nothing was deleted'], 409);
-    }
-    $confirmed = $outcome->status === SubmitStatus::Confirmed;
-
-    // §10.4's ordering: the account is the evidence, not the signature, so
-    // this has to be a reading taken after the close confirmed.
-    $reads($request)->invalidatePayer();
-
-    $payer = $reads($request)->payer();
-    if ($payer === null || $payer->hasContract()) {
-        // Sent, and the account is still there, or the chain did not answer.
-        // Nothing is deleted on a maybe. The close may still land, so leave a
-        // note: the next request from this wallet that finds the contract
-        // gone finishes the erasure (`$finishClose`). Without the note, that
-        // request could not tell a meter just closed from one never opened.
-        $store()->recordPendingClose($address, $signature, (int) $config->auth()['session_ttl_s']);
-
-        return $json($response, [
-            'ok' => false,
-            'pending' => true,
-            'message' => 'sent, but the contract is still on chain; reload in a moment and close again if it is still here',
-        ], 202);
-    }
-
-    // §10.4. Session, grants and the lock row go; the faucet ledger survives
-    // for the published reason.
-    $erased = $store()->eraseReader($address);
-    $id = Session::idFrom($request);
-    if ($id !== null) {
-        $store()->destroySession($id);
-    }
-
-    return Session::clear($json($response, [
-        'ok' => true,
-        'confirmed' => $confirmed,
-        'signature' => $signature,
-        'erased' => $erased,
-        // Read back from the token account after the close, not asserted: this
-        // is the line claim 6 in §2 is actually about, and it is the one a
-        // wallet is least likely to show the reader itself.
-        'delegate' => $payer->funds?->delegate,
-        // Whose it is, so the receipt can tell a delegate this site failed to
-        // withdraw from one it deliberately left alone.
-        'delegateIsContract' => $payer->delegateIsContract(),
-        'tokenAccount' => $payer->tokenAccount,
-    ]), Session::isSecure($request));
-});
-
-/**
- * SPEC §4.3. The site signs this one, so it is a button and not a wallet
- * interaction — nothing here spends the reader's money.
- */
-$app->post('/faucet', function (Request $request, Response $response) use ($json, $wallet, $store, $config, $rpcFactory): Response {
-    $address = $wallet($request);
-    if ($address === null) {
-        return $json($response, ['message' => 'identify first'], 401);
-    }
-    if (!$config->isProvisioned()) {
-        return $json($response, ['message' => 'this site is not provisioned'], 409);
-    }
-
-    $rpc = $rpcFactory();
-    $result = (new Faucet($config, Submitter::fromConfig($rpc, $config), $store()))->grant($address);
-
-    return $json($response, $result, $result['granted'] ? 200 : 409);
 });
 
 /**
@@ -1485,9 +1051,10 @@ $app->get('/inspector/event/{signature}', function (Request $request, Response $
     $parts = [];
     foreach ($event->fields as $field => $value) {
         $parts[] = $field.' '.match (true) {
-            // The two counts are counts. Everything else is a token amount and
-            // gets both unit forms, for the reason §9 gives about the panel
-            // generally: a six-decimal scaling error is invisible in one form.
+            // The count is a count and the expiry a time. Everything else is a
+            // token amount and gets both unit forms, for the reason §9 gives
+            // about the panel generally: a six-decimal scaling error is
+            // invisible in one form.
             //
             // The short name and nothing else, since 2026-09-12: the panel's
             // first table defines it, beside the base58 and the copy button,
@@ -1500,8 +1067,11 @@ $app->get('/inspector/event/{signature}', function (Request $request, Response $
             // panel writes it with `textContent`; making one word of it a link
             // would mean composing markup here and trusting it there, for a
             // row that already sits a few lines under the table.
-            $field === 'contract' => Alias::for(Alias::CONTRACT, (string) $value),
-            $field === 'page_views' => (string) $value,
+            $field === 'meter' => Alias::for(Alias::METER, (string) $value),
+            $field === 'items' => (string) $value,
+            // `Renewed` carries the meter's new expiry, in Unix seconds. A date
+            // reads where a ten-digit number does not.
+            $field === 'expiry' => gmdate('Y-m-d H:i', (int) $value).' UTC',
             default => sprintf('%s %s (%d)', Units::fromBaseUnits((int) $value, $decimals), $symbol, (int) $value),
         };
     }

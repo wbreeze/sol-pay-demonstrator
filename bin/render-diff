@@ -261,12 +261,10 @@ function fixtures(string $tree): array
 
     $SITE = '7X4hDbm44UQYnmXshwSdCyAMhh3bJe2X5u1z2m1dSCVt';
     $MINT = 'MintI1111111111111111111111111111111111111';
-    $PAYER = 'BFT5EZLV7eWhwX4jjRP7JJDuJYoCQRmvmzuDUBbvSMqR';
-    $CONTRACT = 'Fgm6costwpmn4d1CTqdM5su8jBptdwnW134cNoFixgqs';
+    $FUND = 'BFT5EZLV7eWhwX4jjRP7JJDuJYoCQRmvmzuDUBbvSMqR';
+    $METER = 'Fgm6costwpmn4d1CTqdM5su8jBptdwnW134cNoFixgqs';
     $TOKEN = '3KDoatBW3VwL5tyKLnCrWreKSsAXEhymyCUpei6eLd7v';
-    // Another site's contract, for the branches where its approval is the one
-    // on the reader's token account.
-    $OTHER = 'D5VoE7hnS4yDaaMcEfgwcPyMnwNG5Xb2j4WFFFtHKwKq';
+    $KEY = 'D5VoE7hnS4yDaaMcEfgwcPyMnwNG5Xb2j4WFFFtHKwKq';
     $SIG = 'FKb3eeBwq5fXi4M6NhLY5tkstxRi2N6VoKtPpkG23ASSxyz';
 
     $P = Newsprint\Content\Piece::class;
@@ -279,40 +277,23 @@ function fixtures(string $tree): array
     $program = $config->program();
 
     $panel = static fn (array $o = []): array => $o + [
-        'wallet' => $PAYER, 'stage' => 'metered', 'symbol' => 'DEMO', 'decimals' => 6,
-        'balance' => '0.05', 'limit_floor' => '0.5', 'views_remaining' => 8, 'blocked' => null,
-        'contract' => ['address' => $CONTRACT, 'limit' => '0.5', 'used' => '0.42', 'paid' => '0.28', 'unpaid' => '0.14'],
-        'faucet' => ['demo' => '0.6', 'sol' => '0.05', 'available' => true],
-        'provisioned' => true, 'chain' => 'solana:devnet',
-        'program' => $program->id, 'token_program' => $program->tokenProgram,
+        'stage' => 'metered', 'ended' => false, 'symbol' => 'DEMO', 'decimals' => 6,
+        'balance' => '0.05', 'limit_floor' => '0.5', 'items_remaining' => 8, 'blocked' => null,
+        'meter' => ['address' => $METER, 'limit' => '0.5', 'used' => '0.42', 'paid' => '0.28', 'unpaid' => '0.14', 'expiry' => '2026-10-02 12:00 UTC'],
+        'provisioned' => true,
         'result' => null, 'page_price' => '0.01', 'step_views' => 7, 'advanced' => null, 'solvency' => null,
-        'delegate' => $CONTRACT, 'delegate_is_ours' => true,
     ];
 
-    // `$delegate`: true for this site's contract, false for an empty field, or
-    // an address for another site's approval sitting where ours was.
-    $shortfall = static fn (int $bal, int $allow, bool|string $delegate = true): SolPay\Core\Shortfall
-        => SolPay\Core\Shortfall::diagnose(
-            new SolPay\Core\TokenAccount(
-                $MINT,
-                $PAYER,
-                210000 - $bal,
-                $delegate === true ? $CONTRACT : ($delegate === false ? null : $delegate),
-                210000 - $allow,
-            ),
-            210000,
-        );
+    // How far a fund holding 0.21 less `$short` is from a settle of 0.21.
+    $shortfall = static fn (int $short): int => SolPay\Core\Shortfall::of(
+        new SolPay\Core\TokenAccount($MINT, $FUND, 210000 - $short, null, 0),
+        210000,
+    );
 
-    $solvency = static function (int $bal, int $allow, bool|string $delegate = true) use ($shortfall): array {
-        $s = $shortfall($bal, $allow, $delegate);
-        $ours = $delegate === true;
+    $solvency = static function (int $short) use ($shortfall): array {
+        $s = $shortfall($short);
 
-        return [
-            'would_move' => '0.21',
-            'balance_short' => $s->balanceShort, 'balance_short_demo' => '0.08',
-            'allowance_short' => $s->allowanceShort, 'allowance_short_demo' => '0.05',
-            'delegate_is_ours' => $ours, 'clear' => $s->isClear() && $ours,
-        ];
+        return ['would_move' => '0.21', 'short' => $s, 'short_demo' => '0.08', 'clear' => $s === 0];
     };
 
     $O = Newsprint\Metering\MeterOutcome::class;
@@ -322,7 +303,7 @@ function fixtures(string $tree): array
 
     $metered = $R::metered($SIG, 10000, true, 1, [new SolPay\Core\Instruction(
         $program->id,
-        [new SolPay\Core\AccountMeta($SITE, true, true), new SolPay\Core\AccountMeta($PAYER, false, false)],
+        [new SolPay\Core\AccountMeta($SITE, true, true), new SolPay\Core\AccountMeta($FUND, false, false)],
         (string) hex2bin('1e8e96a17c2e1d7e'),
     )]);
 
@@ -331,15 +312,15 @@ function fixtures(string $tree): array
         new SolPay\Core\Site(
             authority: '163aJWGmry7Q2gWjtxmTbdC7NGFc7FecSN1gfpNUgRt',
             mint: $MINT, treasury: 'TrSy11111111111111111111111111111111111111',
-            pagePrice: $price, collectionThreshold: 100000, minLimit: 500000, bump: 254,
+            itemPrice: $price, collectionThreshold: 100000, minLimit: 500000, bump: 254,
         ),
         null,
         $decimals,
     );
-    $payer = static fn (bool $contract = true, bool $funds = true): Newsprint\Chain\PayerState => new Newsprint\Chain\PayerState(
-        $PAYER, $CONTRACT, $TOKEN,
-        $contract ? new SolPay\Core\Contract($SITE, $PAYER, 500000, 420000, 280000, 255) : null,
-        $funds ? new SolPay\Core\TokenAccount($MINT, $PAYER, 210000, $CONTRACT, 180000) : null,
+    $meter = static fn (bool $open = true, bool $funds = true, int $expiry = 4000000000): Newsprint\Chain\MeterState => new Newsprint\Chain\MeterState(
+        $METER, $FUND, $TOKEN,
+        $open ? new SolPay\Core\Meter($SITE, $FUND, $KEY, $expiry, 500000, 420000, 280000, 255) : null,
+        $funds ? new SolPay\Core\TokenAccount($MINT, $FUND, 210000, null, 0) : null,
         $state()->site, 6,
     );
 
@@ -380,78 +361,53 @@ function fixtures(string $tree): array
     // The article, paid for and not, and the shell it waits behind.
     $f['article-paid'] = ['article', ['piece' => $piece, 'body' => '<p>body</p>', 'site' => $site, 'meter' => $panel(['result' => $R::granted()]), 'previous' => $older, 'next' => $draft]];
     $f['article-draft'] = ['article', ['piece' => $draft, 'body' => '<p>body</p>', 'site' => $site, 'meter' => $panel(['result' => $R::granted()]), 'previous' => null, 'next' => null]];
-    $f['article-gate'] = ['article', ['piece' => $piece, 'body' => null, 'site' => $site, 'meter' => $panel(['stage' => 'set-meter']), 'previous' => $older, 'next' => null]];
+    $f['article-gate'] = ['article', ['piece' => $piece, 'body' => null, 'site' => $site, 'meter' => $panel(['stage' => 'anonymous', 'meter' => null]), 'previous' => $older, 'next' => null]];
     $f['pending'] = ['article-pending', ['piece' => $piece, 'longWaitMs' => 2500]];
     $f['pending-draft'] = ['article-pending', ['piece' => $draft, 'longWaitMs' => 2500]];
 
     // The meter, every stage §6 has.
     $m = static fn (array $o = []): array => ['meter', ['meter' => $panel($o), 'site' => $site]];
-    $f['meter-unprovisioned'] = $m(['provisioned' => false, 'wallet' => null, 'contract' => null]);
-    $f['meter-unreadable'] = $m(['stage' => 'unreadable', 'contract' => null]);
-    $f['meter-unreadable-anon'] = $m(['stage' => 'unreadable', 'wallet' => null, 'contract' => null]);
-    $f['meter-anonymous'] = $m(['stage' => 'anonymous', 'wallet' => null, 'contract' => null]);
-    $f['meter-unfunded'] = $m(['stage' => 'unfunded', 'contract' => null]);
-    $f['meter-unfunded-spent'] = $m(['stage' => 'unfunded', 'contract' => null, 'faucet' => ['demo' => '0.6', 'sol' => '0.05', 'available' => false]]);
-    $f['meter-set-meter'] = $m(['stage' => 'set-meter', 'contract' => null]);
-    $f['meter-failed-balance'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', SolPay\Core\Cause::of($program, $program->tokenProgram, 1), $shortfall(80000, 0), null)]);
-    $f['meter-failed-deadend'] = $m(['stage' => 'failed', 'faucet' => ['demo' => '0.6', 'sol' => '0.05', 'available' => false], 'result' => $R::failed('refused', null, $shortfall(80000, 0), null)]);
-    $f['meter-failed-allowance'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', null, $shortfall(0, 90000), null)]);
-    $f['meter-failed-delegate'] = $m(['stage' => 'failed', 'delegate' => null, 'delegate_is_ours' => false, 'result' => $R::failed('refused', null, $shortfall(0, 0, false), null, [], false)]);
-    $f['meter-failed-delegate-replaced'] = $m(['stage' => 'failed', 'delegate' => $OTHER, 'delegate_is_ours' => false, 'result' => $R::failed('refused', null, $shortfall(0, 0, $OTHER), null, [], false)]);
-    $f['meter-set-meter-displaces'] = $m(['stage' => 'set-meter', 'contract' => null, 'delegate' => $OTHER, 'delegate_is_ours' => false]);
-    $f['meter-failed-both'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', null, $shortfall(80000, 90000), null)]);
+    $f['meter-unprovisioned'] = $m(['provisioned' => false, 'meter' => null]);
+    $f['meter-unreadable'] = $m(['stage' => 'unreadable', 'meter' => null]);
+    $f['meter-anonymous'] = $m(['stage' => 'anonymous', 'meter' => null]);
+    $f['meter-anonymous-ended'] = $m(['stage' => 'anonymous', 'ended' => true, 'meter' => null]);
+    $f['meter-failed-short'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', SolPay\Core\Cause::of($program, $program->tokenProgram, 1), $shortfall(80000), null)]);
+    $f['meter-failed-other'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', null, $shortfall(0), null)]);
     $f['meter-limit'] = $m(['stage' => 'limit']);
+    $f['meter-expired'] = $m(['stage' => 'expired', 'blocked' => 'Expired']);
     $f['meter-running'] = $m();
-    $f['meter-running-anon'] = $m(['wallet' => null]);
 
     // The strip under a paid article: what the charge did, what an advance
     // did, and the warning before the next one.
     $strip = static fn (array $o = []) => ['meter-strip', ['result' => $panel($o)['result'], 'meter' => $panel($o), 'piece' => $draft]];
     $f['strip-granted'] = $strip(['result' => $R::granted()]);
-    $f['strip-granted-nocontract'] = $strip(['result' => $R::granted(), 'contract' => null]);
+    $f['strip-granted-nometer'] = $strip(['result' => $R::granted(), 'meter' => null]);
     $f['strip-unconfirmed'] = $strip(['result' => $R::unconfirmed($SIG, 10000, false)]);
     $f['strip-metered-settles'] = $strip(['result' => $R::metered($SIG, 10000, true)]);
     $f['strip-metered-nosettle'] = $strip(['result' => $R::metered($SIG, 10000, false)]);
-    $f['strip-adv-failed-balance'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000, 0), 'advanced' => $advance($O::Failed)]);
-    $f['strip-adv-failed-allowance'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 50000), 'advanced' => $advance($O::Failed)]);
-    $f['strip-adv-failed-revoked'] = $strip(['result' => $R::granted(), 'delegate' => null, 'delegate_is_ours' => false, 'solvency' => $solvency(0, 0, false), 'advanced' => $advance($O::Failed)]);
-    $f['strip-adv-failed-revoked-zeroed'] = $strip(['result' => $R::granted(), 'delegate' => null, 'delegate_is_ours' => false, 'solvency' => $solvency(0, 50000, false), 'advanced' => $advance($O::Failed)]);
-    $f['strip-adv-failed-replaced'] = $strip(['result' => $R::granted(), 'delegate' => $OTHER, 'delegate_is_ours' => false, 'solvency' => $solvency(0, 0, $OTHER), 'advanced' => $advance($O::Failed)]);
-    $f['strip-adv-failed-clear'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 0), 'advanced' => $advance($O::Failed)]);
+    $f['strip-adv-failed-short'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000), 'advanced' => $advance($O::Failed)]);
+    $f['strip-adv-failed-clear'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0), 'advanced' => $advance($O::Failed)]);
     $f['strip-adv-blocked'] = $strip(['result' => $R::granted(), 'advanced' => $advance($O::Blocked)]);
+    $f['strip-adv-expired'] = $strip(['result' => $R::granted(), 'stage' => 'expired', 'advanced' => $advance($O::Blocked)]);
     $f['strip-adv-unreadable'] = $strip(['result' => $R::granted(), 'advanced' => $advance($O::Unreadable)]);
     $f['strip-adv-settled'] = $strip(['result' => $R::granted(), 'advanced' => $advance($O::Metered, true, $SIG)]);
     $f['strip-adv-unsettled'] = $strip(['result' => $R::granted(), 'advanced' => $advance($O::Metered, false, null)]);
-    $f['strip-headsup-balance'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000, 0)]);
-    $f['strip-headsup-delegate'] = $strip(['result' => $R::granted(), 'delegate' => null, 'delegate_is_ours' => false, 'solvency' => $solvency(0, 0, false)]);
-    $f['strip-headsup-replaced'] = $strip(['result' => $R::granted(), 'delegate' => $OTHER, 'delegate_is_ours' => false, 'solvency' => $solvency(0, 0, $OTHER)]);
-    $f['strip-headsup-allowance'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(0, 50000)]);
+    $f['strip-headsup-short'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000)]);
 
     // The repair of 2026-09-14: an advance that said nothing about solvency
     // still warns, and one that did is not asked to say it twice.
-    $f['strip-adv-settled-short'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000, 0), 'advanced' => $advance($O::Metered, true, $SIG)]);
-    $f['strip-adv-blocked-short'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000, 0), 'advanced' => $advance($O::Blocked)]);
-    $f['strip-adv-unread-short'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000, 0), 'advanced' => $advance($O::Unreadable)]);
+    $f['strip-adv-settled-short'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000), 'advanced' => $advance($O::Metered, true, $SIG)]);
+    $f['strip-adv-blocked-short'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000), 'advanced' => $advance($O::Blocked)]);
+    $f['strip-adv-unread-short'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000), 'advanced' => $advance($O::Unreadable)]);
 
-    // manage_meter, its four stages, and the sign-out control inside it.
-    $manage = static fn (array $o = []): array => ['manage-meter', $o + [
-        'stage' => 'open', 'site' => $site, 'wallet' => $PAYER, 'chain' => 'solana:devnet',
-        'program' => $program->id, 'token_program' => $program->tokenProgram, 'symbol' => 'DEMO',
-        'contract' => ['address' => $CONTRACT, 'limit' => '0.5', 'used' => '0.42', 'paid' => '0.28', 'unpaid' => '0.14'],
-        'views_remaining' => 8, 'blocked' => null, 'limit_floor' => '0.64', 'balance' => '0.05',
-        'token_account' => $TOKEN, 'delegate' => $CONTRACT, 'approved' => '0.36', 'live_grants' => 3,
-    ]];
+    // manage_meter, its three stages.
+    $manage = static fn (array $o = []): array => ['manage-meter', $o + ['stage' => 'open', 'site' => $site] + $panel()];
     $f['manage-anonymous'] = ['manage-meter', ['stage' => 'anonymous', 'site' => $site]];
+    $f['manage-anonymous-ended'] = ['manage-meter', ['stage' => 'anonymous', 'ended' => true, 'site' => $site]];
     $f['manage-unreadable'] = ['manage-meter', ['stage' => 'unreadable', 'site' => $site]];
-    $f['manage-no-contract'] = ['manage-meter', ['stage' => 'no-contract', 'site' => $site, 'wallet' => $PAYER]];
     $f['manage-open'] = $manage();
-    $f['manage-no-delegate'] = $manage(['delegate' => null, 'approved' => '0']);
     $f['manage-blocked'] = $manage(['blocked' => 'LimitReached']);
-    $f['manage-no-views'] = $manage(['views_remaining' => null]);
-    $f['manage-no-grants'] = $manage(['live_grants' => 0]);
-    $f['forget-open'] = ['forget-wallet', ['has_contract' => true, 'contract' => ['unpaid' => '0.14']]];
-    $f['forget-none'] = ['forget-wallet', ['has_contract' => false, 'contract' => null]];
-    $f['forget-unknown'] = ['forget-wallet', ['has_contract' => null, 'contract' => null]];
+    $f['manage-no-items'] = $manage(['items_remaining' => null]);
 
     // First run, and the page it redirects to.
     $f['setup-error'] = ['setup', ['status' => $status(), 'error' => 'connection refused', 'site' => $site, 'setup' => []]];
@@ -459,8 +415,8 @@ function fixtures(string $tree): array
     $f['setup-ready'] = ['setup', ['status' => $status(), 'error' => null, 'site' => $site, 'setup' => []]];
     $f['setup-unfunded'] = ['setup', ['status' => $status(['funded' => false, 'balance' => 0]), 'error' => null, 'site' => $site, 'setup' => []]];
     $f['setup-undeployed'] = ['setup', ['status' => $status(['program_deployed' => false]), 'error' => null, 'site' => $site, 'setup' => []]];
-    $f['setup-ran-done'] = ['setup-ran', ['provisioned' => true, 'steps' => $steps]];
-    $f['setup-ran-stopped'] = ['setup-ran', ['provisioned' => false, 'steps' => $steps]];
+    $f['setup-ran-done'] = ['setup-ran', ['provisioned' => true, 'steps' => $steps, 'refused' => false]];
+    $f['setup-ran-stopped'] = ['setup-ran', ['provisioned' => false, 'steps' => $steps, 'refused' => false]];
 
     // §9's panel, assembled by `Inspector` and rendered by its templates — so
     // these cover the class as well as the markup, which is the half a
@@ -470,12 +426,13 @@ function fixtures(string $tree): array
     $f['panel-error'] = ['inspector-sections', ['sections' => $sections(null, 'getMultipleAccounts: HTTP 429')]];
     $f['panel-unprovisioned'] = ['inspector-sections', ['sections' => $sections()]];
     $f['panel-drift'] = ['inspector-sections', ['sections' => $sections($state(20000))]];
-    $f['panel-reader'] = ['inspector-sections', ['sections' => $sections($state(), null, $payer())]];
-    $f['panel-reader-nofunds'] = ['inspector-sections', ['sections' => $sections($state(), null, $payer(true, false))]];
-    $f['panel-no-contract'] = ['inspector-sections', ['sections' => $sections($state(), null, $payer(false))]];
-    $f['panel-metered'] = ['inspector-sections', ['sections' => $sections($state(), null, $payer(), $metered)]];
-    $f['panel-browser-built'] = ['inspector-sections', ['sections' => $sections($state(), null, $payer(), $R::metered($SIG, 10000, true))]];
-    $f['panel-no-decimals'] = ['inspector-sections', ['sections' => $sections($state(10000, null), null, $payer())]];
+    $f['panel-reader'] = ['inspector-sections', ['sections' => $sections($state(), null, $meter())]];
+    $f['panel-reader-nofunds'] = ['inspector-sections', ['sections' => $sections($state(), null, $meter(true, false))]];
+    $f['panel-reader-expired'] = ['inspector-sections', ['sections' => $sections($state(), null, $meter(true, true, 1700000000))]];
+    $f['panel-no-meter'] = ['inspector-sections', ['sections' => $sections($state(), null, $meter(false))]];
+    $f['panel-metered'] = ['inspector-sections', ['sections' => $sections($state(), null, $meter(), $metered)]];
+    $f['panel-built-elsewhere'] = ['inspector-sections', ['sections' => $sections($state(), null, $meter(), $R::metered($SIG, 10000, true))]];
+    $f['panel-no-decimals'] = ['inspector-sections', ['sections' => $sections($state(10000, null), null, $meter())]];
 
     return $f;
 }

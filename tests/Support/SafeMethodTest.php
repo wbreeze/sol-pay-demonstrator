@@ -71,7 +71,7 @@ final class SafeMethodTest extends TestCase
         $root = dirname(__DIR__, 2);
         foreach (['src/Metering/ChargeFollowUp.php', 'src/Metering/ChargeFinisher.php'] as $file) {
             $source = (string) file_get_contents($root.'/'.$file);
-            foreach (['Keypair', 'Ix::', '->send(', 'new Meter(', 'withPayerLock'] as $forbidden) {
+            foreach (['Keypair', 'Ix::', '->send(', 'new Meter(', 'withMeterLock'] as $forbidden) {
                 self::assertStringNotContainsString($forbidden, $source, "{$file} mentions {$forbidden}");
             }
         }
@@ -88,7 +88,7 @@ final class SafeMethodTest extends TestCase
         // its charge: without JavaScript, a resubmitted form is the only
         // request that reader's reload makes.
         self::assertSame(1, preg_match("/\\\$articlePost = \\\$app->post\\([^\n]*\\\$followUpFactory/", $index), 'the article POST has the follow-up');
-        self::assertStringContainsString('$followUpFactory()->report($address, $piece->slug, false) ?? $result;', $index);
+        self::assertStringContainsString('$followUpFactory()->report($held->meter, $piece->slug, false) ?? $result;', $index);
     }
 
     /**

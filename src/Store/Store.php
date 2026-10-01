@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Newsprint\Store;
 
+use Newsprint\Auth\Binding;
 use Newsprint\Metering\ChargeState;
 use PDO;
 
@@ -12,16 +13,29 @@ use PDO;
  * SPEC §10.2's promise — "the actual stores, enumerated, each one traceable to
  * a line in the code" — is checkable by reading one file.
  *
+ * **Everything about a reader is keyed by the meter** (SPEC §10.4). The fund
+ * design knows a browser by the meter its key answers to, so the meter's
+ * address is the one name the session, the grants, the lock row and a pending
+ * close share, and closing the meter erases by that name. The faucet ledger is
+ * the exception, keyed by the address the faucet sent to, because it is not
+ * about a meter at all.
+ *
  * Time is injected rather than taken from `time()` so expiry is testable
  * without sleeping. Everything here takes seconds since the epoch.
  */
 final class Store
 {
+    /** @var callable(): int */
+    private $clock;
+
+    /**
+     * @param (callable(): int)|null $clock
+     */
     public function __construct(
         private readonly PDO $pdo,
-        private $clock = null,
+        ?callable $clock = null,
     ) {
-        $this->clock ??= static fn (): int => time();
+        $this->clock = $clock ?? static fn (): int => time();
     }
 
     public function now(): int
@@ -29,29 +43,33 @@ final class Store
         return ($this->clock)();
     }
 
-    // ---- §5 session ------------------------------------------------------
+    // ---- §5.3 session ----------------------------------------------------
 
-    public function createSession(string $wallet, int $ttlSeconds): string
+    /**
+     * Bind a session to a meter, after a key proof (SPEC §5.3).
+     *
+     * 256 bits from the CSPRNG. The cookie carries this and nothing else,
+     * which is what entitles the privacy page to call it strictly necessary.
+     */
+    public function createSession(Binding $binding, int $ttlSeconds): string
     {
-        // 256 bits from the CSPRNG. The cookie carries this and nothing else
-        // (§5), which is what entitles the privacy page to call it strictly
-        // necessary.
         $id = bin2hex(random_bytes(32));
         $now = $this->now();
         $this->pdo->prepare(
-            'INSERT INTO sessions (id, wallet, created_at, expires_at) VALUES (?, ?, ?, ?)'
-        )->execute([$id, $wallet, $now, $now + $ttlSeconds]);
+            'INSERT INTO sessions (id, meter, fund, key, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)'
+        )->execute([$id, $binding->meter, $binding->fund, $binding->key, $now, $now + $ttlSeconds]);
 
         return $id;
     }
 
-    public function walletForSession(string $id): ?string
+    /** The meter, fund and key a live session holds, or null. */
+    public function bindingForSession(string $id): ?Binding
     {
-        $stmt = $this->pdo->prepare('SELECT wallet FROM sessions WHERE id = ? AND expires_at > ?');
+        $stmt = $this->pdo->prepare('SELECT meter, fund, key FROM sessions WHERE id = ? AND expires_at > ?');
         $stmt->execute([$id, $this->now()]);
         $row = $stmt->fetch();
 
-        return $row === false ? null : (string) $row['wallet'];
+        return $row === false ? null : new Binding((string) $row['meter'], (string) $row['fund'], (string) $row['key']);
     }
 
     public function destroySession(string $id): void
@@ -59,99 +77,72 @@ final class Store
         $this->pdo->prepare('DELETE FROM sessions WHERE id = ?')->execute([$id]);
     }
 
-    // ---- §5 sign-in nonce ------------------------------------------------
+    /**
+     * End every session that holds this meter under this key (SPEC §5.3).
+     *
+     * By meter and key rather than by session id, because the read that finds
+     * the meter renewed to another key is a fact about every browser holding
+     * the old key, and it is found on whichever request reads first. Sessions
+     * on the same meter under the new key are the other device's, and stay.
+     */
+    public function endSessions(Binding $binding): int
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM sessions WHERE meter = ? AND key = ?');
+        $stmt->execute([$binding->meter, $binding->key]);
+
+        return $stmt->rowCount();
+    }
+
+    // ---- §5.2 proof nonces -----------------------------------------------
 
     /**
-     * @param string $input the \`SolanaSignInInput\` issued with this nonce, as JSON.
-     *                      It is stored rather than recomposed because SPEC §5
-     *                      step 3 compares the signed message against *the input
-     *                      this server issued*, and an input rebuilt at
-     *                      verification time from the current clock is a
-     *                      different input.
+     * Issue a nonce for a key proof: 32 random bytes, hex-encoded, stored with
+     * the time it was issued.
      */
-    public function issueNonce(int $ttlSeconds, string $input = '{}'): string
+    public function issueNonce(int $ttlSeconds): string
     {
-        $nonce = bin2hex(random_bytes(16));
+        $nonce = bin2hex(random_bytes(32));
         $now = $this->now();
         $this->pdo->prepare(
-            'INSERT INTO signin_nonces (nonce, issued_at, expires_at, input) VALUES (?, ?, ?, ?)'
-        )->execute([$nonce, $now, $now + $ttlSeconds, $input]);
+            'INSERT INTO nonces (nonce, issued_at, expires_at) VALUES (?, ?, ?)'
+        )->execute([$nonce, $now, $now + $ttlSeconds]);
 
         return $nonce;
     }
 
     /**
-     * Issue a sign-in challenge: a nonce, and the input composed around it,
-     * stored together.
+     * Forget the nonce, and say whether it was one this server issued and has
+     * not let expire.
      *
-     * The composition happens inside because the two cannot be separated
-     * safely. The input names the nonce, so the nonce has to exist first; and
-     * a nonce that exists without its input is a challenge a verifier cannot
-     * check against anything. One INSERT, or neither.
-     *
-     * @param callable(string): array<string, mixed> $compose
-     *
-     * @return array{nonce: string, input: array<string, mixed>}
-     */
-    public function issueSignIn(callable $compose, int $ttlSeconds): array
-    {
-        $nonce = bin2hex(random_bytes(16));
-        $input = $compose($nonce);
-        $now = $this->now();
-        $this->pdo->prepare(
-            'INSERT INTO signin_nonces (nonce, issued_at, expires_at, input) VALUES (?, ?, ?, ?)'
-        )->execute([$nonce, $now, $now + $ttlSeconds, json_encode($input, JSON_UNESCAPED_SLASHES)]);
-
-        return ['nonce' => $nonce, 'input' => $input];
-    }
-    /**
-     * True exactly once per nonce, and never after it expires. Both halves
-     * matter: SPEC §5 step 3 says a verifier that checks neither accepts a
-     * replay forever.
+     * Forgotten at this first presentation whether the proof then passes or
+     * not (SPEC §5.2). A proof accepted twice can be replayed by whoever
+     * copies it, and each article the replayer reads is charged to the
+     * reader's fund, so the nonce must be gone before anything is checked.
+     * One `DELETE` decides both halves: a second presentation finds no row.
      */
     public function consumeNonce(string $nonce): bool
     {
-        $stmt = $this->pdo->prepare(
-            'UPDATE signin_nonces SET used_at = ? WHERE nonce = ? AND used_at IS NULL AND expires_at > ?'
-        );
-        $stmt->execute([$this->now(), $nonce, $this->now()]);
+        $stmt = $this->pdo->prepare('DELETE FROM nonces WHERE nonce = ? AND expires_at > ?');
+        $stmt->execute([$nonce, $this->now()]);
+        $live = $stmt->rowCount() === 1;
 
-        return $stmt->rowCount() === 1;
-    }
+        // An expired nonce presented is forgotten too, rather than left for the
+        // sweep: its presentation is its use.
+        $this->pdo->prepare('DELETE FROM nonces WHERE nonce = ?')->execute([$nonce]);
 
-    /**
-     * Consume the nonce and hand back the input it was issued with, or null if
-     * the nonce is unknown, already used, or expired.
-     *
-     * One call rather than two, because the two have to be indivisible: a
-     * verifier that reads the input, does its checks, and only then marks the
-     * nonce used has a window in which the same signed message is accepted
-     * twice. Here the nonce is spent first and the input is a consequence of
-     * having spent it.
-     */
-    public function consumeSignIn(string $nonce): ?string
-    {
-        if (!$this->consumeNonce($nonce)) {
-            return null;
-        }
-
-        $stmt = $this->pdo->prepare('SELECT input FROM signin_nonces WHERE nonce = ?');
-        $stmt->execute([$nonce]);
-        $row = $stmt->fetch();
-
-        return $row === false ? null : (string) $row['input'];
+        return $live;
     }
 
     // ---- §7.1 view grants ------------------------------------------------
 
     /** @return array{granted_at: int, expires_at: int, signature: ?string, charge: ChargeState}|null */
-    public function liveGrant(string $wallet, string $article): ?array
+    public function liveGrant(string $meter, string $article): ?array
     {
         $stmt = $this->pdo->prepare(
             'SELECT granted_at, expires_at, signature, charge FROM grants
-             WHERE wallet = ? AND article = ? AND expires_at > ?'
+             WHERE meter = ? AND article = ? AND expires_at > ?'
         );
-        $stmt->execute([$wallet, $article, $this->now()]);
+        $stmt->execute([$meter, $article, $this->now()]);
         $row = $stmt->fetch();
         if ($row === false) {
             return null;
@@ -176,7 +167,7 @@ final class Store
      * request finds out whether it landed ({@see settleCharge()}).
      */
     public function recordGrant(
-        string $wallet,
+        string $meter,
         string $article,
         int $ttlSeconds,
         ?string $signature = null,
@@ -184,17 +175,16 @@ final class Store
     ): void {
         $now = $this->now();
         $this->pdo->prepare(
-            'INSERT INTO grants (wallet, article, granted_at, expires_at, signature, confirmed, charge)
-             VALUES (:w, :a, :g, :e, :s, :c, :ch)
-             ON CONFLICT (wallet, article) DO UPDATE SET
-                 granted_at = :g, expires_at = :e, signature = :s, confirmed = :c, charge = :ch'
+            'INSERT INTO grants (meter, article, granted_at, expires_at, signature, charge)
+             VALUES (:m, :a, :g, :e, :s, :ch)
+             ON CONFLICT (meter, article) DO UPDATE SET
+                 granted_at = :g, expires_at = :e, signature = :s, charge = :ch'
         )->execute([
-            ':w' => $wallet,
+            ':m' => $meter,
             ':a' => $article,
             ':g' => $now,
             ':e' => $now + $ttlSeconds,
             ':s' => $signature,
-            ':c' => $charge === ChargeState::Confirmed ? 1 : 0,
             ':ch' => $charge->value,
         ]);
     }
@@ -211,20 +201,19 @@ final class Store
      *
      * True when this call wrote it.
      */
-    public function settleCharge(string $wallet, string $article, string $signature, ChargeState $charge): bool
+    public function settleCharge(string $meter, string $article, string $signature, ChargeState $charge): bool
     {
         if ($charge === ChargeState::Pending) {
             return false;
         }
 
         $stmt = $this->pdo->prepare(
-            "UPDATE grants SET charge = :ch, confirmed = :c
-             WHERE wallet = :w AND article = :a AND signature = :s AND charge = 'pending'"
+            "UPDATE grants SET charge = :ch
+             WHERE meter = :m AND article = :a AND signature = :s AND charge = 'pending'"
         );
         $stmt->execute([
             ':ch' => $charge->value,
-            ':c' => $charge === ChargeState::Confirmed ? 1 : 0,
-            ':w' => $wallet,
+            ':m' => $meter,
             ':a' => $article,
             ':s' => $signature,
         ]);
@@ -233,49 +222,44 @@ final class Store
     }
 
     /**
-     * How many live grants this wallet holds.
+     * How many live grants this meter holds.
      *
      * Not a reading history being read — a count, and the only place it is
-     * used is the close confirmation, where §10.4 qualification 2 requires
+     * used is the close confirmation, where §10.4 qualification 3 requires
      * the reader to be told *before* they click that closing costs them the
      * articles they have already paid for. Saying "one article" when it is
      * three would be a disclosure that misleads.
      */
-    public function liveGrantCount(string $wallet): int
+    public function liveGrantCount(string $meter): int
     {
-        $stmt = $this->pdo->prepare('SELECT COUNT(*) AS n FROM grants WHERE wallet = ? AND expires_at > ?');
-        $stmt->execute([$wallet, $this->now()]);
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) AS n FROM grants WHERE meter = ? AND expires_at > ?');
+        $stmt->execute([$meter, $this->now()]);
 
         return (int) $stmt->fetch()['n'];
     }
 
     /**
-     * Delete the grants, sessions and sign-in nonces that have expired, and the
-     * lock rows that nothing refers to any more (§10.4 q.1).
+     * Delete every row whose window has passed, and the lock rows nothing
+     * refers to any more (§10.4 qualification 1).
      *
-     * Expiry by itself deletes nothing. `liveGrant()` and `walletForSession()`
+     * Expiry by itself deletes nothing. `liveGrant()` and `bindingForSession()`
      * skip an expired row, and the row stays. Until 2026-09-16 nothing called
      * this method, so every lapsed grant stayed in the table until the reader
-     * closed the meter: one row per wallet and article, with the time and the
-     * signature. Those rows add up to a reading history, and the privacy page
-     * promises a receipt that is gone in thirty minutes. The metering path now
-     * calls this method inside the payer lock; see
+     * closed the meter. Those rows add up to a reading history, and the
+     * privacy page promises a receipt that is gone in thirty minutes. The
+     * metering path calls this method inside the meter lock; see
      * {@see \Newsprint\Metering\Meter::forArticle()}. `bin/sweep` calls it on
      * a schedule, for the hours when nobody buys anything.
      *
-     * A `payers` row goes once its wallet has no session and no grant left.
-     * The row exists only to be locked. A wallet address kept after the
-     * reader's session and grants are gone is a store the privacy page does
-     * not list.
+     * A `meters` row goes once its meter has no session and no grant left.
+     * The row exists only to be locked.
      *
-     * An expired nonce names no reader and can never be consumed, so deleting
-     * it is housekeeping rather than privacy. A used nonce that has not yet
-     * expired stays: `consumeNonce()` needs the row to refuse a replay.
+     * A nonce goes after five minutes whether or not it was presented, and a
+     * pending setup after ten. A pending-close note goes when it expires, or
+     * once its meter has no session and no grant left, since the note then
+     * protects nothing.
      *
-     * A pending-close note goes when it expires, or once its wallet has no
-     * session and no grant left, since the note then protects nothing.
-     *
-     * @return array{grants: int, sessions: int, payers: int, nonces: int, closes: int}
+     * @return array{grants: int, sessions: int, meters: int, nonces: int, setups: int, closes: int}
      */
     public function sweepExpired(): array
     {
@@ -287,38 +271,40 @@ final class Store
         $sessions = $this->pdo->prepare('DELETE FROM sessions WHERE expires_at <= ?');
         $sessions->execute([$now]);
 
-        // After the two deletes above, so a wallet whose last session or
-        // grant just went loses its lock row in the same sweep.
-        $payers = $this->pdo->prepare(
-            'DELETE FROM payers
-             WHERE wallet NOT IN (SELECT wallet FROM sessions)
-               AND wallet NOT IN (SELECT wallet FROM grants)'
+        $meters = $this->pdo->prepare(
+            'DELETE FROM meters
+             WHERE meter NOT IN (SELECT meter FROM sessions)
+               AND meter NOT IN (SELECT meter FROM grants)'
         );
-        $payers->execute();
+        $meters->execute();
 
-        $nonces = $this->pdo->prepare('DELETE FROM signin_nonces WHERE expires_at <= ?');
+        $nonces = $this->pdo->prepare('DELETE FROM nonces WHERE expires_at <= ?');
         $nonces->execute([$now]);
+
+        $setups = $this->pdo->prepare('DELETE FROM pending_setups WHERE expires_at <= ?');
+        $setups->execute([$now]);
 
         $closes = $this->pdo->prepare(
             'DELETE FROM pending_closes
              WHERE expires_at <= ?
-                OR (wallet NOT IN (SELECT wallet FROM sessions)
-                    AND wallet NOT IN (SELECT wallet FROM grants))'
+                OR (meter NOT IN (SELECT meter FROM sessions)
+                    AND meter NOT IN (SELECT meter FROM grants))'
         );
         $closes->execute([$now]);
 
         return [
             'grants' => $grants->rowCount(),
             'sessions' => $sessions->rowCount(),
-            'payers' => $payers->rowCount(),
+            'meters' => $meters->rowCount(),
             'nonces' => $nonces->rowCount(),
+            'setups' => $setups->rowCount(),
             'closes' => $closes->rowCount(),
         ];
     }
 
     /**
-     * How long the oldest expired grant or session has waited for a sweep, in
-     * seconds, or null when nothing is waiting.
+     * How long the oldest expired row about a reader has waited for a sweep,
+     * in seconds, or null when nothing is waiting.
      *
      * `GET /health` reports this number. With `bin/sweep` on its schedule, the
      * number stays below `sweep_every_s`. A number that keeps growing means the
@@ -333,6 +319,8 @@ final class Store
                  SELECT expires_at FROM grants WHERE expires_at <= :now
                  UNION ALL
                  SELECT expires_at FROM sessions WHERE expires_at <= :now
+                 UNION ALL
+                 SELECT expires_at FROM pending_setups WHERE expires_at <= :now
              )'
         );
         $stmt->execute([':now' => $now]);
@@ -344,24 +332,24 @@ final class Store
     // ---- §10.4 erasure ---------------------------------------------------
 
     /**
-     * Closing the contract purges the site's record of the reader: session,
+     * Closing the meter purges the site's record of the reader: sessions,
      * grants, the lock row, and the note of a close still waiting to be
      * confirmed. The faucet ledger deliberately survives, for the published
-     * reason in §10.4 qualification 3.
+     * reason in §10.4 qualification 4.
      *
      * Returns what went, because §10.4 says this is testable from outside and
      * the inspector shows the DELETE happening rather than asserting it.
      *
      * @return array{sessions: int, grants: int}
      */
-    public function eraseReader(string $wallet): array
+    public function eraseMeter(string $meter): array
     {
-        $sessions = $this->pdo->prepare('DELETE FROM sessions WHERE wallet = ?');
-        $sessions->execute([$wallet]);
-        $grants = $this->pdo->prepare('DELETE FROM grants WHERE wallet = ?');
-        $grants->execute([$wallet]);
-        $this->pdo->prepare('DELETE FROM payers WHERE wallet = ?')->execute([$wallet]);
-        $this->pdo->prepare('DELETE FROM pending_closes WHERE wallet = ?')->execute([$wallet]);
+        $sessions = $this->pdo->prepare('DELETE FROM sessions WHERE meter = ?');
+        $sessions->execute([$meter]);
+        $grants = $this->pdo->prepare('DELETE FROM grants WHERE meter = ?');
+        $grants->execute([$meter]);
+        $this->pdo->prepare('DELETE FROM meters WHERE meter = ?')->execute([$meter]);
+        $this->pdo->prepare('DELETE FROM pending_closes WHERE meter = ?')->execute([$meter]);
 
         return ['sessions' => $sessions->rowCount(), 'grants' => $grants->rowCount()];
     }
@@ -369,32 +357,31 @@ final class Store
     // ---- §10.4 a close the chain had not confirmed yet -------------------
 
     /**
-     * Remember that this wallet sent a close the server stopped waiting for.
+     * Remember that this meter's close was sent and not yet seen to land.
      *
-     * `POST /meter/close/done` waits a bounded time and then reads the
-     * contract account. When the account is still there, nothing is deleted,
-     * and the close may still land a few seconds later. Without this note, the
-     * request that comes after cannot tell a wallet that has just closed its
-     * meter from one that never opened a meter, and the erasure never runs.
-     * {@see \Newsprint\Metering\CloseFinisher} reads the note.
+     * The close route waits a bounded time and then reads the meter. When the
+     * account is still there, nothing is deleted, and the close may still land
+     * a few seconds later. Without this note, the request that comes after
+     * cannot tell a meter just closed from one closed long ago, and the
+     * erasure never runs. {@see \Newsprint\Metering\CloseFinisher} reads it.
      */
-    public function recordPendingClose(string $wallet, string $signature, int $ttlSeconds): void
+    public function recordPendingClose(string $meter, string $signature, int $ttlSeconds): void
     {
         $now = $this->now();
         $this->pdo->prepare(
-            'INSERT INTO pending_closes (wallet, signature, sent_at, expires_at)
-             VALUES (:w, :s, :n, :e)
-             ON CONFLICT (wallet) DO UPDATE SET signature = :s, sent_at = :n, expires_at = :e'
-        )->execute([':w' => $wallet, ':s' => $signature, ':n' => $now, ':e' => $now + $ttlSeconds]);
+            'INSERT INTO pending_closes (meter, signature, sent_at, expires_at)
+             VALUES (:m, :s, :n, :e)
+             ON CONFLICT (meter) DO UPDATE SET signature = :s, sent_at = :n, expires_at = :e'
+        )->execute([':m' => $meter, ':s' => $signature, ':n' => $now, ':e' => $now + $ttlSeconds]);
     }
 
     /** @return array{signature: string, sent_at: int}|null */
-    public function pendingClose(string $wallet): ?array
+    public function pendingClose(string $meter): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT signature, sent_at FROM pending_closes WHERE wallet = ? AND expires_at > ?'
+            'SELECT signature, sent_at FROM pending_closes WHERE meter = ? AND expires_at > ?'
         );
-        $stmt->execute([$wallet, $this->now()]);
+        $stmt->execute([$meter, $this->now()]);
         $row = $stmt->fetch();
 
         return $row === false ? null : [
@@ -404,26 +391,26 @@ final class Store
     }
 
     /** The close did not land and no longer can. */
-    public function dropPendingClose(string $wallet): void
+    public function dropPendingClose(string $meter): void
     {
-        $this->pdo->prepare('DELETE FROM pending_closes WHERE wallet = ?')->execute([$wallet]);
+        $this->pdo->prepare('DELETE FROM pending_closes WHERE meter = ?')->execute([$meter]);
     }
 
-    // ---- §7.2 one meter at a time per payer ------------------------------
+    // ---- §7.2 one charge at a time per meter -----------------------------
 
     /**
-     * Run `$work` with this payer serialized against every other request for
-     * the same wallet.
+     * Run `$work` with this meter serialized against every other request for
+     * the same meter.
      *
      * `BEGIN IMMEDIATE` takes SQLite's write lock at the start rather than on
-     * first write, which is the point: the read, the preflight, the meter and
+     * first write, which is the point: the read, the preflight, the charge and
      * the grant have to be inside one critical section, and a deferred
      * transaction would upgrade halfway through and lose the race it exists
-     * to prevent. The `payers` row is touched so the lock and the state it
+     * to prevent. The `meters` row is touched so the lock and the state it
      * guards are the same object (§12.5).
      *
      * Note the lock is database-wide (see {@see Database}), so this is
-     * stronger than per-payer. It is still one machine's answer: §7.2's
+     * stronger than per-meter. It is still one machine's answer: §7.2's
      * multi-instance caveat stands.
      *
      * @template T
@@ -432,14 +419,14 @@ final class Store
      *
      * @return T
      */
-    public function withPayerLock(string $wallet, callable $work)
+    public function withMeterLock(string $meter, callable $work)
     {
         $this->pdo->exec('BEGIN IMMEDIATE');
         try {
             $this->pdo->prepare(
-                'INSERT INTO payers (wallet, updated_at) VALUES (?, ?)
-                 ON CONFLICT (wallet) DO UPDATE SET updated_at = excluded.updated_at'
-            )->execute([$wallet, $this->now()]);
+                'INSERT INTO meters (meter, updated_at) VALUES (?, ?)
+                 ON CONFLICT (meter) DO UPDATE SET updated_at = excluded.updated_at'
+            )->execute([$meter, $this->now()]);
 
             $result = $work();
             $this->pdo->exec('COMMIT');
@@ -454,26 +441,26 @@ final class Store
 
     // ---- §4.3 faucet ledger ----------------------------------------------
 
-    public function faucetGranted(string $wallet): bool
+    public function faucetGranted(string $address): bool
     {
-        $stmt = $this->pdo->prepare('SELECT 1 FROM faucet_ledger WHERE wallet = ?');
-        $stmt->execute([$wallet]);
+        $stmt = $this->pdo->prepare('SELECT 1 FROM faucet_ledger WHERE address = ?');
+        $stmt->execute([$address]);
 
         return $stmt->fetch() !== false;
     }
 
-    /** False if this wallet already had its one grant (§13.2: the faucet refuses). */
-    public function recordFaucet(string $wallet, ?string $signature = null): bool
+    /** False if this address already had its one grant (§13.2: the faucet refuses). */
+    public function recordFaucet(string $address, ?string $signature = null): bool
     {
         $stmt = $this->pdo->prepare(
-            'INSERT OR IGNORE INTO faucet_ledger (wallet, granted_at, signature) VALUES (?, ?, ?)'
+            'INSERT OR IGNORE INTO faucet_ledger (address, granted_at, signature) VALUES (?, ?, ?)'
         );
-        $stmt->execute([$wallet, $this->now(), $signature]);
+        $stmt->execute([$address, $this->now(), $signature]);
 
         return $stmt->rowCount() === 1;
     }
 
-    // ---- §10.4 q.5 aggregates --------------------------------------------
+    // ---- §10.4 aggregates ------------------------------------------------
 
     /**
      * A fact about the article. It is incremented here and never derived from

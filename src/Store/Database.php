@@ -10,15 +10,16 @@ use PDOException;
 /**
  * The one SQLite file, and its schema (SPEC §12.5).
  *
- * Four stores, all small and all short-lived: the session (§5), view grants
- * (§7.1), the per-payer serialization the metering path takes (§7.2), and the
- * faucet's one-grant-per-wallet record (§4.3). SPEC §10.4 enumerates them and
- * the privacy page repeats the enumeration, so a table added here is a claim
- * on that page that has to be updated with it.
+ Seven stores, all small and all but one short-lived: the session (§5.3),
+ * pending setups (§6.3), proof nonces (§5.2), view grants (§7.1), the
+ * per-meter serialization the metering path takes (§7.2), pending closes
+ * (§10.4), and the faucet's one-grant-per-address record (§4.3). SPEC §10.4
+ * enumerates them and the privacy page repeats the enumeration, so a table
+ * added here is a claim on that page that has to be updated with it.
  *
  * **On the word "row" in §12.5.** SQLite's write lock is database-wide, not
  * per row: `BEGIN IMMEDIATE` serializes *every* writer, not just the ones
- * touching one payer. It therefore delivers §7.2 and then some. WAL keeps
+ * touching one meter. It therefore delivers §7.2 and then some. WAL keeps
  * readers out of that queue. The stronger guarantee costs nothing at this
  * scale and the spec's real caveat is untouched — one file on one machine is
  * still not a lock that spans instances.
@@ -37,7 +38,7 @@ final class Database
         ]);
 
         // **First, before anything that can contend.** A second request for the
-        // same payer waits here rather than failing; this is the visible half
+        // same meter waits here rather than failing; this is the visible half
         // of §7.2's queue, and it is longer than §7.3's confirmation window on
         // purpose.
         //
@@ -102,82 +103,165 @@ final class Database
         return $pdo;
     }
 
+    /**
+     * The schema this code expects, in SQLite's own `user_version`.
+     *
+     * Version 2 is the fund design (2026-10-01). Everything the delegate
+     * design kept was keyed by wallet, and the fund design keys by meter, so
+     * nothing a reader left behind carries over: sessions, grants and lock
+     * rows from before are dropped, which ends every session once. Two tables
+     * are kept, because neither is reader data that the redesign changes. The
+     * faucet ledger duplicates a public fact and must survive (§10.4
+     * qualification 4), and the purchase counts are facts about articles.
+     */
+    public const VERSION = 2;
+
     public static function migrate(PDO $pdo): void
     {
+        $version = (int) $pdo->query('PRAGMA user_version')->fetchColumn();
+        if ($version >= self::VERSION) {
+            return;
+        }
+
+        $pdo->exec('BEGIN IMMEDIATE');
+        try {
+            // Asked again under the write lock. Four requests opening a fresh
+            // file together all read version 0 above, and the three that
+            // queued here must find the first one's work rather than drop it.
+            if ((int) $pdo->query('PRAGMA user_version')->fetchColumn() >= self::VERSION) {
+                $pdo->exec('COMMIT');
+
+                return;
+            }
+
+            self::fromDelegateDesign($pdo);
+            self::create($pdo);
+            $pdo->exec('PRAGMA user_version = '.self::VERSION);
+            $pdo->exec('COMMIT');
+        } catch (\Throwable $e) {
+            $pdo->exec('ROLLBACK');
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Drop the delegate design's tables, carrying the faucet ledger across
+     * under its new key. A fresh database has none of them, and this does
+     * nothing to it.
+     */
+    private static function fromDelegateDesign(PDO $pdo): void
+    {
+        $tables = $pdo->query("SELECT name FROM sqlite_master WHERE type = 'table'")->fetchAll(PDO::FETCH_COLUMN);
+
+        $ledger = [];
+        if (in_array('faucet_ledger', $tables, true) && self::hasColumn($pdo, 'faucet_ledger', 'wallet')) {
+            $ledger = $pdo->query('SELECT wallet, granted_at, signature FROM faucet_ledger')->fetchAll();
+            $pdo->exec('DROP TABLE faucet_ledger');
+        }
+
+        foreach (['sessions', 'signin_nonces', 'grants', 'payers', 'pending_closes'] as $old) {
+            if (in_array($old, $tables, true)) {
+                $pdo->exec("DROP TABLE {$old}");
+            }
+        }
+
+        if ($ledger === []) {
+            return;
+        }
+
+        self::create($pdo);
+        $insert = $pdo->prepare('INSERT OR IGNORE INTO faucet_ledger (address, granted_at, signature) VALUES (?, ?, ?)');
+        foreach ($ledger as $row) {
+            $insert->execute([$row['wallet'], $row['granted_at'], $row['signature']]);
+        }
+    }
+
+    private static function create(PDO $pdo): void
+    {
         $pdo->exec(<<<'SQL'
-            -- §5. The viewer-to-wallet map, which is the integrator's one
-            -- obligation. A publisher with accounts would put the address on
-            -- the account row instead and change nothing else.
+            -- §5.3. The viewer-to-meter map, which is the integrator's one
+            -- obligation. The fund's address saves a read; the key is what
+            -- every charge checks the meter still names. A publisher with
+            -- accounts would put these on the account row instead.
             CREATE TABLE IF NOT EXISTS sessions (
                 id         TEXT PRIMARY KEY,
-                wallet     TEXT NOT NULL,
+                meter      TEXT NOT NULL,
+                fund       TEXT NOT NULL,
+                key        TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 expires_at INTEGER NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS sessions_wallet ON sessions (wallet);
+            CREATE INDEX IF NOT EXISTS sessions_meter ON sessions (meter);
 
-            -- §5 step 3. A verifier that skips the expiry accepts a replay
-            -- forever, so the nonce carries one and is marked used.
-            CREATE TABLE IF NOT EXISTS signin_nonces (
-                nonce      TEXT PRIMARY KEY,
-                issued_at  INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL,
-                used_at    INTEGER,
-                -- The \`SolanaSignInInput\` issued with this nonce. §5 step 3
-                -- checks the signed message against what was issued, so what
-                -- was issued has to outlive the request that issued it.
-                input      TEXT NOT NULL DEFAULT '{}'
+            -- §6.3. A setup the reader has started and not continued. It
+            -- holds what the panel asked, and the wallet's address once the
+            -- wallet has asked for the transaction. Ten minutes, or until
+            -- *continue*. Written by slice 3's routes; the sweep covers it now.
+            CREATE TABLE IF NOT EXISTS pending_setups (
+                id         TEXT PRIMARY KEY,
+                session    TEXT NOT NULL,
+                key        TEXT NOT NULL,
+                answers    TEXT NOT NULL DEFAULT '{}',
+                wallet     TEXT,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL
             );
 
-            -- §7.1. A receipt, not a profile: it answers "has this wallet
+            -- §5.2. A proof's nonce, forgotten at its first presentation
+            -- whether the proof then passes or not, or after five minutes.
+            CREATE TABLE IF NOT EXISTS nonces (
+                nonce      TEXT PRIMARY KEY,
+                issued_at  INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
+
+            -- §7.1. A receipt, not a profile: it answers "has this meter
             -- already paid for this article", is never joined across
             -- articles, never leaves the server, and expires.
             CREATE TABLE IF NOT EXISTS grants (
-                wallet     TEXT NOT NULL,
+                meter      TEXT NOT NULL,
                 article    TEXT NOT NULL,
                 granted_at INTEGER NOT NULL,
                 expires_at INTEGER NOT NULL,
                 signature  TEXT,
-                confirmed  INTEGER NOT NULL DEFAULT 1,
-                charge     TEXT NOT NULL DEFAULT 'confirmed',
-                PRIMARY KEY (wallet, article)
+                charge     TEXT NOT NULL DEFAULT 'pending',
+                PRIMARY KEY (meter, article)
             );
             CREATE INDEX IF NOT EXISTS grants_expiry ON grants (expires_at);
 
             -- §7.2. The row the metering path locks. It holds no reading
-            -- history — its only purpose is to exist so a transaction can be
-            -- taken against it — and it is purged on close with the rest.
-            CREATE TABLE IF NOT EXISTS payers (
-                wallet     TEXT PRIMARY KEY,
+            -- history; its only purpose is to exist so a transaction can be
+            -- taken against it, and it is purged on close with the rest.
+            CREATE TABLE IF NOT EXISTS meters (
+                meter      TEXT PRIMARY KEY,
                 updated_at INTEGER NOT NULL
             );
 
-            -- §10.4, 2026-09-17. A close the reader sent that the chain had
-            -- not confirmed when the server stopped waiting. It holds the
-            -- wallet and the close's signature, both already public on chain
-            -- in that transaction. It lets a later request finish the
-            -- erasure once the contract is gone, and it goes with the
-            -- erasure, or when the close is found not to have landed, or
-            -- after one session's life at the most.
+            -- §10.4 qualification 2. A close the server sent that the chain
+            -- had not confirmed when it stopped waiting. The meter and the
+            -- close's signature, both public in that transaction. It goes
+            -- with the erasure, or when the close is found not to have
+            -- landed, or after one session's life at the most.
             CREATE TABLE IF NOT EXISTS pending_closes (
-                wallet     TEXT PRIMARY KEY,
+                meter      TEXT PRIMARY KEY,
                 signature  TEXT NOT NULL,
                 sent_at    INTEGER NOT NULL,
                 expires_at INTEGER NOT NULL
             );
 
-            -- §4.3 and §10.4 qualification 3. This one survives a close, and
-            -- the reason is published rather than assumed: the faucet's mint
-            -- is an on-chain transaction naming that account forever, so the
-            -- row duplicates a public fact and could be replaced by a chain
-            -- query. Without it, close-and-refaucet is a loop.
+            -- §4.3 and §10.4 qualification 4. This one survives a close, and
+            -- the reason is published rather than assumed: the faucet's
+            -- transfer is an on-chain transaction naming that address
+            -- forever, so the row duplicates a public fact. Without it,
+            -- close-and-refaucet is a loop.
             CREATE TABLE IF NOT EXISTS faucet_ledger (
-                wallet     TEXT PRIMARY KEY,
+                address    TEXT PRIMARY KEY,
                 granted_at INTEGER NOT NULL,
                 signature  TEXT
             );
 
-            -- §10.4 qualification 5. Counts, not joins: a fact about the
+            -- §10.4's aggregates. Counts, not joins: a fact about the
             -- article. The count must not need the row, which is why it is
             -- incremented here and never derived from `grants`.
             CREATE TABLE IF NOT EXISTS article_purchases (
@@ -185,28 +269,13 @@ final class Database
                 purchases INTEGER NOT NULL DEFAULT 0
             );
         SQL);
-
-        self::addColumn($pdo, 'signin_nonces', 'input', "TEXT NOT NULL DEFAULT '{}'");
-        // §7.3, 2026-09-17: the article is served before its charge confirms,
-        // so a grant carries what became of the charge. `confirmed` stays and
-        // is written alongside it — true exactly when this says `confirmed`.
-        self::addColumn($pdo, 'grants', 'charge', "TEXT NOT NULL DEFAULT 'confirmed'");
     }
 
-    /**
-     * \`CREATE TABLE IF NOT EXISTS\` does nothing to a table that already
-     * exists, so a column added after someone has run the site is invisible to
-     * it. This is the whole migration story the demo needs: no versions table,
-     * no down migrations, just the columns that arrived late.
-     */
-    private static function addColumn(PDO $pdo, string $table, string $column, string $definition): void
+    private static function hasColumn(PDO $pdo, string $table, string $column): bool
     {
         $stmt = $pdo->prepare('SELECT 1 FROM pragma_table_info(?) WHERE name = ?');
         $stmt->execute([$table, $column]);
-        if ($stmt->fetch() !== false) {
-            return;
-        }
 
-        $pdo->exec("ALTER TABLE {$table} ADD COLUMN {$column} {$definition}");
+        return $stmt->fetch() !== false;
     }
 }

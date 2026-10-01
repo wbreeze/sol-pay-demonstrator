@@ -7,7 +7,7 @@ declare(strict_types=1);
  * `*Test.php`, and this is a script `proc_open` runs in its own process.
  *
  *   php one-meter-at-a-time-worker.php \
- *       <db> <wallet> <article> <barrier-dir> <workers> <hold_us> locked|unlocked
+ *       <db> <meter> <article> <barrier-dir> <workers> <hold_us> locked|unlocked
  *
  * It prints one word: `metered` if it did the work, `granted` if it found the
  * work already done. The caller counts the words.
@@ -37,18 +37,18 @@ require dirname(__DIR__, 2).'/vendor/autoload.php';
 use Newsprint\Store\Database;
 use Newsprint\Store\Store;
 
-[, $db, $wallet, $article, $barrier, $workers, $holdUs, $mode] = $argv;
+[, $db, $meter, $article, $barrier, $workers, $holdUs, $mode] = $argv;
 
 $store = new Store(Database::open($db), static fn (): int => time());
 
-$work = static function () use ($store, $wallet, $article, $holdUs): string {
-    if ($store->liveGrant($wallet, $article) !== null) {
+$work = static function () use ($store, $meter, $article, $holdUs): string {
+    if ($store->liveGrant($meter, $article) !== null) {
         return 'granted';
     }
 
     usleep((int) $holdUs);
 
-    $store->recordGrant($wallet, $article, 1_800);
+    $store->recordGrant($meter, $article, 1_800);
     $store->countPurchase($article);
 
     return 'metered';
@@ -63,4 +63,4 @@ while (count((array) glob($barrier.'/*')) < (int) $workers && microtime(true) < 
     usleep(200);
 }
 
-echo $mode === 'locked' ? $store->withPayerLock($wallet, $work) : $work();
+echo $mode === 'locked' ? $store->withMeterLock($meter, $work) : $work();

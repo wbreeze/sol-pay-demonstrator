@@ -26,18 +26,18 @@ whose point is not obvious does not get deleted for looking strange.
 | the wallet registry keyed by name rather than by feature | `/diagnostics/wallets` plus `usable(chain)` |
 | 350 KB downloaded inside the blockhash window | both libraries preload before the click |
 | a page spending an RPC call nothing on it needed | `var/profile-pages`, and a HAR read against written-down predictions |
-| a payer address that starts depending on the site *account* | `tests/Chain/RequestReadTest.php` — derive the pair both ways, require the same strings |
-| a pre-send account reading shown on a screen that reports a charge | `tests/Metering/MeterResultTest.php` — the sending factories must have nowhere to put a `PayerState` |
+| a meter address that starts depending on the site *account* | `tests/Chain/RequestReadTest.php` — the meter's two addresses come from the session and setup alone |
+| a pre-send account reading shown on a screen that reports a charge | `tests/Metering/MeterResultTest.php` — the sending factories must have nowhere to put a `MeterState` |
 | a markdown syntax the dialect cannot render | `tests/Content/MarkdownTest.php`, whose third part is the one that matters: a syntax on *neither* list was invisible, which is exactly what a missing extension is |
 | a `status` nobody recognises publishing a draft | `tests/Content/BuildContentTest.php` — the build refuses anything but `draft` or `published` |
 | a published date that has stopped being true | `bin/content-dates`, with `--require-git` in CI so a green result cannot mean "no history to check" |
-| a refactor that moves the page while the suite stays green | `bin/render-diff`, 88 fixtures rendered from this tree and from a ref |
+| a refactor that moves the page while the suite stays green | `bin/render-diff`, its fixtures rendered from this tree and from a ref |
 | a prerendered page charging for an article nobody opened | `PrerenderTest` and `MeterMiddlewareTest` — two checks at opposite ends of one request |
 | a session cookie travelling with another site's POST | `SessionCookieTest`, which pins `SameSite=Lax` |
 | an expiry that hides a row nobody deletes | `ChargeSweepsTest` for the charge-time sweep, `SweepScriptTest` for the scheduled one |
 | a GET route that can reach a `Meter` | `tests/Support/RouteTest.php`, which reads what each route's handler closed over rather than the names a textual check happens to know |
 | a second confirmation schedule anywhere | `ConfirmScheduleTest`, which asserts that only `Submitter` calls `signatureStatuses` |
-| a delegate another site's `approve` replaced, reading as present | `tests/Chain/PayerStateTest.php` and `DelegateWiringTest` — the library's `delegate_present` cannot answer it, so the comparison is the site's |
+| a meter renewed to another device's key, still charged from this one | `tests/Chain/RequestReadTest.php` for the read that ends the session, `MeterStateTest` for what counts as holding the meter; `Meter` asks again inside the lock |
 | a page title and its heading drifting apart | `tests/Support/PageTitleTest.php`, for the two pages where one phrase is written twice |
 | a failure report carrying nothing about the failure | `tests/Support/FailureReportTest.php` — the challenge is recorded *before* the wallet call, because the call is what throws |
 | devnet reset, or the program redeployed elsewhere | `bin/devnet-canary`, daily |

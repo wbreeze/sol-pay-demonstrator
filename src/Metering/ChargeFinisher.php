@@ -55,9 +55,9 @@ final class ChargeFinisher
      *                                                                             `outcome` is the chain's answer when
      *                                                                             this call asked for one
      */
-    public function finish(string $wallet, string $article, callable $ask): ?array
+    public function finish(string $meter, string $article, callable $ask): ?array
     {
-        $grant = $this->store->liveGrant($wallet, $article);
+        $grant = $this->store->liveGrant($meter, $article);
         if ($grant === null) {
             return null;
         }
@@ -83,10 +83,10 @@ final class ChargeFinisher
                 : ChargeState::Pending,
         };
 
-        if ($charge !== ChargeState::Pending && !$this->store->settleCharge($wallet, $article, $signature, $charge)) {
+        if ($charge !== ChargeState::Pending && !$this->store->settleCharge($meter, $article, $signature, $charge)) {
             // Somebody else wrote first, or a newer charge replaced the grant.
             // Report the row, which is what the next request will see too.
-            $now = $this->store->liveGrant($wallet, $article);
+            $now = $this->store->liveGrant($meter, $article);
             if ($now === null) {
                 return null;
             }

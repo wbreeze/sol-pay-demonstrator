@@ -10,9 +10,9 @@ use Newsprint\Support\Config;
 use Newsprint\Support\Inspector;
 use PHPUnit\Framework\TestCase;
 use Newsprint\Metering\MeterResult;
-use Newsprint\Chain\PayerState;
+use Newsprint\Chain\MeterState;
 use SolPay\Core\AccountMeta;
-use SolPay\Core\Contract;
+use SolPay\Core\Meter;
 use SolPay\Core\TokenAccount;
 use SolPay\Core\Instruction;
 use SolPay\Core\Site;
@@ -32,7 +32,7 @@ final class InspectorTest extends TestCase
         return new Inspector(Config::load(dirname(__DIR__, 2)));
     }
 
-    private function state(int $pagePrice = 10_000, int $threshold = 100_000, int $minLimit = 500_000): SiteState
+    private function state(int $itemPrice = 10_000, int $threshold = 100_000, int $minLimit = 500_000): SiteState
     {
         return new SiteState(
             self::SITE,
@@ -40,7 +40,7 @@ final class InspectorTest extends TestCase
                 authority: '163aJWGmry7Q2gWjtxmTbdC7NGFc7FecSN1gfpNUgRt',
                 mint: 'MintI1111111111111111111111111111111111111',
                 treasury: 'TrSy11111111111111111111111111111111111111',
-                pagePrice: $pagePrice,
+                itemPrice: $itemPrice,
                 collectionThreshold: $threshold,
                 minLimit: $minLimit,
                 bump: 254,
@@ -73,7 +73,7 @@ final class InspectorTest extends TestCase
 
         // §6.2's scaling error — 50 becoming 50,000,000 — is invisible until
         // the two forms sit side by side, so neither is optional.
-        self::assertSame('0.01 DEMO  (10000 base units)', $this->row($sections, 'Site account, decoded', 'page price'));
+        self::assertSame('0.01 DEMO  (10000 base units)', $this->row($sections, 'Site account, decoded', 'item price'));
         self::assertSame('0.1 DEMO  (100000 base units)  — 10 views', $this->row($sections, 'Site account, decoded', 'collection threshold'));
         self::assertSame('0.5 DEMO  (500000 base units)  — 50 views', $this->row($sections, 'Site account, decoded', 'minimum limit'));
     }
@@ -90,11 +90,11 @@ final class InspectorTest extends TestCase
     {
         // config/site.php says 10_000; this site was initialised at a
         // different price and initialize_site runs once.
-        $sections = $this->inspector()->sections($this->state(pagePrice: 20_000));
+        $sections = $this->inspector()->sections($this->state(itemPrice: 20_000));
 
         self::assertSame(
             'config says 10000, the chain says 20000',
-            $this->row($sections, 'Configuration drift', 'page price'),
+            $this->row($sections, 'Configuration drift', 'item price'),
         );
     }
 
@@ -214,9 +214,9 @@ final class InspectorTest extends TestCase
      * short name a section uses resolves to a row in the table. A panel that
      * satisfied only the first would be a panel of names nobody can look up.
      *
-     * The fixture has to be the crowded case — a payer and a transaction —
+     * The fixture has to be the crowded case — a meter and a transaction —
      * because the deduplication is the point: that view shows the authority,
-     * the treasury and the contract three times each.
+     * the treasury and the meter more than once each.
      */
     public function testEveryShortNameUsedIsDefinedExactlyOnce(): void
     {
@@ -271,7 +271,7 @@ final class InspectorTest extends TestCase
         );
         self::assertStringNotContainsString(':', (string) $names[$stranger]['note'], 'a colon with nothing after it');
 
-        foreach ([Alias::SITE, Alias::AUTHORITY, Alias::MINT, Alias::PAYER] as $role) {
+        foreach ([Alias::SITE, Alias::AUTHORITY, Alias::MINT, Alias::METER] as $role) {
             self::assertStringStartsNotWith($role, $names[$stranger]['alias']);
         }
 
@@ -307,7 +307,7 @@ final class InspectorTest extends TestCase
      */
     public function testEveryLineUnderAValueOpensWithWhatTheValueIs(): void
     {
-        $names = $this->names($this->inspector()->sections($this->state(), null, $this->payer(), $this->metered()));
+        $names = $this->names($this->inspector()->sections($this->state(), null, $this->meter(), $this->metered()));
         self::assertGreaterThan(6, count($names), 'a table this small is not the crowded case');
 
         foreach ($names as $value => $name) {
@@ -394,20 +394,43 @@ final class InspectorTest extends TestCase
         self::fail("no section headed {$heading}");
     }
 
-    /** A reader with a contract, so the crowded panel is the one under test. */
-    private function payer(): PayerState
+    /**
+     * The meter's own rows (SPEC §9.1's new names): the key it answers to,
+     * the fund it draws on and the fund's token account, each under its
+     * role's prefix, and preflight asking about the expiry before the limit.
+     */
+    public function testTheMeterIsShownWithItsKeyItsFundAndItsExpiry(): void
+    {
+        $read = $this->meter(expiry: 1_700_000_000);
+        self::assertNotNull($read->meter);
+        $sections = $this->inspector()->sections($this->state(), null, $read);
+        $names = $this->names($sections);
+
+        self::assertStringStartsWith(Alias::METER, $names[$read->meterAddress]['alias']);
+        self::assertStringStartsWith(Alias::FUND, $names[$read->fund]['alias']);
+        self::assertStringStartsWith(Alias::FUND_TOKEN_ACCOUNT, $names[$read->fundTokenAccount]['alias']);
+        self::assertStringStartsWith(Alias::BROWSER_KEY, $names[$read->meter->key]['alias']);
+        self::assertStringContainsString('["meter", '.Alias::for(Alias::SITE, self::SITE).', '.Alias::for(Alias::FUND, $read->fund).']', (string) $names[$read->meterAddress]['note']);
+
+        self::assertSame('2023-11-14 22:13 UTC — past', $this->row($sections, 'You, on chain', 'expiry'));
+        self::assertStringStartsWith('no — Expired', (string) $this->row($sections, 'Preflight, for this request', 'can_meter'));
+    }
+
+    /** A browser holding a meter, so the crowded panel is the one under test. */
+    private function meter(int $expiry = 4_000_000_000): MeterState
     {
         $site = $this->state()->site;
-        $wallet = 'BFT5EZLV7eWhwX4jjRP7JJDuJYoCQRmvmzuDUBbvSMqR';
-        $contract = 'Fgm6costwpmn4d1CTqdM5su8jBptdwnW134cNoFixgqs';
+        $meter = 'Fgm6costwpmn4d1CTqdM5su8jBptdwnW134cNoFixgqs';
+        $fund = 'BFT5EZLV7eWhwX4jjRP7JJDuJYoCQRmvmzuDUBbvSMqR';
         $token = '3KDoatBW3VwL5tyKLnCrWreKSsAXEhymyCUpei6eLd7v';
+        $key = '9yJyc2v4mA2PZFDPZJvHM1Hx2iV6cp5r38jSxShNNhzF';
 
-        return new PayerState(
-            $wallet,
-            $contract,
+        return new MeterState(
+            $meter,
+            $fund,
             $token,
-            new Contract(self::SITE, $wallet, 500_000, 420_000, 280_000, 255),
-            new TokenAccount($site->mint, $wallet, 210_000, $contract, 180_000),
+            new Meter(self::SITE, $fund, $key, $expiry, 500_000, 420_000, 280_000, 255),
+            new TokenAccount($site->mint, $fund, 210_000, null, 0),
             $site,
             6,
         );
@@ -448,7 +471,7 @@ final class InspectorTest extends TestCase
         // place without failing anything.
         $site = $this->state()->site;
         $state = new SiteState(self::SITE, $site, new TokenAccount($site->mint, $site->authority, 4_200_000, null, 0), 6);
-        $sections = $this->inspector()->sections($state, null, $this->payer(), $this->metered());
+        $sections = $this->inspector()->sections($state, null, $this->meter(), $this->metered());
 
         self::assertSame([
             'The values, in full',
@@ -464,7 +487,7 @@ final class InspectorTest extends TestCase
     /** The drift alarm sits with the account it disagrees with. */
     public function testDriftIsShownBesideTheSiteAccount(): void
     {
-        $headings = array_column($this->inspector()->sections($this->state(pagePrice: 20_000)), 'heading');
+        $headings = array_column($this->inspector()->sections($this->state(itemPrice: 20_000)), 'heading');
 
         self::assertSame(
             array_search('Site account, decoded', $headings, true) - 1,
@@ -481,10 +504,10 @@ final class InspectorTest extends TestCase
 
     /**
      * Serve first, confirm afterward (§7.3, 2026-09-17), as the panel tells
-     * it. The request that sent the charge marks its reading of the reader's
+     * it. The request that sent the charge marks its reading of the meter's
      * accounts as taken before the charge confirmed, and its instructions
      * with the signature they belong to. The follow-up says its instructions
-     * were built elsewhere — not by a browser — and marks where they go.
+     * were built elsewhere, and marks where they go.
      */
     public function testThePanelSaysWhenItsReadingPredatesTheCharge(): void
     {
@@ -494,13 +517,13 @@ final class InspectorTest extends TestCase
             new Instruction($program->id, [new AccountMeta(self::SITE, false, false)], (string) hex2bin('1e8e96a17c2e1d7e')),
         ]);
 
-        $sent = $this->inspector()->sections($this->state(), null, $this->payer(), $ahead);
+        $sent = $this->inspector()->sections($this->state(), null, $this->meter(), $ahead);
         self::assertStringStartsWith('before the charge for this article confirmed', (string) $this->row($sent, 'You, on chain', 'read'));
         self::assertSame($sig, $this->section($sent, 'The last transaction')['instructions'] ?? null);
         self::assertStringStartsWith('sent — ', (string) $this->row($sent, 'The last transaction', 'outcome'));
 
         // The same reader after the answer: no such row.
-        $after = $this->inspector()->sections($this->state(), null, $this->payer(), MeterResult::confirmedLater($sig, true));
+        $after = $this->inspector()->sections($this->state(), null, $this->meter(), MeterResult::confirmedLater($sig, true));
         self::assertNull($this->row($after, 'You, on chain', 'read'));
 
         $later = $this->section($after, 'The last transaction');
@@ -509,24 +532,25 @@ final class InspectorTest extends TestCase
         self::assertStringStartsWith('built by the request that sent this charge', (string) $this->row($after, 'The last transaction', 'instructions'));
 
         // Unread settle: said as unread, not as "accrues only".
-        $unread = $this->inspector()->sections($this->state(), null, $this->payer(), MeterResult::confirmedLater($sig, null));
+        $unread = $this->inspector()->sections($this->state(), null, $this->meter(), MeterResult::confirmedLater($sig, null));
         foreach ($this->section($unread, 'The last transaction')['rows'] as $row) {
-            if ($row[0] === 'page views') {
+            if ($row[0] === 'items') {
                 self::assertSame('the event says which', $row[2] ?? null);
             }
         }
 
         // A charge that failed after serving says so, rather than pointing at
         // an event a failed transaction never emitted.
-        $absorbed = $this->inspector()->sections($this->state(), null, $this->payer(), MeterResult::absorbed($sig, null, 'transaction failed on chain'));
+        $absorbed = $this->inspector()->sections($this->state(), null, $this->meter(), MeterResult::absorbed($sig, null, 'transaction failed on chain'));
         foreach ($this->section($absorbed, 'The last transaction')['rows'] as $row) {
-            if ($row[0] === 'page views') {
+            if ($row[0] === 'items') {
                 self::assertSame('failed, so nothing moved', $row[2] ?? null);
             }
         }
 
-        // And a browser's transaction still says a browser built it.
-        $browser = $this->inspector()->sections($this->state(), null, $this->payer(), MeterResult::metered($sig, 0, false));
-        self::assertStringStartsWith('built in your browser', (string) $this->row($browser, 'The last transaction', 'instructions'));
+        // And a transaction whose instructions this request does not hold, and
+        // which no earlier request reported, says only that much.
+        $elsewhere = $this->inspector()->sections($this->state(), null, $this->meter(), MeterResult::metered($sig, 0, false));
+        self::assertStringStartsWith('not built by this request', (string) $this->row($elsewhere, 'The last transaction', 'instructions'));
     }
 }

@@ -2,19 +2,16 @@
 /**
  * The meter, on the article, where the decision to spend is actually made.
  *
- * This is `set_meter` from sol-pay's state diagram — "inform cost per fetch,
- * prompt limit amount, enforce minimum on limit amount" — and `authorize`
- * behind it. There is no sign-in screen: the diagram has no such node, and a
- * page whose only purpose is to collect an identity reads as identification
- * for tracking. Identifying happens here, one click before the money, where a
- * reader can see exactly what it is for.
+ * This is `set_meter` from sol-pay's state diagram for a browser with no
+ * meter, and `manage_meter`'s short form for one whose meter cannot take the
+ * next charge. There is no sign-in screen (SPEC §5.6): identifying happens
+ * here, beside the money.
  *
- * Two clicks and two wallet dialogs the first time, and the split is not
- * cosmetic. Each wallet call has to originate from a real user gesture, and
- * after the first `await` the second call is no longer inside one — Android
- * Chrome blocks the intent navigation on that basis (§6.3). One dialog per
- * click is also the honest description of what is happening: one proves who
- * you are, one authorizes a spending limit.
+ * **Setting a meter is being rebuilt for the fund design.** The browser key
+ * and its proof (SPEC §5) and the setup scan (SPEC §6.3) replace the wallet
+ * in the page, and until they land this panel says so rather than offering a
+ * control that would not work. A browser that already holds a session still
+ * meters, blocks and fails here as it will afterwards.
  *
  * @var array<string, mixed> $meter
  * @var array<string, int|string> $site
@@ -24,14 +21,10 @@ use Newsprint\Support\View;
 use SolPay\Core\Units;
 
 $symbol = View::e((string) $meter['symbol']);
-$contract = $meter['contract'];
+$onChain = $meter['meter'];
 ?>
 <section class="gate meter" data-meter
-         data-stage="<?= View::e((string) $meter['stage']) ?>"
-         data-chain="<?= View::e((string) $meter['chain']) ?>"
-         data-payer="<?= View::e((string) ($meter['wallet'] ?? '')) ?>"
-         data-program="<?= View::e((string) $meter['program']) ?>"
-         data-token-program="<?= View::e((string) $meter['token_program']) ?>">
+         data-stage="<?= View::e((string) $meter['stage']) ?>">
 
 <?php if (!$meter['provisioned']): ?>
     <h2>The rest is metered</h2>
@@ -44,167 +37,36 @@ $contract = $meter['contract'];
     </p>
 
 <?php elseif ($meter['stage'] === 'anonymous'): ?>
-    <?php /* The diagram's `identified` choice, and its "viewer not identified"
-             branch. One click, one wallet dialog, and no page. */ ?>
     <h2>The rest is metered</h2>
     <p>
         Reading on costs <?= View::e((string) $site['page_price_demo']) ?> <?= $symbol ?>
-        an article, drawn from a limit you set yourself and can close at any time.
+        an article, drawn from a fund you control, under a limit and an expiry
+        you set yourself.
     </p>
-    <p>
-        Your wallet identifies you to this site and to nothing else. It is the
-        only thing here that knows who you are, and
-        <a href="/privacy">what that gets you</a> is one address and a session id.
-    </p>
-    <p>
-        <button type="button" class="wallet" data-identify>Connect a wallet</button>
-    </p>
-    <div data-wallet-choices hidden></div>
-
-<?php elseif ($meter['stage'] === 'unfunded'): ?>
-    <?php /* §4.3. `approve_checked` against a token account that does not
-             exist fails at the runtime, and the reader would never learn why,
-             so the faucet is the branch before `set_meter` and not a screen
-             they have to go and find. */ ?>
-    <h2>You will need some <?= $symbol ?></h2>
-    <p>
-        <?= $symbol ?> is minted by this site, on devnet, and is worth nothing.
-        It exists so the meter has something real to move.
-    </p>
-    <p>
-        The faucet gives <?= View::e((string) $meter['faucet']['demo']) ?> <?= $symbol ?>
-        and <?= View::e((string) $meter['faucet']['sol']) ?> SOL, once per wallet.
-        The SOL is for the rent on your contract account and the fees; the site
-        pays for both, and this one does not go through your wallet.
-    </p>
-<?php if ($meter['faucet']['available']): ?>
-    <p><button type="button" class="wallet" data-faucet>Send me <?= View::e((string) $meter['faucet']['demo']) ?> <?= $symbol ?></button></p>
-<?php else: ?>
+<?php if ($meter['ended']): ?>
     <p class="pending">
-        This wallet has already had its one grant, and the balance is
-        <?= View::e((string) $meter['balance']) ?> <?= $symbol ?>. That is
-        §13.2's walkthrough rather than a fault — the faucet is stingy on
-        purpose so a depleted balance is reachable.
+        The meter this browser held has been closed, or renewed from another
+        device, which then holds it. This browser's session with it has ended.
     </p>
 <?php endif ?>
-
-<?php elseif ($meter['stage'] === 'set-meter'): ?>
-    <?php /* `set_meter`: inform cost per fetch, prompt limit, enforce the
-             minimum — all three before any wallet dialog opens. */ ?>
-    <h2>Set a limit</h2>
-    <p>
-        Each article costs <?= View::e((string) $site['page_price_demo']) ?> <?= $symbol ?>.
-        You authorize a ceiling; the site draws against it as you read, and
-        settles in batches rather than per article.
-    </p>
-    <p class="fine">
-        The limit is trust, not pacing: a site can draw straight to it whenever
-        it likes. Better to meet that fact here, where the money is fake.
-    </p>
-
-    <p class="fine">
-        Paying wallet <code><?= View::e(substr((string) $meter['wallet'], 0, 4).'…'.substr((string) $meter['wallet'], -4)) ?></code>
-        · balance <?= View::e((string) $meter['balance']) ?> <?= $symbol ?>
-    </p>
-
-    <label class="limit">
-        Limit
-        <input type="text" inputmode="decimal" data-limit
-               value="<?= View::e((string) $meter['limit_floor']) ?>"
-               size="8">
-        <?= $symbol ?>
-    </label>
-    <p class="fine">
-        The smallest limit you can set is
-        <?= View::e((string) $meter['limit_floor']) ?> <?= $symbol ?>.
-    </p>
-
-<?php /* A token account holds exactly one delegate. Authorizing here names
-         this site's contract, which takes away whatever permission is there
-         now — so a reader who has authorized another site is told before the
-         wallet dialog opens, not after that site's next collection fails. */ ?>
-<?php if (($meter['delegate'] ?? null) !== null && !$meter['delegate_is_ours']): ?>
     <p class="pending">
-        Your token account already names a delegate, and it is not this site:
-        <code><?= View::e(substr((string) $meter['delegate'], 0, 4).'…'.substr((string) $meter['delegate'], -4)) ?></code>.
-        An account holds one at a time, so authorizing here replaces it. The
-        site that set it will stop being able to collect, and will not find out
-        until it next tries.
-    </p>
-<?php endif ?>
-
-    <p>
-        <button type="button" class="wallet" data-authorize>Authorize</button>
+        The meter is being rebuilt. Setting one up from this page will return
+        shortly; until then the ledes are free to read.
     </p>
 
 <?php elseif ($meter['stage'] === 'failed'): ?>
-    <?php /* §8.2. `InsufficientFunds` is ambiguous by construction: SPL
-             reports a short balance and a short allowance identically and the
-             two need opposite responses, so the site reads the account rather
-             than guessing from the code. Both can be short at once, and then
-             both are shown in this order — a re-approval the balance cannot
-             cover fixes nothing. */ ?>
+    <?php /* §8.2. Under the fund design SPL's `InsufficientFunds` means one
+             thing: the fund holds less than the unpaid total. So the screen
+             can say how much, and that the answer is money. */ ?>
     <h2>The charge did not go through</h2>
 <?php $shortfall = $meter['result']?->shortfall; ?>
-<?php if ($shortfall !== null && $shortfall->balanceShort > 0): ?>
+<?php if ($shortfall !== null && $shortfall > 0): ?>
     <p>
-        Your balance is short by
-        <?= View::e(Units::fromBaseUnits($shortfall->balanceShort, (int) $meter['decimals'])) ?>
-        <?= $symbol ?>. On a real site this is where it would say "top up"; here
-        the faucet is the top-up, if this wallet has not already had its one grant.
+        Your fund is short by
+        <?= View::e(Units::fromBaseUnits($shortfall, (int) $meter['decimals'])) ?>
+        <?= $symbol ?> of what this settle would move. The fund holds
+        <?= View::e((string) $meter['balance']) ?> <?= $symbol ?>.
     </p>
-<?php if ($meter['faucet']['available']): ?>
-    <p><button type="button" class="wallet" data-faucet>Send me <?= View::e((string) $meter['faucet']['demo']) ?> <?= $symbol ?></button></p>
-<?php else: ?>
-    <?php /* **The one branch that could dead-end.** The faucet is spent, the
-             balance cannot cover the charge, and renewing raises a ceiling
-             that was never the problem — so without this there is nothing on
-             the screen to do next, which is half of §8's rule rather than all
-             of it. §8 says every branch leaving the happy path early is a
-             screen; a screen with no way onward is a nicer error page.
-
-             A link and not a button, deliberately. Closing is a wallet
-             transaction that forgives a residue, purges live grants and signs
-             the reader out, and §10.4 qualification 2 says that cost is
-             "stated on the close confirmation rather than discovered". The
-             four disclosures it requires live on the meter, above the button,
-             where a reader can still change their mind. Putting a one-click
-             close inside an error box would either drop them or reproduce
-             them, and neither is a small control. */ ?>
-    <p>
-        This wallet has had its one grant, so there is no top-up here. What is
-        left is <a href="/meter">the meter</a>: close the contract, and this
-        site forgets you. Closing forgives what you are carrying rather than
-        collecting it.
-    </p>
-<?php endif ?>
-<?php endif ?>
-<?php if ($shortfall !== null && $shortfall->allowanceShort > 0): ?>
-    <p>
-        The amount you approved no longer covers what is owed — short by
-        <?= View::e(Units::fromBaseUnits($shortfall->allowanceShort, (int) $meter['decimals'])) ?>
-        <?= $symbol ?>. Renewing re-approves.
-    </p>
-    <p><a href="/meter">Renew the meter</a></p>
-<?php endif ?>
-<?php /* Not `$shortfall->delegatePresent`, which is true of any delegate: a
-         token account holds one, and another site's `approve` installs its own
-         over this site's. The result carries the comparison instead. */ ?>
-<?php if ($meter['result']?->delegateIsContract === false): ?>
-<?php if (($meter['delegate'] ?? null) === null): ?>
-    <p>
-        This site is no longer a delegate on your token account — the approval
-        was revoked, or SPL cleared it when the approved amount reached zero.
-        Renewing re-approves.
-    </p>
-<?php else: ?>
-    <p>
-        Another site's approval has replaced this one on your token account, so
-        the transfer was refused. Renewing re-approves here, and takes away
-        the other site's permission.
-    </p>
-<?php endif ?>
-    <p><a href="/meter">Renew the meter</a></p>
 <?php endif ?>
 <?php $said = Causes::describe($meter['result']?->cause); ?>
 <?php if ($said !== null): ?>
@@ -218,73 +80,49 @@ $contract = $meter['contract'];
         on the explorer.
     </p>
 
+<?php elseif ($meter['stage'] === 'expired'): ?>
+    <h2>Your meter has expired</h2>
+    <p>
+        It expired at <?= View::e((string) $onChain['expiry']) ?>, having used
+        <?= View::e((string) $onChain['used']) ?> of
+        <?= View::e((string) $onChain['limit']) ?> <?= $symbol ?>.
+        Nothing can be metered on it until it is renewed.
+    </p>
+    <p><a href="/meter">The meter</a></p>
+
 <?php elseif ($meter['stage'] === 'limit'): ?>
     <h2>You have reached your limit</h2>
     <p>
-        Used <?= View::e((string) $contract['used']) ?> of
-        <?= View::e((string) $contract['limit']) ?> <?= $symbol ?>,
-        of which <?= View::e((string) $contract['paid']) ?> has settled and
-        <?= View::e((string) $contract['unpaid']) ?> has not.
+        Used <?= View::e((string) $onChain['used']) ?> of
+        <?= View::e((string) $onChain['limit']) ?> <?= $symbol ?>,
+        of which <?= View::e((string) $onChain['paid']) ?> has settled and
+        <?= View::e((string) $onChain['unpaid']) ?> has not.
     </p>
-    <p>
-        <a href="/meter">Raise the limit, or close it</a>. Closing forgives the
-        unpaid residue and erases what this site holds about you.
-    </p>
+    <p><a href="/meter">The meter</a></p>
 
 <?php else: ?>
     <h2>The meter is running</h2>
     <p>
-        Limit <?= View::e((string) $contract['limit']) ?> <?= $symbol ?>
-        · used <?= View::e((string) $contract['used']) ?>
-        · settled <?= View::e((string) $contract['paid']) ?>
-        · <?= View::e((string) $meter['views_remaining']) ?> views left.
+        Limit <?= View::e((string) $onChain['limit']) ?> <?= $symbol ?>
+        · used <?= View::e((string) $onChain['used']) ?>
+        · settled <?= View::e((string) $onChain['paid']) ?>
+        · <?= View::e((string) $meter['items_remaining']) ?> views left.
     </p>
     <?php /* This branch is the panel's fallback and nothing reaches it through
              the article (2026-09-11). `meter.php` renders only where the body
-             is withheld, and a reader with a contract who is not blocked gets
-             the body — so `metered` here needs a null `MeterResult`, which the
-             POST always sets and the GET only reaches with a grant. It used to
-             be the prefetch's branch, and it carried both the exit below and a
-             sentence saying the body was "not delivered yet: meter_and_settle
-             is the next rung", two rungs after that stopped being true. The
-             sentence is gone; the branch stays so that no stage can render
-             blank, which `TemplateRenderTest` checks. */ ?>
+             is withheld, and a reader whose meter is not blocked gets the
+             body — so `metered` here needs a null `MeterResult`, which the
+             POST always sets and the GET only reaches with a grant. The
+             branch stays so that no stage can render blank, which
+             `TemplateRenderTest` checks. */ ?>
 <?php endif ?>
 
-<?php /* §6 asks manage_meter to carry a permanent link from the meter widget,
-         not only at the limit — a reader who has authorized a site to draw
-         from their wallet should not have to exhaust something to find the
-         exit. It was written into the branch above, which nobody reaches, so
-         for months it was permanent in the way a locked fire door is.
-
-         Here it renders on **every stage that stores a wallet**, including the
-         three a stuck reader is actually in — `unfunded`, `set-meter`, and
-         `unreadable`, where the chain cannot be read and §10.4's promise is
-         the one thing that still works, because `POST /signout` never asks the
-         chain anything.
-
-         Two wordings, because one would be false somewhere: §6's case is about
-         a reader who *authorized*, and a reader without a contract has not.
-         Their claim is §10.4's instead — the site is holding an address — so
-         that is what the line says to them. Stages that offer their own
-         `/meter` link in context keep it; this is the one that is always in
-         the same place. */ ?>
-<?php if ($meter['wallet'] !== null): ?>
+<?php /* §6 asks manage_meter to carry a permanent link from the meter, not
+         only at the limit. Here it renders on every stage that holds a
+         session, including `unreadable`, where the chain cannot be read. */ ?>
+<?php if ($onChain !== null || $meter['stage'] === 'unreadable'): ?>
     <p class="fine">
-<?php if ($contract !== null): ?>
-        <a href="/meter">The meter</a> — what you have spent, and the way out.
-<?php else: ?>
-        <a href="/meter">The meter</a> — what this site is holding for you, and
-        how to have it forgotten.
-<?php endif ?>
+        <a href="/meter">The meter</a> — what you have spent, and where it stands.
     </p>
 <?php endif ?>
-
-    <p class="pending" data-meter-status hidden></p>
 </section>
-
-<?php if ($meter['provisioned'] && in_array($meter['stage'], ['anonymous', 'unfunded', 'set-meter'], true)): ?>
-<?php /* §12.2: JavaScript where the wallet is, and nowhere else. Not loaded on
-         a page with nothing for it to do. */ ?>
-<script type="module" src="/assets/meter.js"></script>
-<?php endif ?>

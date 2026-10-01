@@ -4,7 +4,8 @@
 declare(strict_types=1);
 
 /**
- * SPEC §7.2's chain half: two simultaneous readers, one `meter_and_settle`.
+ * SPEC §7.2's chain half: two overlapping requests on one meter, one
+ * `meter_and_settle`.
  *
  *   bin/two-readers            # pick an article from a list
  *   bin/two-readers <slug>     # go straight at one
@@ -16,7 +17,7 @@ declare(strict_types=1);
  * protects — building and sending `meter_and_settle` — really does happen once
  * when two requests arrive together through the whole stack.
  *
- * **It spends.** One page view at `page_price`, and a devnet fee. If the
+ * **It spends.** One page view at the item price, and a devnet fee. If the
  * charge crosses the collection threshold it settles, which moves real DEMO to
  * the treasury and is the better observation. Two, if the defect is present,
  * which is the point.
@@ -33,7 +34,8 @@ declare(strict_types=1);
  * out unauthenticated, metered nothing, and looked like a pass.
  */
 
-use Newsprint\Chain\PayerReader;
+use Newsprint\Auth\Binding;
+use Newsprint\Chain\MeterReader;
 use Newsprint\Chain\Rpc;
 use Newsprint\Chain\RpcException;
 use Newsprint\Chain\SiteReader;
@@ -206,39 +208,43 @@ step('2. whose meter?');
 $pdo = Database::open($config->dbPath());
 $store = new Store($pdo, static fn (): int => time());
 
-/** @var list<array{id: string, wallet: string}> $sessions */
+/** @var list<array{id: string, binding: Binding}> $sessions */
 $sessions = [];
 $stmt = $pdo->prepare(
-    'SELECT id, wallet FROM sessions WHERE expires_at > ? ORDER BY created_at DESC'
+    'SELECT id, meter, fund, key FROM sessions WHERE expires_at > ? ORDER BY created_at DESC'
 );
 $stmt->execute([time()]);
 foreach ($stmt->fetchAll() as $row) {
-    $sessions[] = ['id' => (string) $row['id'], 'wallet' => (string) $row['wallet']];
+    $sessions[] = [
+        'id' => (string) $row['id'],
+        'binding' => new Binding((string) $row['meter'], (string) $row['fund'], (string) $row['key']),
+    ];
 }
 
 $sessions === [] && bad(
     "no live session in the store.\n"
-    ."  Sign in at {$base} with the payer's wallet, then run this again."
+    ."  Bind one at {$base} from a browser that holds a meter, then run this again."
 );
 
-$byWallet = [];
+$byMeter = [];
 foreach ($sessions as $s) {
-    $byWallet[$s['wallet']] ??= $s['id'];
+    $byMeter[$s['binding']->meter] ??= $s;
 }
 
-if (count($byWallet) === 1) {
-    $wallet = array_key_first($byWallet);
+if (count($byMeter) === 1) {
+    $chosen = $byMeter[array_key_first($byMeter)];
 } else {
-    say('   more than one wallet is signed in:');
-    $wallets = array_keys($byWallet);
-    foreach ($wallets as $i => $w) {
-        say(sprintf('     %d) %s', $i + 1, $w));
+    say('   more than one meter has a session:');
+    $meters = array_keys($byMeter);
+    foreach ($meters as $i => $m) {
+        say(sprintf('     %d) %s', $i + 1, $m));
     }
     $pick = (int) ask('   which one', '1');
-    $wallet = $wallets[$pick - 1] ?? bad('that was not one of the choices.');
+    $chosen = $byMeter[$meters[$pick - 1] ?? bad('that was not one of the choices.')];
 }
-$session = $byWallet[$wallet];
-say("   wallet  {$wallet}");
+$binding = $chosen['binding'];
+$session = $chosen['id'];
+say("   meter   {$binding->meter}");
 say('   session '.substr($session, 0, 12).'…  (taken from the store, not from a browser)');
 
 // ---- 3. the chain, before ------------------------------------------------
@@ -248,25 +254,25 @@ step('3. what the chain says now');
 try {
     $state = (new SiteReader($config, $rpc))->read();
     $state instanceof SiteState || bad('the site account did not read back.');
-    $payer = (new PayerReader($config, $rpc))->read($wallet, $state);
+    $read = (new MeterReader($config, $rpc))->read($binding, $state);
 } catch (RpcException $e) {
     bad('the endpoint did not answer: '.$e->getMessage());
 }
 
-$payer->hasContract() || bad(
-    "this wallet has no open contract, so there is nothing to meter.\n"
-    ."  Open one at {$base}/meter first."
+$read->binds($binding) || bad(
+    "this meter is closed, or now answers to another browser's key, so the\n"
+    ."  session would end at its first read and nothing would meter."
 );
 
-$contract = $payer->contract;
-$contract !== null || bad('the contract account did not decode.');
-$pagePrice = $state->site->pagePrice;
-$remaining = $payer->viewsRemaining() ?? 0;
+$meter = $read->meter;
+$meter !== null || bad('the meter account did not decode.');
+$itemPrice = $state->site->itemPrice;
+$remaining = $read->itemsRemaining() ?? 0;
 
-say('   used      '.$amount($contract->used).sprintf('   (%d base units)', $contract->used));
-say('   limit     '.$amount($contract->limit));
-say('   unpaid    '.$amount($contract->unpaid()));
-say('   remaining '.$remaining.' views at '.$amount($pagePrice).' each');
+say('   used      '.$amount($meter->used).sprintf('   (%d base units)', $meter->used));
+say('   limit     '.$amount($meter->limit));
+say('   unpaid    '.$amount($meter->unpaid()));
+say('   remaining '.$remaining.' views at '.$amount($itemPrice).' each');
 
 // Two views of headroom, not one. At exactly one, a second charge would be
 // refused *by the program* rather than by the lock, and the run would look
@@ -275,13 +281,13 @@ $remaining >= 2 || bad(
     "only {$remaining} view(s) of headroom left.\n"
     ."  A double charge has to be *possible* for its absence to mean anything —\n"
     ."  at one view the program would refuse the second charge for its own reasons.\n"
-    ."  Renew the contract at {$base}/meter and run this again."
+    ."  Renew the meter and run this again."
 );
 
-if ($blocked = $payer->blocked(2)) {
+if ($blocked = $read->blocked(time(), 2)) {
     bad(
         "the preflight refuses two charges: {$blocked}\n"
-        .'  Same reason as above — top up, or raise the limit, then run this again.'
+        .'  Same reason as above — renew, or raise the limit, then run this again.'
     );
 }
 
@@ -301,7 +307,7 @@ if ($slug === '') {
     $metered === [] && bad('no metered articles are built.');
 
     foreach ($metered as $i => $piece) {
-        $held = $store->liveGrant($wallet, $piece->slug) !== null;
+        $held = $store->liveGrant($binding->meter, $piece->slug) !== null;
         say(sprintf('     %d) %-28s %s', $i + 1, $piece->slug, $held ? '(has a live grant)' : ''));
     }
     $pick = (int) ask('   which one', '1');
@@ -317,10 +323,10 @@ say("   article {$slug}");
 // A live grant short-circuits both requests: neither meters, and the run
 // proves nothing. This is the single most likely way to get a confident wrong
 // answer, so it is checked and cleared rather than mentioned.
-if ($store->liveGrant($wallet, $slug) !== null) {
-    say('   this wallet already holds a live grant for it, so neither request would meter.');
+if ($store->liveGrant($binding->meter, $slug) !== null) {
+    say('   this meter already holds a live grant for it, so neither request would meter.');
     confirm('   delete that grant and continue?') || bad('stopped. Nothing was charged.');
-    $pdo->prepare('DELETE FROM grants WHERE wallet = ? AND article = ?')->execute([$wallet, $slug]);
+    $pdo->prepare('DELETE FROM grants WHERE meter = ? AND article = ?')->execute([$binding->meter, $slug]);
     say('   grant cleared.');
 }
 
@@ -410,13 +416,13 @@ $purchasesAfter = $purchases();
 $purchaseDelta = $purchasesAfter - $purchasesBefore;
 
 $signature = null;
-$row = $pdo->prepare('SELECT signature, confirmed FROM grants WHERE wallet = ? AND article = ?');
-$row->execute([$wallet, $slug]);
+$row = $pdo->prepare('SELECT signature FROM grants WHERE meter = ? AND article = ?');
+$row->execute([$binding->meter, $slug]);
 if ($found = $row->fetch()) {
     $signature = $found['signature'] === null ? null : (string) $found['signature'];
 }
 
-$reader = new PayerReader($config, $rpc);
+$reader = new MeterReader($config, $rpc);
 $deadline = time() + 20;
 $views = 0;
 $usedDelta = 0;
@@ -424,13 +430,13 @@ $after = null;
 
 while (true) {
     try {
-        $after = $reader->read($wallet, $state);
+        $after = $reader->read($binding, $state);
     } catch (RpcException $e) {
         bad('the endpoint stopped answering before the after-reading: '.$e->getMessage());
     }
 
-    $usedDelta = ($after->contract?->used ?? 0) - $contract->used;
-    $views = $pagePrice > 0 ? intdiv($usedDelta, $pagePrice) : 0;
+    $usedDelta = ($after->meter?->used ?? 0) - $meter->used;
+    $views = $itemPrice > 0 ? intdiv($usedDelta, $itemPrice) : 0;
 
     if ($views >= max(1, $purchaseDelta) || time() >= $deadline) {
         break;
@@ -480,7 +486,7 @@ if ($views === 0) {
 }
 
 if ($views === 1 && $purchaseDelta === 1 && $charges < 2) {
-    say("\033[32m  PASS\033[0m — two simultaneous readers, one meter_and_settle.");
+    say("\033[32m  PASS\033[0m — two overlapping requests, one meter_and_settle.");
     say('  One request metered; the other was served from the grant it recorded.');
     say('');
     say('  For the results table in claude/manual-two-readers-one-meter.md:');
@@ -489,8 +495,8 @@ if ($views === 1 && $purchaseDelta === 1 && $charges < 2) {
         date('Y-m-d'),
         $slug,
         $signature ?? '(none)',
-        Units::fromBaseUnits($contract->used, $decimals),
-        Units::fromBaseUnits($after?->contract?->used ?? 0, $decimals),
+        Units::fromBaseUnits($meter->used, $decimals),
+        Units::fromBaseUnits($after?->meter?->used ?? 0, $decimals),
     ));
     exit(0);
 }
@@ -500,7 +506,7 @@ say("  `used` moved by {$views} view(s); purchases moved by {$purchaseDelta}"
     .($timingOn ? "; {$charges} of 2 responses sent a transaction." : '.'));
 say('');
 say('  Note what the store does *not* show you: `grants` is keyed on');
-say('  (wallet, article) and recordGrant upserts, so it holds one row naming');
+say('  (meter, article) and recordGrant upserts, so it holds one row naming');
 say('  only the second signature. The first charge exists on chain and nowhere');
-say("  else — walk the contract's transactions to find it.");
+say("  else — walk the meter's transactions to find it.");
 exit(1);

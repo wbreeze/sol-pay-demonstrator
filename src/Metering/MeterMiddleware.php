@@ -99,58 +99,57 @@ final class MeterMiddleware implements MiddlewareInterface
         }
 
         $reads = ($this->reads)($request);
-        $wallet = $reads->wallet();
+        $binding = $reads->binding();
 
         // §7.5. Asked before anything is read, because a request that is not
-        // going to meter should not pay to find that out — `wallet()` comes
+        // going to meter should not pay to find that out — the binding comes
         // from the cookie and the store. The GET route asks the same question
         // for a different reason: to decide whether to send the shell.
-        if (!Decision::shouldMeter($piece, $wallet)) {
+        if (!Decision::shouldMeter($piece, $binding)) {
             return $handler->handle($request);
         }
 
-        // No reader, no charge. The lede is public and the panel will offer to
-        // identify — nothing here is an error.
-        if ($wallet === null) {
+        // No session, no charge. The lede is public and the panel says how a
+        // browser comes to hold a meter. Nothing here is an error.
+        if ($binding === null) {
             return $handler->handle($request);
         }
 
-        // One round trip, five accounts: the site's three and this reader's
-        // two (§12.4). The handler behind this middleware renders from the
-        // same object, so nothing below is a call the page would not have made
+        // One round trip, five accounts: the site's three and the meter's two
+        // (§6.2). The handler behind this middleware renders from the same
+        // object, so nothing below is a call the page would not have made
         // anyway.
         $state = $reads->site();
         if ($state === null) {
             return $handler->handle($request);
         }
 
-        // **`find_contract`, and it is a fork in the diagram rather than a
-        // metering outcome.** A reader with no contract is on their way to
-        // `set_meter`; there is nothing to meter and nothing to refuse. This
-        // used to be discovered *inside* `Meter`, which read the two accounts
-        // again to find it out and returned a result the panel then ignored —
-        // measured 2026-09-09 at a whole round trip on the screen where a
-        // reader is deciding whether to spend money.
-        if ($reads->payer()?->hasContract() !== true) {
+        // **The session check, and it is a fork in the diagram rather than a
+        // metering outcome** (§5.3, §6.2). A meter that is gone, or that
+        // names another browser's key, ended the session when `RequestRead`
+        // read it, and the reader is on their way to `set_meter`. A read that
+        // failed leaves no meter either, and there is nothing to charge.
+        if ($reads->meter() === null) {
             return $handler->handle($request);
         }
 
-        $result = ($this->meter)()->forArticle($wallet, $piece->slug, $state);
+        $result = ($this->meter)()->forArticle($binding, $piece->slug, $state);
 
-        // §7.2 puts the metering read inside the payer lock, so `Meter` has
+        // §7.2 puts the metering read inside the meter lock, so `Meter` has
         // looked at these two accounts more recently than this request did.
         // Which of the two answers is true afterwards depends on one thing:
-        if ($result->payer !== null) {
+        if ($result->state !== null) {
             // Nothing was sent, and the locked read is simply the better one.
             // A limit screen should state the arithmetic its refusal was made
-            // from rather than a reading taken moments earlier.
-            $reads->adopt($result->payer);
+            // from rather than a reading taken moments earlier. An unbound
+            // result ends the session here, through the same check.
+            $reads->adopt($result->state);
         } elseif ($result->sent() && !$result->awaiting()) {
             // A transaction went out and the chain has answered. §2's claim 7
             // says the numbers on the screen came from an account, so the
             // accounts are read again — this is the one re-read that is bought
             // on purpose.
-            $reads->invalidatePayer();
+            $reads->invalidateMeter();
         }
 
         // **And not while the charge is still out** (2026-09-17). An article

@@ -10,7 +10,7 @@ namespace Newsprint\Support;
  * Base58 is unreadable and, worse, *comparable-looking*: two addresses sharing
  * four leading characters read as the same address to a human eye scanning a
  * panel. So every address the site shows gets a role prefix and a nonsense
- * syllable — `CPDAcat`, `PAYRfig` — with the full base58 one click away and
+ * syllable — `MPDAcat`, `FPDAfig` — with the full base58 one click away and
  * always what gets copied.
  *
  * **The syllable is derived from the address, not assigned in order.** The same
@@ -20,19 +20,28 @@ namespace Newsprint\Support;
  * positional is a lie the first time the panel reorders.
  *
  * These are this site's invention and not a standard, which the inspector says
- * once, so nobody leaves thinking `CPDAcat` means anything to a wallet or an
+ * once, so nobody leaves thinking `MPDAcat` means anything to a wallet or an
  * explorer.
  */
 final class Alias
 {
     public const PROGRAM = 'PID';
     public const SITE = 'SPDA';
-    public const CONTRACT = 'CPDA';
     public const MINT = 'MINT';
     public const TREASURY = 'TRSY';
-    public const PAYER = 'PAYR';
-    public const PAYER_TOKEN_ACCOUNT = 'PATA';
     public const TOKEN_PROGRAM = 'TKPG';
+
+    /**
+     * The fund design's four (SPEC §9.1, 2026-10-01): the meter, the fund it
+     * draws on, the fund's token account where the money is, and the browser
+     * key the meter answers to. They replace the delegate design's contract,
+     * payer and payer token account. The reader's wallet (`RDR`) arrives
+     * with the decoded fund, which this site does not read yet.
+     */
+    public const METER = 'MPDA';
+    public const FUND = 'FPDA';
+    public const FUND_TOKEN_ACCOUNT = 'FATA';
+    public const BROWSER_KEY = 'BKEY';
 
     /**
      * The site authority (SPEC §4.4), added 2026-09-08 — the one address that
@@ -85,12 +94,13 @@ final class Alias
     private const MEANINGS = [
         self::PROGRAM => 'The metering program',
         self::SITE => "This site's account",
-        self::CONTRACT => 'Your contract',
         self::MINT => 'The token mint',
         self::TREASURY => 'The site treasury',
-        self::PAYER => 'Your wallet',
-        self::PAYER_TOKEN_ACCOUNT => 'Your token account',
         self::TOKEN_PROGRAM => 'The token program',
+        self::METER => 'Your meter',
+        self::FUND => 'Your fund',
+        self::FUND_TOKEN_ACCOUNT => "Your fund's token account",
+        self::BROWSER_KEY => "This browser's key",
         self::AUTHORITY => 'The site authority',
         self::UNNAMED => 'An address this panel cannot place',
         self::DATA => "An instruction's bytes",
@@ -98,8 +108,8 @@ final class Alias
 
     /** Every prefix this class defines, which is what `MEANINGS` must cover. */
     public const PREFIXES = [
-        self::PROGRAM, self::SITE, self::CONTRACT, self::MINT, self::TREASURY,
-        self::PAYER, self::PAYER_TOKEN_ACCOUNT, self::TOKEN_PROGRAM,
+        self::PROGRAM, self::SITE, self::MINT, self::TREASURY, self::TOKEN_PROGRAM,
+        self::METER, self::FUND, self::FUND_TOKEN_ACCOUNT, self::BROWSER_KEY,
         self::AUTHORITY, self::UNNAMED, self::DATA,
     ];
 

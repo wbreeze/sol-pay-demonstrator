@@ -25,12 +25,12 @@ use SolPay\Core\Base58;
  */
 final class ProgramEventTest extends TestCase
 {
-    private const CONTRACT = 'CPDA';
+    private const METER = 'MPDA';
 
-    /** 32 bytes that stand in for a contract PDA. */
-    private function contractBytes(): string
+    /** 32 bytes that stand in for a meter PDA. */
+    private function meterBytes(): string
     {
-        return str_pad(self::CONTRACT, 32, "\x11");
+        return str_pad(self::METER, 32, "\x11");
     }
 
     /**
@@ -48,11 +48,11 @@ final class ProgramEventTest extends TestCase
         return $raw;
     }
 
-    private function metered(int $pageViews = 7, int $used = 70_000, int $paid = 100_000, int $transferred = 100_000): string
+    private function metered(int $items = 7, int $used = 70_000, int $paid = 100_000, int $transferred = 100_000): string
     {
         return $this->bytes('1e8e96a17c2e1d7e')
-            .$this->contractBytes()
-            .pack('V', $pageViews)
+            .$this->meterBytes()
+            .pack('V', $items)
             .pack('P', $used)
             .pack('P', $paid)
             .pack('P', $transferred);
@@ -81,38 +81,61 @@ final class ProgramEventTest extends TestCase
 
         self::assertNotNull($event);
         self::assertSame('Metered', $event->name);
-        self::assertSame(Base58::encode($this->contractBytes()), $event->contract);
+        self::assertSame(Base58::encode($this->meterBytes()), $event->meter);
         self::assertSame(
-            ['contract', 'page_views', 'used', 'paid', 'transferred'],
+            ['meter', 'items', 'used', 'paid', 'transferred'],
             array_keys($event->fields),
             'the field order is the program\'s declaration order and borsh depends on it',
         );
-        self::assertSame(7, $event->fields['page_views']);
+        self::assertSame(7, $event->fields['items']);
         self::assertSame(70_000, $event->fields['used']);
         self::assertSame(100_000, $event->fields['paid']);
         self::assertSame(100_000, $event->fields['transferred']);
     }
 
-    public function testDecodesRenewed(): void
+    /**
+     * 0.2.0 added the expiry, eight bytes on the end. The decoder left on the
+     * old layout refused every `Renewed` as too long, so the old layout's
+     * bytes are checked here too, in the other direction.
+     */
+    public function testDecodesRenewedWithItsExpiry(): void
     {
-        $bytes = $this->bytes('8bfcd923492a0757').$this->contractBytes().pack('P', 500_000).pack('P', 40_000);
-        $event = ProgramEvent::decode($bytes);
+        $old = $this->bytes('8bfcd923492a0757').$this->meterBytes().pack('P', 500_000).pack('P', 40_000);
+        $event = ProgramEvent::decode($old.pack('P', 1_790_000_000));
 
         self::assertNotNull($event);
         self::assertSame('Renewed', $event->name);
-        self::assertSame(['contract', 'limit', 'carried'], array_keys($event->fields));
+        self::assertSame(['meter', 'limit', 'carried', 'expiry'], array_keys($event->fields));
         self::assertSame(500_000, $event->fields['limit']);
         self::assertSame(40_000, $event->fields['carried']);
+        self::assertSame(1_790_000_000, $event->fields['expiry']);
+
+        self::assertNull(ProgramEvent::decode($old), 'the delegate design\'s layout, eight bytes short, does not decode');
+    }
+
+    /**
+     * The expiry is signed, and a signed field is the one place a negative
+     * value is a value rather than an overflow. The program refuses a past
+     * expiry, so this is unreachable from the chain; it pins that the refusal
+     * of negative numbers is a rule about unsigned fields only.
+     */
+    public function testASignedExpiryIsNotMistakenForAnOverflow(): void
+    {
+        $bytes = $this->bytes('8bfcd923492a0757').$this->meterBytes().pack('P', 500_000).pack('P', 0).pack('P', -1);
+        $event = ProgramEvent::decode($bytes);
+
+        self::assertNotNull($event);
+        self::assertSame(-1, $event->fields['expiry']);
     }
 
     public function testDecodesClosed(): void
     {
-        $bytes = $this->bytes('321f579b87dcc3ef').$this->contractBytes().pack('P', 30_000);
+        $bytes = $this->bytes('321f579b87dcc3ef').$this->meterBytes().pack('P', 30_000);
         $event = ProgramEvent::decode($bytes);
 
         self::assertNotNull($event);
         self::assertSame('Closed', $event->name);
-        self::assertSame(['contract', 'forgiven'], array_keys($event->fields));
+        self::assertSame(['meter', 'forgiven'], array_keys($event->fields));
         self::assertSame(30_000, $event->fields['forgiven']);
     }
 
@@ -124,7 +147,7 @@ final class ProgramEventTest extends TestCase
      */
     public function testRefusesAnotherProgramsData(): void
     {
-        $foreign = $this->bytes('deadbeefdeadbeef').$this->contractBytes().pack('V', 7).str_repeat("\x00", 24);
+        $foreign = $this->bytes('deadbeefdeadbeef').$this->meterBytes().pack('V', 7).str_repeat("\x00", 24);
 
         self::assertNull(ProgramEvent::decode($foreign));
     }
@@ -155,7 +178,7 @@ final class ProgramEventTest extends TestCase
      */
     public function testRefusesAValuePastWhatPhpCanHold(): void
     {
-        $tooBig = $this->bytes('321f579b87dcc3ef').$this->contractBytes()."\xff\xff\xff\xff\xff\xff\xff\xff";
+        $tooBig = $this->bytes('321f579b87dcc3ef').$this->meterBytes()."\xff\xff\xff\xff\xff\xff\xff\xff";
 
         self::assertNull(ProgramEvent::decode($tooBig));
     }
@@ -175,7 +198,7 @@ final class ProgramEventTest extends TestCase
 
         self::assertNotNull($event);
         self::assertSame('Metered', $event->name);
-        self::assertSame(7, $event->fields['page_views']);
+        self::assertSame(7, $event->fields['items']);
     }
 
     public function testFindsNothingWhenThereIsNoEvent(): void

@@ -9,17 +9,17 @@ use PHPUnit\Framework\TestCase;
 /**
  * SPEC §7.2, the oldest open item in this repository until 2026-09-12.
  *
- * Two requests from one reader that both reach the metering step build two
+ * Two requests on one session that both reach the metering step build two
  * `meter_and_settle` instructions from the same read. They do not conflict on
  * chain — the program increments whatever it finds — so both succeed and the
  * reader is charged twice for a race they did not cause. The server prevents
- * it by serializing the read-preflight-meter-confirm sequence per wallet, in
+ * it by serializing the read-preflight-meter-record sequence per meter, in
  * a SQLite transaction taken with `BEGIN IMMEDIATE`.
  *
- * **What SPEC asks for, and what this is.** §7.2 says the test is two
- * browsers, one wallet, one article, and the pass condition is one
- * `meter_and_settle` on chain. That needs devnet, a funded payer and a real
- * wallet, and it is not something CI can ever hold — which is why the line sat
+ * **What SPEC asks for, and what this is.** The whole claim is two
+ * overlapping requests on one meter, and the pass condition is one
+ * `meter_and_settle` on chain. That needs devnet and a funded fund, and it is
+ * not something CI can ever hold — which is why the line sat
  * unwritten from the beginning. What CI *can* hold is the half that carries
  * the defect: the serialization itself, under real contention, in real
  * processes, against the real lock. The chain half stays an observation
@@ -27,12 +27,12 @@ use PHPUnit\Framework\TestCase;
  *
  * So this file is in two parts, and neither is worth much without the other:
  *
- * 1. **The race**, below. Four separate PHP processes, one wallet, one
+ * 1. **The race**, below. Four separate PHP processes, one meter, one
  *    article, one SQLite file, entering together. Exactly one does the work;
  *    the other three find it done. Then the same four with the lock removed
  *    and nothing else changed, which must produce the double charge — a race
  *    test that cannot fail is not a test, and this one says so out loud.
- * 2. **The structure**, after it. The race exercises `Store::withPayerLock`.
+ * 2. **The structure**, after it. The race exercises `Store::withMeterLock`.
  *    It says nothing about whether `Meter::forArticle` still *uses* it, or
  *    still does its grant check inside it rather than in front of it. That is
  *    positional, so the check is too — the same shape as
@@ -118,7 +118,7 @@ final class OneMeterAtATimeTest extends TestCase
     /**
      * §7.4's advance takes the same lock. It writes no grant and consults
      * none, so the race above cannot cover it — but it charges the chain, and
-     * two of them from one reader is the same defect wearing a different hat.
+     * two of them on one meter is the same defect wearing a different hat.
      */
     public function testAdvanceIsInsideTheLockToo(): void
     {
@@ -126,7 +126,7 @@ final class OneMeterAtATimeTest extends TestCase
 
         self::assertSame(
             'return',
-            trim(substr($body, 0, (int) strpos($body, '$this->store->withPayerLock('))),
+            trim(substr($body, 0, (int) strpos($body, '$this->store->withMeterLock('))),
             'SPEC §7.4 charges the chain; it queues behind the same lock, first thing',
         );
     }
@@ -144,8 +144,8 @@ final class OneMeterAtATimeTest extends TestCase
     {
         $body = $this->methodBody('forArticle');
 
-        $lock = strpos($body, '$this->store->withPayerLock(');
-        self::assertIsInt($lock, 'forArticle takes the payer lock');
+        $lock = strpos($body, '$this->store->withMeterLock(');
+        self::assertIsInt($lock, 'forArticle takes the meter lock');
 
         // Everything before the call must be the `return` that hands it back.
         // Any other statement there is a decision made before waiting, which
@@ -177,11 +177,11 @@ final class OneMeterAtATimeTest extends TestCase
     public function testTheArticleServesFirstAndTheAdvanceWaits(): void
     {
         $article = $this->methodBody('forArticle');
-        self::assertStringContainsString('$this->meter($wallet, $state, 1, false, ', $article);
+        self::assertStringContainsString('$this->meter($binding, $state, 1, false, ', $article);
         self::assertStringContainsString('$result->chargeState', $article, 'the grant records what the result says of its charge');
 
         $advance = $this->methodBody('advance');
-        self::assertStringContainsString('$this->meter($wallet, $state, $pageViews, true)', $advance);
+        self::assertStringContainsString('$this->meter($binding, $state, $items, true)', $advance);
     }
 
     // ---- the harness -------------------------------------------------------
@@ -199,7 +199,7 @@ final class OneMeterAtATimeTest extends TestCase
         $procs = [];
         foreach (range(1, self::WORKERS) as $_) {
             $command = [
-                PHP_BINARY, $worker, $this->db, 'PAYRfig', 'why-approve-comes-first',
+                PHP_BINARY, $worker, $this->db, 'MPDAfig', 'why-approve-comes-first',
                 $this->barrier, (string) self::WORKERS, (string) self::HOLD_US, $mode,
             ];
             $pipes = [];

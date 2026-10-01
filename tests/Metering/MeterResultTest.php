@@ -4,20 +4,20 @@ declare(strict_types=1);
 
 namespace Newsprint\Tests\Metering;
 
-use Newsprint\Chain\PayerState;
+use Newsprint\Chain\MeterState;
 use Newsprint\Metering\ChargeState;
 use Newsprint\Metering\MeterResult;
 use PHPUnit\Framework\TestCase;
 use SolPay\Core\Blocked;
-use SolPay\Core\Contract;
+use SolPay\Core\Meter;
 use SolPay\Core\Site;
 
 /**
  * One rule, asserted from both sides: **a metering result carries the accounts
  * it decided from exactly when no transaction went out.**
  *
- * The saving is the easy half. `Meter` reads the contract and the reader's
- * token account to decide, and the request then renders from those same two
+ * The saving is the easy half. `Meter` reads the meter and the fund's token
+ * account to decide, and the request then renders from those same two
  * accounts; where nothing was sent, reading them again is a second ~500 ms
  * round trip for identical bytes. Measured 2026-09-09: the `set-meter` screen
  * cost three `getMultipleAccounts` and 1.88 s, one whole call of which was
@@ -39,10 +39,11 @@ final class MeterResultTest extends TestCase
 
     public function testTheOutcomesThatSendNothingCarryTheAccountsTheyDecidedFrom(): void
     {
-        $payer = $this->payer();
+        $read = $this->read();
 
-        self::assertSame($payer, MeterResult::unreadable('there is no contract for this reader', $payer)->payer);
-        self::assertSame($payer, MeterResult::blocked(Blocked::limitReached(400), 10_000, $payer)->payer);
+        self::assertSame($read, MeterResult::blocked(Blocked::limitReached(400), 10_000, $read)->state);
+        self::assertSame($read, MeterResult::blocked(Blocked::expired(), 10_000, $read)->state);
+        self::assertSame($read, MeterResult::unbound($read)->state, 'the read that found the meter no longer binds the session');
     }
 
     /**
@@ -51,19 +52,19 @@ final class MeterResultTest extends TestCase
      */
     public function testAnEndpointThatDidNotAnswerCarriesNothing(): void
     {
-        self::assertNull(MeterResult::unreadable('the endpoint did not answer')->payer);
+        self::assertNull(MeterResult::unreadable('the endpoint did not answer')->state);
     }
 
-    public function testEveryOutcomeThatSentSomethingCarriesNoPayer(): void
+    public function testEveryOutcomeThatSentSomethingCarriesNoRead(): void
     {
-        self::assertNull(MeterResult::granted()->payer);
-        self::assertNull(MeterResult::metered('sig', 10_000, true, 1, [])->payer);
-        self::assertNull(MeterResult::unconfirmed('sig', 10_000, false, 1, [])->payer);
-        self::assertNull(MeterResult::failed('refused', null, null, 'sig', [])->payer);
-        self::assertNull(MeterResult::servedAhead('sig', 10_000, false, [])->payer);
-        self::assertNull(MeterResult::confirmedLater('sig', true)->payer);
-        self::assertNull(MeterResult::unconfirmedLater('sig', ChargeState::Pending)->payer);
-        self::assertNull(MeterResult::absorbed('sig', null, 'transaction failed on chain')->payer);
+        self::assertNull(MeterResult::granted()->state);
+        self::assertNull(MeterResult::metered('sig', 10_000, true, 1, [])->state);
+        self::assertNull(MeterResult::unconfirmed('sig', 10_000, false, 1, [])->state);
+        self::assertNull(MeterResult::failed('refused', null, null, 'sig', [])->state);
+        self::assertNull(MeterResult::servedAhead('sig', 10_000, false, [])->state);
+        self::assertNull(MeterResult::confirmedLater('sig', true)->state);
+        self::assertNull(MeterResult::unconfirmedLater('sig', ChargeState::Pending)->state);
+        self::assertNull(MeterResult::absorbed('sig', null, 'transaction failed on chain')->state);
     }
 
     /**
@@ -89,6 +90,7 @@ final class MeterResultTest extends TestCase
             'absorbed' => [MeterResult::absorbed('sig', null, 'failed'), true, false, false],
             'waited, confirmed' => [MeterResult::metered('sig', 10_000, true), true, false, false],
             'refused up front' => [MeterResult::failed('refused', null, null, 'sig'), false, false, false],
+            'unbound' => [MeterResult::unbound($this->read()), false, false, false],
         ];
 
         foreach ($cases as $label => [$result, $serves, $awaiting, $asks]) {
@@ -107,13 +109,13 @@ final class MeterResultTest extends TestCase
     /**
      * And they cannot be made to, which is the direction that matters.
      *
-     * The check above passes for as long as nobody passes a payer to those
+     * The check above passes for as long as nobody passes a read to those
      * factories; this one fails the moment somebody gives them somewhere to
      * put one. A default-null parameter added to `metered()` in the course of
      * some other repair would sail past a green suite and quietly put a
      * pre-send balance on the screen that reports the charge.
      */
-    public function testTheSendingFactoriesHaveNowhereToPutAPayer(): void
+    public function testTheSendingFactoriesHaveNowhereToPutARead(): void
     {
         $problems = [];
 
@@ -121,8 +123,8 @@ final class MeterResultTest extends TestCase
             $method = new \ReflectionMethod(MeterResult::class, $factory);
             foreach ($method->getParameters() as $parameter) {
                 $type = (string) $parameter->getType();
-                if (str_contains($type, PayerState::class)) {
-                    $problems[] = "MeterResult::{$factory}() accepts a PayerState as \${$parameter->getName()}"
+                if (str_contains($type, MeterState::class)) {
+                    $problems[] = "MeterResult::{$factory}() accepts a MeterState as \${$parameter->getName()}"
                         .' — that outcome follows a send, so the accounts it would carry may be stale';
                 }
             }
@@ -143,32 +145,34 @@ final class MeterResultTest extends TestCase
     {
         $source = (string) file_get_contents(dirname(__DIR__, 2).'/src/Metering/MeterMiddleware.php');
 
-        self::assertSame(1, substr_count($source, '->invalidatePayer()'), 'one re-read, in one place');
+        self::assertSame(1, substr_count($source, '->invalidateMeter()'), 'one re-read, in one place');
         self::assertMatchesRegularExpression(
-            '/elseif \(\$result->sent\(\) && !\$result->awaiting\(\)\) \{[^}]*->invalidatePayer\(\)/s',
+            '/elseif \(\$result->sent\(\) && !\$result->awaiting\(\)\) \{[^}]*->invalidateMeter\(\)/s',
             $source,
         );
     }
 
-    private function payer(): PayerState
+    private function read(): MeterState
     {
         $site = new Site(
             authority: '163aJWGmry7Q2gWjtxmTbdC7NGFc7FecSN1gfpNUgRt',
             mint: 'MintI1111111111111111111111111111111111111',
             treasury: 'TrSy11111111111111111111111111111111111111',
-            pagePrice: 10_000,
+            itemPrice: 10_000,
             collectionThreshold: 100_000,
             minLimit: 500_000,
             bump: 254,
         );
 
-        return new PayerState(
-            wallet: 'PayR11111111111111111111111111111111111111',
-            contractAddress: 'CtRc11111111111111111111111111111111111111',
-            tokenAccount: 'AtA111111111111111111111111111111111111111',
-            contract: new Contract(
+        return new MeterState(
+            meterAddress: 'MtR111111111111111111111111111111111111111',
+            fund: 'FnD111111111111111111111111111111111111111',
+            fundTokenAccount: 'AtA111111111111111111111111111111111111111',
+            meter: new Meter(
                 site: '7X4hDbm44UQYnmXshwSdCyAMhh3bJe2X5u1z2m1dSCVt',
-                payer: 'PayR11111111111111111111111111111111111111',
+                fund: 'FnD111111111111111111111111111111111111111',
+                key: 'BKeY11111111111111111111111111111111111111',
+                expiry: 1_800_000_000,
                 limit: 500_000,
                 used: 230_000,
                 paid: 150_000,

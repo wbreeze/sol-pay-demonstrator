@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Newsprint\Support;
 
 use Newsprint\Chain\ChargeFault;
-use Newsprint\Chain\PayerState;
+use Newsprint\Chain\MeterState;
 use Newsprint\Chain\SiteState;
 use Newsprint\Metering\MeterOutcome;
 use Newsprint\Metering\MeterResult;
@@ -50,9 +50,9 @@ final class Inspector
      *
      * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string, external?: bool}, event?: string}>
      */
-    public function sections(?SiteState $state = null, ?string $error = null, ?PayerState $payer = null, ?MeterResult $result = null): array
+    public function sections(?SiteState $state = null, ?string $error = null, ?MeterState $meter = null, ?MeterResult $result = null): array
     {
-        $sections = $this->order($this->build($state, $error, $payer, $result));
+        $sections = $this->order($this->build($state, $error, $meter, $result));
         $names = $this->names($sections);
 
         return $names === null ? $sections : array_merge([$names], $sections);
@@ -173,7 +173,7 @@ final class Inspector
     /**
      * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string, external?: bool}, event?: string}>
      */
-    private function build(?SiteState $state = null, ?string $error = null, ?PayerState $payer = null, ?MeterResult $result = null): array
+    private function build(?SiteState $state = null, ?string $error = null, ?MeterState $meter = null, ?MeterResult $result = null): array
     {
         $program = $this->config->program();
         $params = $this->config->siteParams();
@@ -181,7 +181,7 @@ final class Inspector
         // One map for the whole panel, built before any row is. Every address
         // row resolves its short name *and* its derivation from this and from
         // nothing else.
-        $known = $this->knownAddresses($state, $payer);
+        $known = $this->knownAddresses($state, $meter);
 
         $sections = [[
             'heading' => 'Deployment',
@@ -286,9 +286,9 @@ final class Inspector
                 ['authority', $this->address($site->authority, $known)],
                 ['mint', $this->address($site->mint, $known)],
                 ['treasury', $this->address($site->treasury, $known)],
-                ['page price', $amount($site->pagePrice)],
-                ['collection threshold', $amount($site->collectionThreshold).sprintf('  — %d views', intdiv($site->collectionThreshold, max(1, $site->pagePrice)))],
-                ['minimum limit', $amount($site->minLimit).sprintf('  — %d views', intdiv($site->minLimit, max(1, $site->pagePrice)))],
+                ['item price', $amount($site->itemPrice)],
+                ['collection threshold', $amount($site->collectionThreshold).sprintf('  — %d views', intdiv($site->collectionThreshold, max(1, $site->itemPrice)))],
+                ['minimum limit', $amount($site->minLimit).sprintf('  — %d views', intdiv($site->minLimit, max(1, $site->itemPrice)))],
                 ['bump', (string) $site->bump],
                 ['mint decimals', $state->mintDecimals === null ? 'unread' : (string) $state->mintDecimals],
             ],
@@ -313,7 +313,7 @@ final class Inspector
         // the number on every other page came from the chain, and this says so.
         $drift = [];
         foreach ([
-            'page price' => [(int) $params['page_price'], $site->pagePrice],
+            'item price' => [(int) $params['page_price'], $site->itemPrice],
             'collection threshold' => [(int) $params['collection_threshold'], $site->collectionThreshold],
             'minimum limit' => [(int) $params['min_limit'], $site->minLimit],
         ] as $label => [$configured, $onChain]) {
@@ -329,9 +329,9 @@ final class Inspector
             ];
         }
 
-        if ($payer !== null) {
-            $sections[] = $this->reader($payer, $amount, $known, $result?->awaiting() ?? false);
-            $sections[] = $this->preflight($state, $payer, $amount);
+        if ($meter !== null) {
+            $sections[] = $this->reader($meter, $amount, $known, $result?->awaiting() ?? false);
+            $sections[] = $this->preflight($state, $meter, $amount);
         }
 
         if ($result !== null && $result->signature !== null) {
@@ -359,11 +359,14 @@ final class Inspector
      * them out of {@see \Newsprint\Metering\Meter} for that reason. Reading
      * them back off the chain would answer a different and easier question.
      *
-     * **Which is why the browser's transactions show less here, and say so.**
-     * `approve_and_open`, `renew_contract` and `close_and_revoke` are compiled
-     * in the reader's browser by the wasm client and this server never holds
-     * those instruction objects. Their signature and their decoded event are
-     * shown; their bytes are not, with a line saying who built them. The
+     * **Which is why a transaction this server did not build shows less here,
+     * and says so.** Under the delegate design the reader's own transactions
+     * were compiled in the browser by the wasm client, and this server never
+     * held those instruction objects. Their signature and their decoded event
+     * were shown; their bytes were not, with a line saying who built them.
+     * Under the fund design the server composes every transaction (SPEC
+     * §6.3, §5.4), so that line now covers only a charge reported by a later
+     * request. The
      * alternative — decoding the landed transaction so all four look alike —
      * was declined 2026-09-08: it would put "as they landed" under a heading
      * that promises "as the builders produced them", and quietly answer a
@@ -387,7 +390,7 @@ final class Inspector
         $rows = [
             ['signature', $signature],
             ['outcome', $result->outcome->value.' — '.$result->detail],
-            ['page views', (string) $result->pageViews, match (true) {
+            ['items', (string) $result->items, match (true) {
                 // A failed transaction moved nothing and emitted no event, so
                 // there is nothing for the event row to settle either way.
                 $result->outcome === MeterOutcome::Absorbed => 'failed, so nothing moved',
@@ -411,7 +414,7 @@ final class Inspector
         } elseif ($result->instructions === []) {
             $rows[] = [
                 'instructions',
-                'built in your browser by the wasm client, so this server never held them',
+                'not built by this request, so this server does not hold them',
                 'signature and event only',
             ];
         }
@@ -573,13 +576,13 @@ final class Inspector
      * **Only some of these addresses are derived, and not all by the same
      * program.** §9 asked for "the derivation that produced it" as though that
      * were one uniform thing. It is not, and the uniform rendering it imagined
-     * would have said something false. The site and contract PDAs are derived
-     * by *this* program from seeds it chose. The treasury and the reader's
-     * token account are derived by Solana's associated-token program, which
-     * this site does not own and did not write — showing all four alike would
-     * quietly claim otherwise. The remaining five were never derived, for
-     * three different reasons: two are keypairs first-run setup generated, one
-     * is the reader's own wallet, one is a deployment address and one is a
+     * would have said something false. The site, fund and meter PDAs are
+     * derived by *this* program from seeds it chose. The treasury and the
+     * fund's token account are derived by Solana's associated-token program,
+     * which this site does not own and did not write — showing them alike
+     * would quietly claim otherwise. The rest were never derived, for
+     * different reasons: two are keypairs first-run setup generated, one is a
+     * key this browser generated, one is a deployment address and one is a
      * constant every Solana cluster shares.
      *
      * So the third cell says which of those it is. Silence would have been
@@ -588,7 +591,7 @@ final class Inspector
      *
      * @return array<string, array{alias: string, derivation: ?string}>
      */
-    private function knownAddresses(?SiteState $state, ?PayerState $payer): array
+    private function knownAddresses(?SiteState $state, ?MeterState $meter): array
     {
         $program = $this->config->program();
 
@@ -613,10 +616,13 @@ final class Inspector
             $roles[$state->site->authority] = Alias::AUTHORITY;
         }
 
-        if ($payer !== null) {
-            $roles[$payer->wallet] = Alias::PAYER;
-            $roles[$payer->tokenAccount] = Alias::PAYER_TOKEN_ACCOUNT;
-            $roles[$payer->contractAddress] = Alias::CONTRACT;
+        if ($meter !== null) {
+            $roles[$meter->meterAddress] = Alias::METER;
+            $roles[$meter->fund] = Alias::FUND;
+            $roles[$meter->fundTokenAccount] = Alias::FUND_TOKEN_ACCOUNT;
+            if ($meter->meter !== null) {
+                $roles[$meter->meter->key] = Alias::BROWSER_KEY;
+            }
         }
 
         // Seeds are written with the short names above rather than with
@@ -658,23 +664,30 @@ final class Inspector
             );
         }
 
-        if ($payer !== null) {
-            $derivations[$payer->wallet] = "your wallet's own public key; nothing derived it";
+        if ($meter !== null) {
+            if ($meter->meter !== null) {
+                $derivations[$meter->meter->key] = 'generated in this browser and kept there; the meter names it';
+            }
 
-            // Both of these are seeded by the mint, so neither can be written
-            // without a site account to read it from. An unprovisioned copy
-            // has no mint and these rows go bare, which is correct: the
-            // addresses would not exist either.
+            // Seeded by the site and the mint, so none can be written without
+            // a site account to read them from. An unprovisioned copy has no
+            // site and these rows go bare, which is correct: the addresses
+            // would not exist either.
             if ($state !== null) {
-                $derivations[$payer->tokenAccount] = $ata(
-                    $of($payer->wallet),
+                $derivations[$meter->fund] = sprintf(
+                    '["fund", your wallet, %s, index] + bump, by %s',
+                    $of($state->site->mint),
+                    $of($program->id),
+                );
+                $derivations[$meter->fundTokenAccount] = $ata(
+                    $of($meter->fund),
                     $of($program->tokenProgram),
                     $of($state->site->mint),
                 );
-                $derivations[$payer->contractAddress] = sprintf(
-                    '["contract", %s, %s] + bump, by %s',
+                $derivations[$meter->meterAddress] = sprintf(
+                    '["meter", %s, %s] + bump, by %s',
                     $of($state->address),
-                    $of($payer->wallet),
+                    $of($meter->fund),
                     $of($program->id),
                 );
             }
@@ -694,7 +707,7 @@ final class Inspector
     /**
      * Preflight, for this request (SPEC §9).
      *
-     * Six answers from `SolPay\Core\Preflight`, each beside the check in the
+     * Five answers from `SolPay\Core\Preflight`, each beside the check in the
      * program it mirrors. The mirroring is the point and it is also the risk:
      * the library's arithmetic is a **copy** of the program's, made because
      * this package cannot call into it, and a copy can drift. `Preflight`'s
@@ -725,40 +738,45 @@ final class Inspector
      * view is the unit the price is quoted in. §7.4's seven-view advance
      * multiplies this row; it does not change it.
      *
+     * `can_meter` asks about the expiry at this server's clock. The program
+     * reads the cluster's, so near the expiry the two disagree by however far
+     * apart the clocks are, and the program's answer is the one that counts.
+     *
      * @param callable(int): string $amount both unit forms, at the mint's own decimals
      *
      * @return array{heading: string, rows: list<array{0: string, 1: string, 2?: string}>, claims: string}
      */
-    private function preflight(SiteState $state, PayerState $payer, callable $amount): array
+    private function preflight(SiteState $state, MeterState $read, callable $amount): array
     {
         $site = $state->site;
-        $contract = $payer->contract;
+        $meter = $read->meter;
+        $now = time();
 
         $charge = Preflight::charge($site, 1);
 
         $rows = [[
             'charge(1)',
             $charge === null ? 'overflows' : $amount($charge),
-            'page_price × page_views',
+            'item_price × items',
         ]];
 
-        if ($contract === null) {
-            // Three of the six take a `Contract` and there is not one. Saying
+        if ($meter === null) {
+            // Three of the five take a `Meter` and there is not one. Saying
             // so beats printing a zero that reads like an answer.
-            $rows[] = ['can_meter', 'no contract — nothing to meter against', 'require!(new_used <= limit)'];
-            $rows[] = ['will_settle', 'no contract', 'unpaid >= collection_threshold'];
-            $rows[] = ['views_remaining', 'no contract', '(limit - used) / page_price'];
+            $rows[] = ['can_meter', 'no meter — nothing to meter against', 'require!(now <= expiry); require!(new_used <= limit)'];
+            $rows[] = ['will_settle', 'no meter', 'unpaid >= collection_threshold'];
+            $rows[] = ['items_remaining', 'no meter', '(limit - used) / item_price'];
         } else {
-            $blocked = Preflight::canMeter($contract, $site, 1);
+            $blocked = Preflight::canMeter($meter, $site, 1, $now);
             $rows[] = [
                 'can_meter',
                 $blocked === null
-                    ? 'yes — this charge fits under the limit'
+                    ? 'yes — the meter is open and this charge fits under the limit'
                     : 'no — '.$blocked->kind->name.': '.$blocked,
-                'require!(new_used <= limit, LimitReached)',
+                'require!(now <= expiry, Expired); require!(new_used <= limit, LimitReached)',
             ];
 
-            $settles = Preflight::willSettle($contract, $site, 1);
+            $settles = Preflight::willSettle($meter, $site, 1);
             $rows[] = [
                 'will_settle',
                 $settles
@@ -768,23 +786,16 @@ final class Inspector
             ];
 
             $rows[] = [
-                'views_remaining',
-                sprintf('%d', Preflight::viewsRemaining($contract, $site)),
-                '(limit - used) / page_price',
+                'items_remaining',
+                sprintf('%d', Preflight::itemsRemaining($meter, $site)),
+                '(limit - used) / item_price',
             ];
         }
 
-        $floor = Preflight::limitFloor($site, $contract);
         $rows[] = [
             'limit_floor',
-            $amount($floor),
+            $amount(Preflight::limitFloor($site, $meter)),
             'max(min_limit, unpaid carried forward)',
-        ];
-
-        $rows[] = [
-            'required_allowance',
-            $amount(Preflight::requiredAllowance($floor)),
-            'the SPL delegated amount checked at open and at renew',
         ];
 
         return [
@@ -801,25 +812,21 @@ final class Inspector
     }
 
     /**
-     * You, on chain.
+     * You, on chain: the meter this browser holds and the fund it draws on.
      *
-     * **The delegate is the row that matters and the one nothing else shows.**
-     * `approve_checked` names this site's contract PDA as the delegate on the
-     * reader's token account and sets how much it may draw; `revoke` clears
-     * both. That is the whole of what authorizing gave away and the whole of
-     * what closing takes back — and a wallet will happily show a balance
-     * without ever mentioning it.
-     *
-     * So it is here, read from the account on every request, in both unit
-     * forms, beside the address a reader can paste into any explorer. Claim 6
-     * in §2 is only checkable if the thing it is about is visible somewhere.
+     * **The expiry and the key are the rows that matter here**, as the
+     * delegate was before them. The key says which browser the meter answers
+     * to, and a renewal from another device changes it. The expiry bounds
+     * what a meter left on a machine can cost, whatever happens to the
+     * machine (SPEC §5.5). The balance is the fund's token account's, read on
+     * every request, because the money is there and not in the fund.
      *
      * @param callable(int): string $amount both unit forms, at the mint's own decimals
      * @param array<string, array{alias: string, derivation: ?string}> $known every address this request can name, for {@see address()}
      *
      * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>}
      */
-    private function reader(PayerState $payer, callable $amount, array $known, bool $beforeCharge = false): array
+    private function reader(MeterState $read, callable $amount, array $known, bool $beforeCharge = false): array
     {
         $rows = [];
 
@@ -831,50 +838,33 @@ final class Inspector
             $rows[] = ['read', 'before the charge for this article confirmed — the figures may not include it'];
         }
 
-        $rows = [...$rows,
-            ['your wallet', $this->address($payer->wallet, $known)],
-            [
-                'your token account',
-                $this->address(
-                    $payer->tokenAccount,
-                    $known,
-                    // Derived either way; only sometimes there. The explorer
-                    // link is dropped rather than pointed at "account not
-                    // found", and the row below says why in words.
-                    $payer->funds !== null,
-                ),
-            ],
+        $rows[] = ['your meter', $this->address($read->meterAddress, $known, $read->meter !== null)];
+
+        if ($read->meter !== null) {
+            $meter = $read->meter;
+            $rows[] = ['key', $this->address($meter->key, $known, false)];
+            $rows[] = ['expiry', gmdate('Y-m-d H:i', $meter->expiry).' UTC'.($meter->expired(time()) ? ' — past' : '')];
+            $rows[] = ['limit', $amount($meter->limit)];
+            $rows[] = ['used', $amount($meter->used)];
+            $rows[] = ['paid', $amount($meter->paid)];
+            $rows[] = ['unpaid', $amount($meter->unpaid())];
+        }
+
+        $rows[] = ['your fund', $this->address($read->fund, $known)];
+        $rows[] = [
+            "the fund's token account",
+            $this->address(
+                $read->fundTokenAccount,
+                $known,
+                // Derived either way; only sometimes there. The explorer
+                // link is dropped rather than pointed at "account not
+                // found", and the row below says why in words.
+                $read->funds !== null,
+            ),
         ];
-
-        if ($payer->funds === null) {
-            $rows[] = ['token account', 'does not exist yet — the faucet creates it'];
-        } else {
-            $rows[] = ['balance', $amount($payer->funds->amount)];
-            $rows[] = [
-                'delegate',
-                $payer->funds->delegate === null
-                    ? 'none — nothing may draw from this account'
-                    : $this->address($payer->funds->delegate, $known),
-            ];
-            $rows[] = ['approved', $amount($payer->funds->delegatedAmount)];
-        }
-
-        if ($payer->contract === null) {
-            $rows[] = [
-                'your contract',
-                $this->address($payer->contractAddress, $known, false),
-            ];
-            $rows[] = ['on chain', 'not yet — the address is derived, the account is not there'];
-        } else {
-            $rows[] = [
-                'your contract',
-                $this->address($payer->contractAddress, $known),
-            ];
-            $rows[] = ['limit', $amount($payer->contract->limit)];
-            $rows[] = ['used', $amount($payer->contract->used)];
-            $rows[] = ['paid', $amount($payer->contract->paid)];
-            $rows[] = ['unpaid', $amount($payer->contract->unpaid())];
-        }
+        $rows[] = $read->funds === null
+            ? ['balance', 'no token account — the fund has never been opened in this mint']
+            : ['balance', $amount($read->funds->amount)];
 
         return [
             'heading' => 'You, on chain',
@@ -890,7 +880,7 @@ final class Inspector
         return [
             'heading' => 'Site parameters, configured',
             'rows' => [
-                ['page price', sprintf('%s %s  (%d base units)', Units::fromBaseUnits((int) $params['page_price'], $decimals), (string) $params['symbol'], (int) $params['page_price'])],
+                ['item price', sprintf('%s %s  (%d base units)', Units::fromBaseUnits((int) $params['page_price'], $decimals), (string) $params['symbol'], (int) $params['page_price'])],
                 ['collection threshold', sprintf('%s %s  (%d views)', Units::fromBaseUnits((int) $params['collection_threshold'], $decimals), (string) $params['symbol'], intdiv((int) $params['collection_threshold'], (int) $params['page_price']))],
                 ['minimum limit', sprintf('%s %s  (%d views)', Units::fromBaseUnits((int) $params['min_limit'], $decimals), (string) $params['symbol'], intdiv((int) $params['min_limit'], (int) $params['page_price']))],
                 ['mint decimals', (string) $decimals],

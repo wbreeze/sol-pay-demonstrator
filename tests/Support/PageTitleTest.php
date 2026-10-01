@@ -11,8 +11,9 @@ use PHPUnit\Framework\TestCase;
  *
  * `public/index.php` hands `$shell()` a title, which becomes `<title>`, and the
  * template it renders carries its own `<h1>`. For two pages those are the same
- * words in both places: `'The meter'` five times over — four `$shell` calls and
- * one heading — and `'First run'` twice. Nothing checked that the copies agreed,
+ * words in both places: `'The meter'` and `'First run'`, each one `$shell` call
+ * and one heading. (`'The meter'` was four calls until the fund design folded
+ * `manage_meter`'s stages into one render.) Nothing checked that the copies agreed,
  * and on-screen words stay in the templates on purpose, so extracting them into
  * a constant is not the answer. Noticing the drift is.
  *
@@ -66,7 +67,7 @@ final class PageTitleTest extends TestCase
     {
         $source = (string) file_get_contents(self::ROOT.'/public/index.php');
 
-        self::assertSame(4, substr_count($source, "\$shell('The meter'"));
+        self::assertSame(1, substr_count($source, "\$shell('The meter'"));
         self::assertSame(1, substr_count($source, "\$shell('First run'"));
     }
 

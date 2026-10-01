@@ -193,16 +193,13 @@ Every one of these is a POST, and each answers with HTML.
 
 ### Called by the page's own scripts
 
+The routes that identified a reader by wallet, opened and closed a contract,
+and ran the faucet for a signed-in wallet went with the delegate design. The
+key proof, the setup scan, the key-signed close and the faucet form arrive as
+the fund design is built (`SPEC.md` §4.3, §5, §6.3).
+
 | route | what it is | answers with |
 | --- | --- | --- |
-| `POST /signin/challenge` | issues the `signInInput` the wallet signs (`SPEC.md` §5) | JSON |
-| `POST /signin/verify` | checks the signature and opens the session | JSON |
-| `POST /signout` | the session row and the cookie both go | 302 to `/` |
-| `POST /meter/prepare` | everything the wallet needs to open or renew a contract | JSON |
-| `POST /meter/opened` | whether it landed, answered from the contract account | JSON |
-| `POST /meter/close/prepare` | `close_and_revoke` — two instructions, no arguments (`SPEC.md` §10.4) | JSON |
-| `POST /meter/close/done` | the chain confirmed it, so `SPEC.md` §10.4's erasure runs | JSON |
-| `POST /faucet` | one grant per wallet, and the site signs this one (`SPEC.md` §4.3) | JSON |
 | `GET /inspector/panel` | the panel's sections for a page that read nothing (`SPEC.md` §9) | a fragment with `X-Fragment: 1`, a page without it |
 | `GET /inspector/event/{signature}` | one decoded event, on demand (`SPEC.md` §9) | JSON |
 

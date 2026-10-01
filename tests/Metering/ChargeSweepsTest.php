@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Newsprint\Tests\Metering;
 
+use Newsprint\Auth\Binding;
 use Newsprint\Chain\Rpc;
 use Newsprint\Chain\SiteState;
 use Newsprint\Chain\Submitter;
@@ -39,23 +40,23 @@ final class ChargeSweepsTest extends TestCase
         $pdo = Database::open(':memory:');
         $store = new Store($pdo, fn (): int => $this->now);
 
-        // Another reader, a week ago: a session, a grant and a lock row.
-        $store->createSession('PAYRcat', 3_600);
-        $store->recordGrant('PAYRcat', 'article-one', 1_800, 'sigcat');
-        $store->withPayerLock('PAYRcat', static fn (): null => null);
+        // Another meter, a week ago: a session, a grant and a lock row.
+        $store->createSession(new Binding('MPDAcat', 'FPDAcat', 'BKEYcat'), 3_600);
+        $store->recordGrant('MPDAcat', 'article-one', 1_800, 'sigcat');
+        $store->withMeterLock('MPDAcat', static fn (): null => null);
 
         $this->now += 7 * 86_400;
 
-        // This reader, now: a live session and a live grant.
-        $store->createSession('PAYRfig', 43_200);
-        $store->recordGrant('PAYRfig', 'article-two', 1_800, 'sigfig');
+        // This meter, now: a live session and a live grant.
+        $store->createSession(new Binding('MPDAfig', 'FPDAfig', 'BKEYfig'), 43_200);
+        $store->recordGrant('MPDAfig', 'article-two', 1_800, 'sigfig');
 
-        $result = $this->meter($store)->forArticle('PAYRfig', 'article-two', $this->state());
+        $result = $this->meter($store)->forArticle(new Binding('MPDAfig', 'FPDAfig', 'BKEYfig'), 'article-two', $this->state());
 
         self::assertSame(MeterOutcome::Granted, $result->outcome, 'served from the grant, without the chain');
-        self::assertSame(['PAYRfig/article-two'], $this->column($pdo, "SELECT wallet || '/' || article FROM grants"));
-        self::assertSame(['PAYRfig'], $this->column($pdo, 'SELECT wallet FROM sessions'));
-        self::assertSame(['PAYRfig'], $this->column($pdo, 'SELECT wallet FROM payers'));
+        self::assertSame(['MPDAfig/article-two'], $this->column($pdo, "SELECT meter || '/' || article FROM grants"));
+        self::assertSame(['MPDAfig'], $this->column($pdo, 'SELECT meter FROM sessions'));
+        self::assertSame(['MPDAfig'], $this->column($pdo, 'SELECT meter FROM meters'));
     }
 
     /**
@@ -67,9 +68,9 @@ final class ChargeSweepsTest extends TestCase
     public function testAGrantWhoseChargeIsOutIsReportedAsStillOut(): void
     {
         $store = new Store(Database::open(':memory:'), fn (): int => $this->now);
-        $store->recordGrant('PAYRfig', 'article-two', 1_800, 'sigfig', ChargeState::Pending);
+        $store->recordGrant('MPDAfig', 'article-two', 1_800, 'sigfig', ChargeState::Pending);
 
-        $result = $this->meter($store)->forArticle('PAYRfig', 'article-two', $this->state());
+        $result = $this->meter($store)->forArticle(new Binding('MPDAfig', 'FPDAfig', 'BKEYfig'), 'article-two', $this->state());
 
         self::assertSame(MeterOutcome::Granted, $result->outcome);
         self::assertTrue($result->awaiting());

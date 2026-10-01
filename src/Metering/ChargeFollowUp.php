@@ -46,20 +46,20 @@ final class ChargeFollowUp
      *   the job for a reader without JavaScript, and it costs a request with a
      *   grant nothing at all once the charge is settled either way.
      *
-     * No payer lock. Nothing here charges, the grant is never removed, and
+     * No meter lock. Nothing here charges, the grant is never removed, and
      * {@see Store::settleCharge()} is conditional — see {@see ChargeFinisher}.
      * That is also why this is a class of its own rather than a method on
      * {@see Meter}: the GET can be given this and not the thing that charges,
      * and `SafeMethodTest` can keep saying so without an exception.
      */
-    public function report(string $wallet, string $article, bool $wait): ?MeterResult
+    public function report(string $meter, string $article, bool $wait): ?MeterResult
     {
         $finisher = new ChargeFinisher($this->store, (int) $this->config->metering()['charge_settle_s']);
 
         // History search: this can be asked minutes after the send, and the
         // status cache alone would answer "never heard of it" by then.
         $found = $finisher->finish(
-            $wallet,
+            $meter,
             $article,
             $wait
                 ? fn (string $signature): Outcome => $this->submitter->confirm($signature, true)
@@ -107,7 +107,7 @@ final class ChargeFollowUp
         return MeterResult::confirmedLater(
             $signature,
             (int) ($event->fields['transferred'] ?? 0) > 0,
-            (int) ($event->fields['page_views'] ?? 1),
+            (int) ($event->fields['items'] ?? 1),
         );
     }
 }

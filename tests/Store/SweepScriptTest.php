@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Newsprint\Tests\Store;
 
+use Newsprint\Auth\Binding;
 use Newsprint\Store\Database;
 use Newsprint\Store\Store;
 use PHPUnit\Framework\TestCase;
@@ -40,18 +41,18 @@ final class SweepScriptTest extends TestCase
     {
         $weekAgo = time() - 7 * 86_400;
         $old = new Store(Database::open($this->db), static fn (): int => $weekAgo);
-        $old->createSession('PAYRcat', 3_600);
-        $old->recordGrant('PAYRcat', 'article-one', 1_800);
+        $old->createSession(new Binding('MPDAcat', 'FPDAcat', 'BKEYcat'), 3_600);
+        $old->recordGrant('MPDAcat', 'article-one', 1_800);
 
         $store = new Store(Database::open($this->db));
-        $store->recordGrant('PAYRfig', 'article-two', 1_800);
+        $store->recordGrant('MPDAfig', 'article-two', 1_800);
 
         [$status, $out, $err] = $this->sweep('--verbose', $this->db);
 
         self::assertSame(0, $status, $err);
-        self::assertSame("swept 1 grant(s), 1 session(s), 0 lock row(s), 0 nonce(s), 0 pending close(s)\n", $out);
+        self::assertSame("swept 1 grant(s), 1 session(s), 0 lock row(s), 0 nonce(s), 0 pending setup(s), 0 pending close(s)\n", $out);
         self::assertNull($store->oldestExpired(), 'nothing expired is left waiting');
-        self::assertNotNull($store->liveGrant('PAYRfig', 'article-two'), 'and the live grant is untouched');
+        self::assertNotNull($store->liveGrant('MPDAfig', 'article-two'), 'and the live grant is untouched');
     }
 
     public function testItIsSilentWhenItSucceeds(): void

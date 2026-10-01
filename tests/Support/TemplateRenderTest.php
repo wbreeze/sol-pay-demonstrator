@@ -11,8 +11,8 @@ use Newsprint\Support\View;
 use PHPUnit\Framework\TestCase;
 use SolPay\Core\Blocked;
 use SolPay\Core\Cause;
-use SolPay\Core\Contract;
 use SolPay\Core\Ids;
+use SolPay\Core\Meter;
 use SolPay\Core\Program;
 use SolPay\Core\Shortfall;
 use SolPay\Core\TokenAccount;
@@ -41,10 +41,9 @@ final class TemplateRenderTest extends TestCase
 {
     private const SITE = '7X4hDbm44UQYnmXshwSdCyAMhh3bJe2X5u1z2m1dSCVt';
     private const MINT = 'AKRs35WnmePSDLcPLyVtC5UPPBC8xjmVZ4EUJ3XwU9op';
-    private const PAYER = 'BFT5EZLV7eWhwX4jjRP7JJDuJYoCQRmvmzuDUBbvSMqR';
-    private const CONTRACT = 'Fgm6costwpmn4d1CTqdM5su8jBptdwnW134cNoFixgqs';
-    private const OTHER_DELEGATE = 'D5VoE7hnS4yDaaMcEfgwcPyMnwNG5Xb2j4WFFFtHKwKq';
-    private const ATA = '3KDoatBW3VwL5tyKLnCrWreKSsAXEhymyCUpei6eLd7v';
+    private const FUND = 'BFT5EZLV7eWhwX4jjRP7JJDuJYoCQRmvmzuDUBbvSMqR';
+    private const METER = 'Fgm6costwpmn4d1CTqdM5su8jBptdwnW134cNoFixgqs';
+    private const KEY = 'D5VoE7hnS4yDaaMcEfgwcPyMnwNG5Xb2j4WFFFtHKwKq';
 
     private function view(): View
     {
@@ -87,51 +86,40 @@ final class TemplateRenderTest extends TestCase
     private function panel(array $overrides = []): array
     {
         return $overrides + [
-            'wallet' => self::PAYER,
             'stage' => 'metered',
+            'ended' => false,
             'symbol' => 'DEMO',
             'decimals' => 6,
             'balance' => '0.05',
             'limit_floor' => '0.5',
-            'views_remaining' => 8,
+            'items_remaining' => 8,
             'blocked' => null,
-            'contract' => ['address' => self::CONTRACT, 'limit' => '0.5', 'used' => '0.42', 'paid' => '0.28', 'unpaid' => '0.14'],
-            'faucet' => ['demo' => '0.6', 'sol' => '0.05', 'available' => true],
+            'meter' => ['address' => self::METER, 'limit' => '0.5', 'used' => '0.42', 'paid' => '0.28', 'unpaid' => '0.14', 'expiry' => '2026-10-02 12:00 UTC'],
             'provisioned' => true,
-            'chain' => 'solana:devnet',
-            'program' => $this->program()->id,
-            'token_program' => $this->program()->tokenProgram,
             'result' => null,
             'page_price' => '0.01',
             'step_views' => 7,
             'advanced' => null,
             'solvency' => null,
-            'delegate' => self::CONTRACT,
-            'delegate_is_ours' => true,
         ];
     }
 
     /**
-     * `$delegate`: true for this site's contract, false for an empty field, or
-     * an address for another site's approval sitting where this site's was.
+     * The heads-up's inputs, worked out the way `$meterVars` works them out:
+     * through `Shortfall::of`, from a token account short by `$short`.
      *
      * @return array<string, mixed>
      */
-    private function solvency(int $balanceShort, int $allowanceShort, bool|string $delegate = true): array
+    private function solvency(int $short): array
     {
-        $held = $delegate === true ? self::CONTRACT : ($delegate === false ? null : $delegate);
-        $account = new TokenAccount(self::MINT, self::PAYER, 210000 - $balanceShort, $held, 210000 - $allowanceShort);
-        $shortfall = Shortfall::diagnose($account, 210000);
-        $ours = $delegate === true;
+        $account = new TokenAccount(self::MINT, self::FUND, 210000 - $short, null, 0);
+        $shortfall = Shortfall::of($account, 210000);
 
         return [
             'would_move' => '0.21',
-            'balance_short' => $shortfall->balanceShort,
-            'balance_short_demo' => '0.0'.$balanceShort,
-            'allowance_short' => $shortfall->allowanceShort,
-            'allowance_short_demo' => '0.0'.$allowanceShort,
-            'delegate_is_ours' => $ours,
-            'clear' => $shortfall->isClear() && $ours,
+            'short' => $shortfall,
+            'short_demo' => '0.0'.$short,
+            'clear' => $shortfall === 0,
         ];
     }
 
@@ -145,8 +133,7 @@ final class TemplateRenderTest extends TestCase
     public function testTheFailurePanelRendersWithEveryKindOfCause(): void
     {
         $program = $this->program();
-        $account = new TokenAccount(self::MINT, self::PAYER, 1000, self::CONTRACT, 500000);
-        $shortfall = Shortfall::diagnose($account, 210000);
+        $shortfall = Shortfall::of(new TokenAccount(self::MINT, self::FUND, 1000, null, 0), 210000);
 
         $causes = [
             'this program' => Cause::of($program, $program->id, 6003),
@@ -163,6 +150,7 @@ final class TemplateRenderTest extends TestCase
             ]);
 
             self::assertStringContainsString('did not go through', $html, $label);
+            self::assertStringContainsString('Your fund is short by 0.209 DEMO', self::said($html), $label.': §8.2, one number and the answer is money');
         }
     }
 
@@ -183,7 +171,7 @@ final class TemplateRenderTest extends TestCase
 
     public function testEveryPanelStageRenders(): void
     {
-        $stages = ['anonymous', 'unfunded', 'set-meter', 'metered', 'limit', 'unreadable'];
+        $stages = ['anonymous', 'metered', 'limit', 'expired', 'failed', 'unreadable'];
 
         foreach ($stages as $stage) {
             $html = $this->renderStrictly('meter', [
@@ -215,7 +203,7 @@ final class TemplateRenderTest extends TestCase
         ];
 
         foreach ($outcomes as $outcome) {
-            foreach ([$this->solvency(80000, 0), $this->solvency(0, 50000), $this->solvency(0, 0)] as $solvency) {
+            foreach ([$this->solvency(80000), $this->solvency(0)] as $solvency) {
                 $meter = $this->panel([
                     'result' => MeterResult::granted(),
                     'solvency' => $solvency,
@@ -227,10 +215,8 @@ final class TemplateRenderTest extends TestCase
             }
         }
 
-        // And the pre-emptive warning. `Heads up` alone could not say which of
-        // its three branches had rendered — all three open that way — so the
-        // assertion names the branch.
-        $meter = $this->panel(['result' => MeterResult::granted(), 'solvency' => $this->solvency(80000, 0)]);
+        // And the pre-emptive warning.
+        $meter = $this->panel(['result' => MeterResult::granted(), 'solvency' => $this->solvency(80000)]);
         $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
         self::assertStringContainsString('Heads up: the next advance would try to move', $html);
     }
@@ -238,8 +224,8 @@ final class TemplateRenderTest extends TestCase
     /**
      * The warning survives the click that makes it true.
      *
-     * `can_meter` is a limit check, so the only thing that knows a balance is
-     * short is the solvency read this page already does — and the advance that
+     * `can_meter` checks the expiry and the limit, so the only thing that
+     * knows a fund is short is the solvency read this page already does — and the advance that
      * spends the balance down is exactly the one after which the next click is
      * certain to fail. The gate used to be "has anything been advanced", which
      * silenced the warning for the rest of the visit on the first success: the
@@ -263,7 +249,7 @@ final class TemplateRenderTest extends TestCase
         $strip = function (MeterOutcome $outcome, bool $settled) use ($piece): string {
             $meter = $this->panel([
                 'result' => MeterResult::granted(),
-                'solvency' => $this->solvency(80000, 0),
+                'solvency' => $this->solvency(80000),
                 'advanced' => ['outcome' => $outcome, 'views' => 7, 'signature' => null, 'settled' => $settled],
             ]);
 
@@ -280,190 +266,43 @@ final class TemplateRenderTest extends TestCase
         // And the one that did say it does not repeat itself.
         $failed = $strip(MeterOutcome::Failed, false);
         self::assertStringNotContainsString($warning, $failed, 'the failure report already named this');
-        self::assertStringContainsString('Your balance is short by', $failed, 'and it is still the failure report that names it');
+        self::assertStringContainsString('Your fund is short by', $failed, 'and it is still the failure report that names it');
     }
 
     /**
-     * A revoked delegate is the third thing that can stop a settle, and the
-     * advance's report had branches for two.
-     *
-     * SPL clears the delegate the moment the approved amount is spent to zero,
-     * so a revoked account usually reports a short allowance as well — and
-     * "the amount you approved no longer covers it" is the wrong account of an
-     * approval that is *gone*. Checked after the allowance it would have been
-     * wrong; checked after and reached only when the allowance happened to be
-     * intact, it was silent. So it is checked before, and both shapes are
-     * asserted: the revoke that left a delegated amount standing, and the
-     * ordinary one that did not.
+     * The panel for a browser with no session, while setting a meter is being
+     * rebuilt (fund design, slice 1). It says so, rather than offering a
+     * control that would not work, and when the read has just ended a session
+     * it says why the meter is gone from this browser (SPEC §5.3).
      */
-    public function testAFailedAdvanceNamesARevokedDelegateRatherThanTheAllowance(): void
+    public function testTheAnonymousPanelSaysTheMeterIsBeingRebuilt(): void
     {
-        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
-
-        foreach ([
-            'a stale delegated amount' => $this->solvency(0, 0, false),
-            'the usual zeroed one' => $this->solvency(0, 50000, false),
-        ] as $label => $solvency) {
-            $meter = $this->panel([
-                'result' => MeterResult::granted(),
-                'solvency' => $solvency,
-                'delegate' => null,
-                'delegate_is_ours' => false,
-                'advanced' => ['outcome' => MeterOutcome::Failed, 'views' => 7, 'signature' => null, 'settled' => false],
-            ]);
-            $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
-
-            self::assertStringContainsString('no longer a delegate on your token account, so the', $html, $label);
-            self::assertStringNotContainsString('The amount you approved no longer covers it', $html, $label.': the approval is gone, not short');
-        }
-    }
-
-    /**
-     * The strip's heads-up paragraph, one branch per reason a settle would be
-     * refused.
-     *
-     * Reached when the advance has not run yet, so it predicts rather than
-     * reports, and it is the same cascade as the failed advance's: balance
-     * first, then whose delegate it is, then the allowance. Only
-     * `bin/render-diff` was watching these, and it cannot compare across the
-     * shape change that introduced `delegate_is_ours`, so they are pinned here.
-     *
-     * The order is the assertion. A replaced approval reports a short allowance
-     * as well, because the delegated amount went with the delegate, and "the
-     * amount you approved is short" is the wrong account of an approval that
-     * belongs to somebody else.
-     */
-    public function testTheHeadsUpNamesTheReasonASettleWouldBeRefused(): void
-    {
-        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
-
-        foreach ([
-            'a short balance' => [
-                ['solvency' => $this->solvency(80000, 0)],
-                'your balance is short by',
-            ],
-            'an empty delegate field' => [
-                ['solvency' => $this->solvency(0, 0, false), 'delegate' => null, 'delegate_is_ours' => false],
-                'this site is no longer a delegate on your token account',
-            ],
-            "another site's approval" => [
-                ['solvency' => $this->solvency(0, 0, self::OTHER_DELEGATE), 'delegate' => self::OTHER_DELEGATE, 'delegate_is_ours' => false],
-                "another site's approval has replaced this one",
-            ],
-            'a short allowance' => [
-                ['solvency' => $this->solvency(0, 50000)],
-                'the amount you approved is short by',
-            ],
-        ] as $label => [$overrides, $expected]) {
-            $meter = $this->panel(['result' => MeterResult::granted()] + $overrides);
-            $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
-
-            self::assertStringContainsString('Heads up:', $html, $label.': there is something to warn about');
-            self::assertStringContainsString($expected, $html, $label);
-        }
-    }
-
-    /**
-     * A delegate whose approval was displaced is short on the allowance too, and
-     * the allowance is not what the reader needs to hear about.
-     */
-    public function testTheHeadsUpPrefersTheDisplacedApprovalOverTheAllowance(): void
-    {
-        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
-        $meter = $this->panel([
-            'result' => MeterResult::granted(),
-            'solvency' => $this->solvency(0, 50000, self::OTHER_DELEGATE),
-            'delegate' => self::OTHER_DELEGATE,
-            'delegate_is_ours' => false,
-        ]);
-        $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
-
-        self::assertStringContainsString("another site's approval has replaced this one", $html);
-        self::assertStringNotContainsString('the amount you approved is short by', $html);
-    }
-
-    /**
-     * A delegate another site installed is present, and is not this site's.
-     *
-     * `Shortfall::delegatePresent` says "present" and says nothing more, so
-     * before the repair this branch was unreachable for a replaced delegate:
-     * the strip fell through to "the amount you approved no longer covers it",
-     * which is the wrong account of an approval that belongs to somebody else.
-     * The two shapes read differently to a reader and are worded differently.
-     */
-    public function testAFailedAdvanceSaysWhenAnotherSitesApprovalReplacedThisOne(): void
-    {
-        $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
-        $meter = $this->panel([
-            'result' => MeterResult::granted(),
-            'solvency' => $this->solvency(0, 0, self::OTHER_DELEGATE),
-            'delegate' => self::OTHER_DELEGATE,
-            'delegate_is_ours' => false,
-            'advanced' => ['outcome' => MeterOutcome::Failed, 'views' => 7, 'signature' => null, 'settled' => false],
-        ]);
-        $html = $this->renderStrictly('meter-strip', ['result' => $meter['result'], 'meter' => $meter, 'piece' => $piece]);
-
-        self::assertStringContainsString("Another site's approval has replaced this one", $html);
-        self::assertStringNotContainsString('The amount you approved no longer covers it', $html);
-        self::assertStringNotContainsString('the approval was revoked', $html, 'it was not revoked; it was displaced');
-    }
-
-    /**
-     * §8.2 on the meter screen, from the result rather than from the shortfall.
-     *
-     * The failed screen used `$shortfall->delegatePresent`, which is true of a
-     * delegate another site installed, so the screen said nothing about the one
-     * thing standing between the reader and a settle.
-     */
-    public function testTheFailedMeterScreenNamesADisplacedApproval(): void
-    {
-        $shortfall = Shortfall::diagnose(
-            new TokenAccount(self::MINT, self::PAYER, 400_000, self::OTHER_DELEGATE, 400_000),
-            210_000,
-        );
-        self::assertTrue($shortfall->delegatePresent, 'the library sees a delegate, which is the whole trouble');
-
-        $meter = $this->panel([
-            'stage' => 'failed',
-            'delegate' => self::OTHER_DELEGATE,
-            'delegate_is_ours' => false,
-            'result' => MeterResult::failed('refused', null, $shortfall, null, [], false),
-        ]);
-        $html = $this->renderStrictly('meter', ['meter' => $meter, 'site' => $this->site()]);
-
-        self::assertStringContainsString("Another site's approval has replaced this one", $html);
-    }
-
-    /**
-     * `set_meter`, before the wallet dialog rather than after another site's
-     * next collection fails.
-     */
-    public function testSetMeterWarnsThatAuthorizingDisplacesAnotherSitesApproval(): void
-    {
-        $displaced = $this->renderStrictly('meter', [
-            'meter' => $this->panel([
-                'stage' => 'set-meter',
-                'contract' => null,
-                'delegate' => self::OTHER_DELEGATE,
-                'delegate_is_ours' => false,
-            ]),
+        $plain = self::said($this->renderStrictly('meter', [
+            'meter' => $this->panel(['stage' => 'anonymous', 'meter' => null, 'items_remaining' => null]),
             'site' => $this->site(),
-        ]);
+        ]));
+        self::assertStringContainsString('The meter is being rebuilt.', $plain);
+        self::assertStringNotContainsString('session with it has ended', $plain);
+        self::assertStringNotContainsString('<button', $plain, 'nothing to press that would not work');
+        self::assertStringNotContainsString('<script', $plain);
 
-        self::assertStringContainsString('already names a delegate, and it is not this site', $displaced);
-        self::assertStringContainsString('authorizing here replaces it', $displaced);
+        $ended = self::said($this->renderStrictly('meter', [
+            'meter' => $this->panel(['stage' => 'anonymous', 'ended' => true, 'meter' => null, 'items_remaining' => null]),
+            'site' => $this->site(),
+        ]));
+        self::assertStringContainsString('renewed from another device, which then holds it', $ended);
+    }
 
-        foreach ([
-            'nothing there yet' => ['delegate' => null, 'delegate_is_ours' => false],
-            'already ours' => ['delegate' => self::CONTRACT, 'delegate_is_ours' => true],
-        ] as $label => $held) {
-            $quiet = $this->renderStrictly('meter', [
-                'meter' => $this->panel(['stage' => 'set-meter', 'contract' => null] + $held),
-                'site' => $this->site(),
-            ]);
+    /** §8.2's `Expired`, which the delegate design never had. */
+    public function testAnExpiredMeterSaysWhenItExpired(): void
+    {
+        $html = self::said($this->renderStrictly('meter', [
+            'meter' => $this->panel(['stage' => 'expired', 'blocked' => (string) Blocked::expired()]),
+            'site' => $this->site(),
+        ]));
 
-            self::assertStringNotContainsString('already names a delegate', $quiet, $label.': there is nothing to warn about');
-        }
+        self::assertStringContainsString('Your meter has expired', $html);
+        self::assertStringContainsString('2026-10-02 12:00 UTC', $html);
     }
 
     /**
@@ -690,134 +529,59 @@ final class TemplateRenderTest extends TestCase
     }
 
     /**
-     * **The way out is on every screen that holds a wallet** (§6, §10.4).
+     * **The way out is on every screen that holds a session** (§6).
      *
      * It used to sit in the panel's last branch, which the trace of 2026-09-09
      * found is reachable only on a prefetch — so the "permanent" link had
-     * almost certainly never been on a screen, while `unfunded`, `set-meter`
-     * and `unreadable` stored an address and offered nothing. Those three are
-     * the states a stuck reader is in.
-     *
-     * The condition is the stored wallet and not the contract, because §10.4's
-     * promise is about the address rather than the authorization — and the
-     * wording follows the contract, because §6's "you have spent" is false for
-     * a reader who has not spent anything.
+     * almost certainly never been on a screen. The condition is a session's
+     * meter, or a session whose meter could not be read.
      */
-    public function testEveryStageHoldingAWalletOffersTheWayOut(): void
+    public function testEveryStageHoldingASessionOffersTheWayOut(): void
     {
-        $shortfall = Shortfall::diagnose(new TokenAccount(self::MINT, self::PAYER, 1000, self::CONTRACT, 500000), 210000);
-        $site = ['symbol' => 'DEMO', 'page_price_demo' => '0.01'];
+        $shortfall = Shortfall::of(new TokenAccount(self::MINT, self::FUND, 1000, null, 0), 210000);
 
-        $render = function (string $stage, bool $contract) use ($shortfall, $site): string {
-            $meter = $this->panel([
-                'stage' => $stage,
-                'blocked' => (string) Blocked::limitReached(1000),
-                'result' => MeterResult::failed('refused', null, $shortfall, null),
-            ]);
-            if (!$contract) {
-                $meter['contract'] = null;
-                $meter['views_remaining'] = null;
-            }
-
-            return self::said($this->renderStrictly('meter', ['meter' => $meter, 'site' => $site]));
-        };
-
-        // A reader who has authorized: §6's case, and the wording it asks for.
-        foreach (['failed', 'limit', 'metered'] as $stage) {
-            $html = $render($stage, true);
+        foreach (['failed', 'limit', 'expired', 'metered'] as $stage) {
+            $html = self::said($this->renderStrictly('meter', [
+                'meter' => $this->panel([
+                    'stage' => $stage,
+                    'blocked' => (string) Blocked::limitReached(1000),
+                    'result' => MeterResult::failed('refused', null, $shortfall, null),
+                ]),
+                'site' => $this->site(),
+            ]));
             self::assertStringContainsString('href="/meter"', $html, $stage);
             self::assertStringContainsString('what you have spent', $html, $stage);
         }
 
-        // A reader who has not, and whose address the site is holding anyway:
-        // §10.4's case. These three are where a stuck reader is.
-        foreach (['unreadable', 'unfunded', 'set-meter'] as $stage) {
-            $html = $render($stage, false);
-            self::assertStringContainsString('href="/meter"', $html, $stage);
-            self::assertStringContainsString('holding for you', $html, $stage);
-            self::assertStringNotContainsString('what you have spent', $html, $stage);
-        }
+        $unreadable = self::said($this->renderStrictly('meter', [
+            'meter' => $this->panel(['stage' => 'unreadable', 'meter' => null, 'items_remaining' => null]),
+            'site' => $this->site(),
+        ]));
+        self::assertStringContainsString('href="/meter"', $unreadable);
 
-        // Nobody's wallet, nothing to offer: a visitor who has not identified
-        // is not invited to be forgotten.
+        // No session, nothing to manage.
         $anonymous = self::said($this->renderStrictly('meter', [
-            'meter' => $this->panel(['stage' => 'anonymous', 'wallet' => null, 'contract' => null, 'views_remaining' => null]),
-            'site' => $site,
+            'meter' => $this->panel(['stage' => 'anonymous', 'meter' => null, 'items_remaining' => null]),
+            'site' => $this->site(),
         ]));
         self::assertStringNotContainsString('href="/meter"', $anonymous);
     }
 
-    /**
-     * `/meter` offers the forget path in every state that holds a wallet,
-     * including `unreadable` — the state where it is the only thing the site
-     * can still do, because `POST /signout` asks the chain nothing.
-     */
-    public function testTheMeterPageOffersForgettingEvenWhenTheChainIsUnreadable(): void
-    {
-        $common = [
-            'site' => ['symbol' => 'DEMO', 'page_price_demo' => '0.01'],
-            'wallet' => self::PAYER,
-            'chain' => 'solana:devnet',
-            'program' => $this->program()->id,
-            'token_program' => $this->program()->tokenProgram,
-            'symbol' => 'DEMO',
-            'contract' => ['address' => self::CONTRACT, 'limit' => '0.5', 'used' => '0.42', 'paid' => '0.28', 'unpaid' => '0.14'],
-            'views_remaining' => 8,
-            'blocked' => (string) Blocked::limitReached(1000),
-            'limit_floor' => '0.5',
-            'balance' => '0.05',
-            'live_grants' => 2,
-            'token_account' => self::ATA,
-            'delegate' => self::CONTRACT,
-            'approved' => '0.5',
-        ];
-
-        foreach (['unreadable', 'no-contract', 'open'] as $stage) {
-            $html = self::said($this->renderStrictly('manage-meter', ['stage' => $stage] + $common));
-            self::assertStringContainsString('action="/signout"', $html, $stage);
-        }
-
-        // What it does not do is guess. With the chain unreadable it says
-        // neither that a contract exists nor that none does. Compared with the
-        // whitespace collapsed, because these sentences are wrapped in the
-        // template and a line break is not a difference in what was said.
-        $unreadable = self::said($this->renderStrictly('manage-meter', ['stage' => 'unreadable'] + $common));
-        self::assertStringNotContainsString('You have no contract', $unreadable);
-        self::assertStringNotContainsString('Your contract stays open', $unreadable);
-
-        // And a visitor with no wallet is not offered it.
-        $anonymous = self::said($this->renderStrictly('manage-meter', ['stage' => 'anonymous'] + $common));
-        self::assertStringNotContainsString('action="/signout"', $anonymous);
-    }
-
     public function testManageMeterRendersInEveryState(): void
     {
-        $common = [
-            'site' => ['symbol' => 'DEMO', 'page_price_demo' => '0.01'],
-            'wallet' => self::PAYER,
-            'chain' => 'solana:devnet',
-            'program' => $this->program()->id,
-            'token_program' => $this->program()->tokenProgram,
-            'symbol' => 'DEMO',
-            'contract' => ['address' => self::CONTRACT, 'limit' => '0.5', 'used' => '0.42', 'paid' => '0.28', 'unpaid' => '0.14'],
-            'views_remaining' => 8,
-            'blocked' => (string) Blocked::limitReached(1000),
-            'limit_floor' => '0.5',
-            'balance' => '0.05',
-            'live_grants' => 2,
-            'token_account' => self::ATA,
-            'delegate' => self::CONTRACT,
-            'approved' => '0.5',
-        ];
+        $common = ['site' => $this->site()] + $this->panel(['blocked' => (string) Blocked::expired()]);
 
-        foreach (['anonymous', 'unreadable', 'no-contract', 'open'] as $stage) {
+        foreach (['anonymous', 'unreadable', 'open'] as $stage) {
             $html = $this->renderStrictly('manage-meter', ['stage' => $stage] + $common);
             self::assertNotSame('', trim($html), $stage);
         }
 
-        // A closed contract: no delegate left, which is claim 6's own case.
-        $html = $this->renderStrictly('manage-meter', ['stage' => 'open', 'delegate' => null, 'approved' => '0'] + $common);
-        self::assertStringContainsString('none', $html);
+        $open = self::said($this->renderStrictly('manage-meter', ['stage' => 'open'] + $common));
+        self::assertStringContainsString('2026-10-02 12:00 UTC', $open, 'the expiry is on the page');
+        self::assertStringContainsString('being rebuilt', $open, 'and the missing controls are said to be missing');
+
+        $ended = self::said($this->renderStrictly('manage-meter', ['stage' => 'anonymous', 'ended' => true] + $common));
+        self::assertStringContainsString('session with it has ended', $ended);
     }
 
     /**
@@ -1162,7 +926,7 @@ final class TemplateRenderTest extends TestCase
     {
         $piece = new \Newsprint\Content\Piece('two-orderings', 'T', 'L', 4, true, 'draft', '2026-09-07', null, '');
         $render = function (MeterResult $result) use ($piece): string {
-            $meter = $this->panel(['result' => $result, 'solvency' => $this->solvency(80000, 0)]);
+            $meter = $this->panel(['result' => $result, 'solvency' => $this->solvency(80000)]);
 
             return $this->renderStrictly('meter-strip', ['result' => $result, 'meter' => $meter, 'piece' => $piece]);
         };
@@ -1299,13 +1063,14 @@ final class TemplateRenderTest extends TestCase
         self::assertStringContainsString('[data-ix-of=', $swap);
     }
 
-    public function testAContractDecodesIntoThePanelWithoutGuessingAtItsShape(): void
+    public function testAMeterDecodesIntoThePanelWithoutGuessingAtItsShape(): void
     {
-        // Not a render: a reminder that `Contract` is a value object with
-        // named fields and a derived `unpaid()`, and that reading anything
-        // else off it is the mistake this whole file exists for.
-        $contract = new Contract(self::SITE, self::PAYER, 500000, 420000, 280000, 255);
+        // Not a render: a reminder that `Meter` is a value object with named
+        // fields and a derived `unpaid()`, and that reading anything else off
+        // it is the mistake this whole file exists for.
+        $meter = new Meter(self::SITE, self::FUND, self::KEY, 1_800_000_000, 500000, 420000, 280000, 255);
 
-        self::assertSame(140000, $contract->unpaid());
+        self::assertSame(140000, $meter->unpaid());
+        self::assertFalse($meter->expired(1_800_000_000), 'the program still meters at the expiry itself');
     }
 }

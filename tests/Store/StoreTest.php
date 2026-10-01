@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Newsprint\Tests\Store;
 
+use Newsprint\Auth\Binding;
 use Newsprint\Metering\ChargeState;
 use Newsprint\Store\Database;
 use Newsprint\Store\Store;
@@ -12,7 +13,11 @@ use PHPUnit\Framework\TestCase;
 /**
  * SPEC §10.4 says the erasure claim is testable from outside and that an
  * erasure claim nothing checks will be wrong within two releases. This is
- * that check, plus the expiry the claim actually rests on (§10.4 q.1).
+ * that check, plus the expiry the claim actually rests on (§10.4
+ * qualification 1).
+ *
+ * The meters, funds and keys are stand-ins named for their roles, the way the
+ * inspector names them. The store never decodes an address.
  */
 final class StoreTest extends TestCase
 {
@@ -23,37 +28,78 @@ final class StoreTest extends TestCase
         return new Store(Database::open(':memory:'), fn (): int => $this->now);
     }
 
+    private function binding(string $meter = 'MPDAfig', string $key = 'BKEYfig'): Binding
+    {
+        return new Binding($meter, 'FPDA'.substr($meter, 4), $key);
+    }
+
+    /** @return array{grants: int, sessions: int, meters: int, nonces: int, setups: int, closes: int} */
+    private static function swept(int $grants = 0, int $sessions = 0, int $meters = 0, int $nonces = 0, int $setups = 0, int $closes = 0): array
+    {
+        return compact('grants', 'sessions', 'meters', 'nonces', 'setups', 'closes');
+    }
+
+    public function testASessionHoldsTheMeterItsFundAndTheProvenKey(): void
+    {
+        $store = $this->store();
+        $id = $store->createSession(new Binding('MPDAfig', 'FPDAfig', 'BKEYfig'), 3_600);
+
+        $binding = $store->bindingForSession($id);
+        self::assertNotNull($binding);
+        self::assertSame(['MPDAfig', 'FPDAfig', 'BKEYfig'], [$binding->meter, $binding->fund, $binding->key]);
+
+        $this->now += 3_600;
+        self::assertNull($store->bindingForSession($id), 'and not past its time');
+    }
+
+    /**
+     * SPEC §5.3: a renewal from another device names that device's key, and
+     * the read that finds it ends the sessions under the old key. The other
+     * device's session, on the same meter, is not this one's to end.
+     */
+    public function testEndingSessionsForAKeyLeavesTheMetersOtherKeyAlone(): void
+    {
+        $store = $this->store();
+        $here = $store->createSession($this->binding(key: 'BKEYold'), 3_600);
+        $there = $store->createSession($this->binding(key: 'BKEYnew'), 3_600);
+
+        self::assertSame(1, $store->endSessions($this->binding(key: 'BKEYold')));
+
+        self::assertNull($store->bindingForSession($here));
+        self::assertNotNull($store->bindingForSession($there));
+    }
+
     public function testAGrantIsLiveUntilItExpires(): void
     {
         $store = $this->store();
-        $store->recordGrant('PAYRfig', 'why-approve-comes-first', 1_800);
+        $store->recordGrant('MPDAfig', 'why-approve-comes-first', 1_800);
 
-        self::assertNotNull($store->liveGrant('PAYRfig', 'why-approve-comes-first'));
+        self::assertNotNull($store->liveGrant('MPDAfig', 'why-approve-comes-first'));
 
         $this->now += 1_799;
-        self::assertNotNull($store->liveGrant('PAYRfig', 'why-approve-comes-first'));
+        self::assertNotNull($store->liveGrant('MPDAfig', 'why-approve-comes-first'));
 
         $this->now += 2;
-        self::assertNull($store->liveGrant('PAYRfig', 'why-approve-comes-first'), 'thirty minutes, and no more');
-        self::assertSame(['grants' => 1, 'sessions' => 0, 'payers' => 0, 'nonces' => 0, 'closes' => 0], $store->sweepExpired());
+        self::assertNull($store->liveGrant('MPDAfig', 'why-approve-comes-first'), 'thirty minutes, and no more');
+        self::assertSame(self::swept(grants: 1), $store->sweepExpired());
     }
 
     public function testTheSweepDeletesExpiredSessionsAndOrphanedLockRows(): void
     {
         $store = $this->store();
-        $store->createSession('PAYRfig', 3_600);
-        $kept = $store->createSession('PAYRcat', 7_200);
-        $store->withPayerLock('PAYRfig', static fn (): null => null);
-        $store->withPayerLock('PAYRcat', static fn (): null => null);
+        $store->createSession($this->binding('MPDAfig'), 3_600);
+        $kept = $store->createSession($this->binding('MPDAcat'), 7_200);
+        $store->withMeterLock('MPDAfig', static fn (): null => null);
+        $store->withMeterLock('MPDAcat', static fn (): null => null);
 
         $this->now += 3_601;
 
         self::assertSame(
-            ['grants' => 0, 'sessions' => 1, 'payers' => 1, 'nonces' => 0, 'closes' => 0],
+            self::swept(sessions: 1, meters: 1),
             $store->sweepExpired(),
             'the expired session goes, and so does the lock row nothing refers to',
         );
-        self::assertSame('PAYRcat', $store->walletForSession($kept), 'and nobody else is touched');
+        self::assertSame('MPDAcat', $store->bindingForSession($kept)?->meter, 'and nobody else is touched');
     }
 
     public function testTheSweepDeletesExpiredNoncesAndKeepsLiveOnes(): void
@@ -64,48 +110,84 @@ final class StoreTest extends TestCase
         $live = $store->issueNonce(300);
         $this->now += 101;
 
-        self::assertSame(['grants' => 0, 'sessions' => 0, 'payers' => 0, 'nonces' => 1, 'closes' => 0], $store->sweepExpired());
-        self::assertTrue($store->consumeNonce($live), 'a live challenge still works after a sweep');
+        self::assertSame(self::swept(nonces: 1), $store->sweepExpired());
+        self::assertTrue($store->consumeNonce($live), 'a live nonce still works after a sweep');
+    }
+
+    /**
+     * SPEC §5.2: thirty-two random bytes, forgotten at their first
+     * presentation. The second presentation is the replay, and it must find
+     * nothing whether the first one's proof passed or not, because the store
+     * cannot know which.
+     */
+    public function testANonceIsGoodOnceAndForgottenAtItsFirstPresentation(): void
+    {
+        $store = $this->store();
+
+        $nonce = $store->issueNonce(300);
+        self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $nonce, '32 bytes, hex');
+        self::assertTrue($store->consumeNonce($nonce));
+        self::assertFalse($store->consumeNonce($nonce), 'a replayed nonce is refused');
+
+        $expiring = $store->issueNonce(300);
+        $this->now += 301;
+        self::assertFalse($store->consumeNonce($expiring), 'a nonce past five minutes is refused');
+        self::assertSame(self::swept(), $store->sweepExpired(), 'and was forgotten when it was presented, not left for the sweep');
+
+        self::assertFalse($store->consumeNonce('not one this server issued'));
+    }
+
+    public function testThePendingSetupsTableIsSweptAfterItsWindow(): void
+    {
+        $pdo = Database::open(':memory:');
+        $store = new Store($pdo, fn (): int => $this->now);
+        $pdo->prepare('INSERT INTO pending_setups (id, session, key, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
+            ->execute(['setup', 'session', 'BKEYfig', $this->now, $this->now + 600]);
+
+        self::assertSame(self::swept(), $store->sweepExpired());
+        $this->now += 600;
+        self::assertSame(0, $store->oldestExpired(), 'an expired setup is a row about a reader, waiting');
+        self::assertSame(self::swept(setups: 1), $store->sweepExpired());
     }
 
     public function testAPendingCloseIsKeptUntilDroppedErasedOrExpired(): void
     {
         $store = $this->store();
-        $store->createSession('PAYRfig', 43_200);
-        self::assertNull($store->pendingClose('PAYRfig'));
+        $store->createSession($this->binding(), 43_200);
+        self::assertNull($store->pendingClose('MPDAfig'));
 
-        $store->recordPendingClose('PAYRfig', 'sigclose', 43_200);
-        self::assertSame(['signature' => 'sigclose', 'sent_at' => $this->now], $store->pendingClose('PAYRfig'));
+        $store->recordPendingClose('MPDAfig', 'sigclose', 43_200);
+        self::assertSame(['signature' => 'sigclose', 'sent_at' => $this->now], $store->pendingClose('MPDAfig'));
 
-        $store->dropPendingClose('PAYRfig');
-        self::assertNull($store->pendingClose('PAYRfig'), 'dropped when the close cannot land');
+        $store->dropPendingClose('MPDAfig');
+        self::assertNull($store->pendingClose('MPDAfig'), 'dropped when the close cannot land');
 
-        $store->recordPendingClose('PAYRfig', 'sigclose', 43_200);
-        $store->eraseReader('PAYRfig');
-        self::assertNull($store->pendingClose('PAYRfig'), 'and it goes with the erasure it was waiting for');
+        $store->recordPendingClose('MPDAfig', 'sigclose', 43_200);
+        $store->eraseMeter('MPDAfig');
+        self::assertNull($store->pendingClose('MPDAfig'), 'and it goes with the erasure it was waiting for');
 
-        $store->recordPendingClose('PAYRfig', 'sigclose', 600);
+        $store->recordPendingClose('MPDAfig', 'sigclose', 600);
         $this->now += 600;
-        self::assertNull($store->pendingClose('PAYRfig'), 'and it stops counting when it expires');
+        self::assertNull($store->pendingClose('MPDAfig'), 'and it stops counting when it expires');
     }
 
     public function testTheSweepDeletesExpiredAndOrphanedPendingCloses(): void
     {
         $store = $this->store();
-        $store->createSession('PAYRfig', 43_200);
-        $store->recordPendingClose('PAYRfig', 'sigfig', 600);
-        $store->createSession('PAYRcat', 43_200);
-        $store->recordPendingClose('PAYRcat', 'sigcat', 43_200);
-        $store->recordPendingClose('PAYRdog', 'sigdog', 43_200);
+        $store->createSession($this->binding('MPDAfig'), 43_200);
+        $store->recordPendingClose('MPDAfig', 'sigfig', 600);
+        $store->createSession($this->binding('MPDAcat'), 43_200);
+        $store->recordPendingClose('MPDAcat', 'sigcat', 43_200);
+        $store->recordPendingClose('MPDAdog', 'sigdog', 43_200);
 
         $this->now += 600;
 
         self::assertSame(
-            ['grants' => 0, 'sessions' => 0, 'payers' => 0, 'nonces' => 0, 'closes' => 2],
+            self::swept(closes: 2),
             $store->sweepExpired(),
-            'the expired note goes, and so does the note whose wallet has nothing left to erase',
+            'the expired note goes, and so does the note whose meter has nothing left to erase',
         );
-        self::assertNotNull($store->pendingClose('PAYRcat'), 'a live note for a live session stays');
+        self::assertNotNull($store->pendingClose('MPDAcat'), 'a live note for a live session stays');
     }
 
     public function testTheOldestExpiredRowSaysHowLongItHasWaited(): void
@@ -113,8 +195,8 @@ final class StoreTest extends TestCase
         $store = $this->store();
         self::assertNull($store->oldestExpired(), 'an empty store has nothing waiting');
 
-        $store->recordGrant('PAYRfig', 'article-one', 1_800);
-        $store->createSession('PAYRfig', 600);
+        $store->recordGrant('MPDAfig', 'article-one', 1_800);
+        $store->createSession($this->binding(), 600);
         $store->issueNonce(60);
         $this->now += 30;
         self::assertNull($store->oldestExpired(), 'nothing has expired yet');
@@ -129,73 +211,60 @@ final class StoreTest extends TestCase
         self::assertNull($store->oldestExpired(), 'and a sweep clears both');
     }
 
-    public function testAGrantIsPerArticleAndPerWallet(): void
+    public function testAGrantIsPerArticleAndPerMeter(): void
     {
         $store = $this->store();
-        $store->recordGrant('PAYRfig', 'article-one', 1_800);
+        $store->recordGrant('MPDAfig', 'article-one', 1_800);
 
-        self::assertNull($store->liveGrant('PAYRfig', 'article-two'));
-        self::assertNull($store->liveGrant('PAYRcat', 'article-one'));
+        self::assertNull($store->liveGrant('MPDAfig', 'article-two'));
+        self::assertNull($store->liveGrant('MPDAcat', 'article-one'));
     }
 
-    public function testClosingPurgesTheReaderButNotTheFaucetLedger(): void
+    public function testClosingPurgesTheMeterButNotTheFaucetLedger(): void
     {
         $store = $this->store();
-        $session = $store->createSession('PAYRfig', 3_600);
-        $store->recordGrant('PAYRfig', 'article-one', 1_800);
-        $store->recordGrant('PAYRfig', 'article-two', 1_800);
-        $store->recordGrant('PAYRcat', 'article-one', 1_800);
-        $store->recordFaucet('PAYRfig', 'sig');
+        $session = $store->createSession($this->binding('MPDAfig'), 3_600);
+        $store->recordGrant('MPDAfig', 'article-one', 1_800);
+        $store->recordGrant('MPDAfig', 'article-two', 1_800);
+        $store->recordGrant('MPDAcat', 'article-one', 1_800);
+        $store->recordFaucet('RDRfig', 'sig');
 
-        self::assertSame(['sessions' => 1, 'grants' => 2], $store->eraseReader('PAYRfig'));
+        self::assertSame(['sessions' => 1, 'grants' => 2], $store->eraseMeter('MPDAfig'));
 
-        self::assertNull($store->walletForSession($session), 'closing also signs the reader out');
-        self::assertNull($store->liveGrant('PAYRfig', 'article-one'));
-        self::assertNotNull($store->liveGrant('PAYRcat', 'article-one'), 'and touches nobody else');
+        self::assertNull($store->bindingForSession($session), 'closing also ends the session');
+        self::assertNull($store->liveGrant('MPDAfig', 'article-one'));
+        self::assertNotNull($store->liveGrant('MPDAcat', 'article-one'), 'and touches nobody else');
 
-        // §10.4 qualification 3, and §13.2's pass condition that the faucet
+        // §10.4 qualification 4, and §13.2's pass condition that the faucet
         // refuses rather than offering a button that will not work.
-        self::assertTrue($store->faucetGranted('PAYRfig'));
-        self::assertFalse($store->recordFaucet('PAYRfig'), 'one grant per wallet, close or no close');
+        self::assertTrue($store->faucetGranted('RDRfig'));
+        self::assertFalse($store->recordFaucet('RDRfig'), 'one grant per address, close or no close');
     }
 
-    public function testASignInNonceWorksOnceAndNotAfterItExpires(): void
+    public function testTheCountSurvivesTheMetersErasure(): void
     {
         $store = $this->store();
-
-        $nonce = $store->issueNonce(300);
-        self::assertTrue($store->consumeNonce($nonce));
-        self::assertFalse($store->consumeNonce($nonce), 'a replayed nonce is refused');
-
-        $expiring = $store->issueNonce(300);
-        $this->now += 301;
-        self::assertFalse($store->consumeNonce($expiring), 'a verifier that skips the expiry accepts a replay forever');
-    }
-
-    public function testTheCountSurvivesTheReadersErasure(): void
-    {
-        $store = $this->store();
-        $store->recordGrant('PAYRfig', 'article-one', 1_800);
+        $store->recordGrant('MPDAfig', 'article-one', 1_800);
         $store->countPurchase('article-one');
-        $store->eraseReader('PAYRfig');
+        $store->eraseMeter('MPDAfig');
 
-        // §10.4 q.5, second condition: if deleting a reader's data changed
-        // what the site can compute, it was never an aggregate.
+        // §10.4's aggregates, second condition: if deleting a reader's data
+        // changed what the site can compute, it was never an aggregate.
         self::assertSame(1, $store->purchases('article-one'));
     }
 
-    public function testThePayerLockRunsItsWorkAndCommits(): void
+    public function testTheMeterLockRunsItsWorkAndCommits(): void
     {
         $store = $this->store();
 
-        $result = $store->withPayerLock('PAYRfig', function () use ($store) {
-            $store->recordGrant('PAYRfig', 'article-one', 1_800);
+        $result = $store->withMeterLock('MPDAfig', function () use ($store) {
+            $store->recordGrant('MPDAfig', 'article-one', 1_800);
 
             return 'metered';
         });
 
         self::assertSame('metered', $result);
-        self::assertNotNull($store->liveGrant('PAYRfig', 'article-one'));
+        self::assertNotNull($store->liveGrant('MPDAfig', 'article-one'));
     }
 
     public function testTheLockRollsBackWhenTheWorkThrows(): void
@@ -203,8 +272,8 @@ final class StoreTest extends TestCase
         $store = $this->store();
 
         try {
-            $store->withPayerLock('PAYRfig', function () use ($store): void {
-                $store->recordGrant('PAYRfig', 'article-one', 1_800);
+            $store->withMeterLock('MPDAfig', function () use ($store): void {
+                $store->recordGrant('MPDAfig', 'article-one', 1_800);
 
                 throw new \RuntimeException('meter failed');
             });
@@ -217,45 +286,64 @@ final class StoreTest extends TestCase
 
         // §7.3's order is meter, record, render, confirm — and a grant
         // written beside a meter that threw must not survive.
-        self::assertNull($store->liveGrant('PAYRfig', 'article-one'));
+        self::assertNull($store->liveGrant('MPDAfig', 'article-one'));
+    }
+
+    public function testAPendingChargeIsSettledOnceAndOnlyForItsOwnSignature(): void
+    {
+        $store = $this->store();
+        $store->recordGrant('MPDAfig', 'article-one', 1_800, 'sigone', ChargeState::Pending);
+
+        self::assertFalse($store->settleCharge('MPDAfig', 'article-one', 'sigother', ChargeState::Confirmed));
+        self::assertTrue($store->settleCharge('MPDAfig', 'article-one', 'sigone', ChargeState::Confirmed));
+        self::assertFalse($store->settleCharge('MPDAfig', 'article-one', 'sigone', ChargeState::Refused), 'once');
+        self::assertSame(ChargeState::Confirmed, $store->liveGrant('MPDAfig', 'article-one')['charge'] ?? null);
     }
 
     /**
-     * A copy that already has a database gains the column the serve-first
-     * charge needs (2026-09-17), and the grants it already holds read as
-     * settled — they were written by the code that waited for confirmation.
+     * The fund design starts the schema fresh (`Database::VERSION`). A copy
+     * that ran the delegate design loses its sessions, grants and lock rows,
+     * all keyed by wallet, and keeps the two tables that are not reader data
+     * the redesign changed: the faucet ledger, carried to its new key, and the
+     * purchase counts.
      */
-    public function testAnExistingGrantsTableGainsTheChargeColumn(): void
+    public function testTheDelegateDesignsDatabaseStartsFreshAndKeepsTheLedger(): void
     {
-        $pdo = new \PDO('sqlite::memory:', null, null, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
-        $pdo->exec('CREATE TABLE grants (
-            wallet TEXT NOT NULL, article TEXT NOT NULL, granted_at INTEGER NOT NULL,
+        $pdo = new \PDO('sqlite::memory:', null, null, [
+            \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+            \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+        ]);
+        $pdo->exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, wallet TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)');
+        $pdo->exec('CREATE TABLE grants (wallet TEXT NOT NULL, article TEXT NOT NULL, granted_at INTEGER NOT NULL,
             expires_at INTEGER NOT NULL, signature TEXT, confirmed INTEGER NOT NULL DEFAULT 1,
-            PRIMARY KEY (wallet, article))');
-        $pdo->exec("INSERT INTO grants VALUES ('PAYRfig', 'article-one', {$this->now}, {$this->now} + 1800, 'sigold', 0)");
+            charge TEXT NOT NULL DEFAULT \'confirmed\', PRIMARY KEY (wallet, article))');
+        $pdo->exec('CREATE TABLE payers (wallet TEXT PRIMARY KEY, updated_at INTEGER NOT NULL)');
+        $pdo->exec('CREATE TABLE signin_nonces (nonce TEXT PRIMARY KEY, issued_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER, input TEXT)');
+        $pdo->exec('CREATE TABLE pending_closes (wallet TEXT PRIMARY KEY, signature TEXT NOT NULL, sent_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)');
+        $pdo->exec('CREATE TABLE faucet_ledger (wallet TEXT PRIMARY KEY, granted_at INTEGER NOT NULL, signature TEXT)');
+        $pdo->exec('CREATE TABLE article_purchases (article TEXT PRIMARY KEY, purchases INTEGER NOT NULL DEFAULT 0)');
+        $pdo->exec("INSERT INTO sessions VALUES ('s', 'PAYRfig', {$this->now}, {$this->now} + 3600)");
+        $pdo->exec("INSERT INTO grants (wallet, article, granted_at, expires_at) VALUES ('PAYRfig', 'article-one', {$this->now}, {$this->now} + 1800)");
+        $pdo->exec("INSERT INTO faucet_ledger VALUES ('PAYRfig', {$this->now}, 'sigfaucet')");
+        $pdo->exec("INSERT INTO article_purchases VALUES ('article-one', 3)");
 
         Database::migrate($pdo);
         $store = new Store($pdo, fn (): int => $this->now);
 
-        self::assertSame(ChargeState::Confirmed, $store->liveGrant('PAYRfig', 'article-one')['charge'] ?? null);
+        self::assertSame(Database::VERSION, (int) $pdo->query('PRAGMA user_version')->fetchColumn());
+        self::assertNull($store->bindingForSession('s'));
+        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM grants')->fetchColumn());
+        self::assertTrue($store->faucetGranted('PAYRfig'), 'the address keeps its one grant');
+        self::assertSame(3, $store->purchases('article-one'));
 
-        $store->recordGrant('PAYRfig', 'article-two', 1_800, 'signew', ChargeState::Pending);
-        self::assertSame(ChargeState::Pending, $store->liveGrant('PAYRfig', 'article-two')['charge'] ?? null);
-    }
+        $tables = $pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")->fetchAll(\PDO::FETCH_COLUMN);
+        self::assertSame(
+            ['article_purchases', 'faucet_ledger', 'grants', 'meters', 'nonces', 'pending_closes', 'pending_setups', 'sessions'],
+            $tables,
+            'the delegate design\'s own tables are gone',
+        );
 
-    /** `confirmed` is still written, and agrees with the new column. */
-    public function testTheOldColumnAgreesWithTheNewOne(): void
-    {
-        $pdo = Database::open(':memory:');
-        $store = new Store($pdo, fn (): int => $this->now);
-        $store->recordGrant('PAYRfig', 'article-one', 1_800, 'sigone', ChargeState::Pending);
-        $store->recordGrant('PAYRfig', 'article-two', 1_800, 'sigtwo');
-
-        $row = static fn (string $article): array => $pdo->query("SELECT confirmed, charge FROM grants WHERE article = '{$article}'")->fetch();
-        self::assertSame(['confirmed' => 0, 'charge' => 'pending'], $row('article-one'));
-        self::assertSame(['confirmed' => 1, 'charge' => 'confirmed'], $row('article-two'));
-
-        $store->settleCharge('PAYRfig', 'article-one', 'sigone', ChargeState::Confirmed);
-        self::assertSame(['confirmed' => 1, 'charge' => 'confirmed'], $row('article-one'));
+        Database::migrate($pdo);
+        self::assertTrue($store->faucetGranted('PAYRfig'), 'and a second open changes nothing');
     }
 }

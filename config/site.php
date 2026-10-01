@@ -93,22 +93,19 @@ return [
     // SPEC §5. Sign In With Solana, required with no fallback: a wallet
     // without the feature is refused by name rather than failed obscurely.
     'auth' => [
-        // The Wallet Standard chain identifier, and the string the wallet
-        // echoes into the signed message as "Chain ID". The type is an
-        // unconstrained string in the specification, so this is a value the
-        // two sides must agree on rather than one the format dictates; it
-        // matches what `signAndSendTransaction` is given, which is the
-        // agreement worth having.
+        // The Wallet Standard chain identifier. A string the two sides must
+        // agree on rather than one the format dictates; it matches what a
+        // wallet is given when it signs and sends.
         'chain_id' => 'solana:devnet',
-        // What the wallet shows the reader. Kept to one sentence: a statement
-        // nobody reads is a consent nobody gave.
-        'statement' => 'Sign in to Newsprint. This proves you hold this wallet. It authorizes nothing and moves no money.',
-        // Five minutes to complete the wallet dialog. Long enough for a first
-        // approval on a phone, short enough that an abandoned challenge is
-        // not a replay window.
-        'challenge_ttl_s' => 300,
+        // SPEC §5.2: a key proof's nonce is good for five minutes, the time a
+        // page needs to sign and answer, and is forgotten at its first use
+        // whatever the outcome.
+        'nonce_ttl_s' => 300,
+        // SPEC §10.4: a setup the reader has not continued is forgotten after
+        // ten minutes, with the wallet address it may have collected.
+        'setup_ttl_s' => 600,
         // The server side of the session. The cookie itself is a session
-        // cookie with no expiry (§5), so this is what bounds it.
+        // cookie with no expiry (§5.3), so this is what bounds it.
         'session_ttl_s' => 43_200, // twelve hours
     ],
 

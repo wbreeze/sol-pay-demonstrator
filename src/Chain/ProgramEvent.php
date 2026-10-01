@@ -30,10 +30,17 @@ use SolPay\Core\Base58;
  * **§8.1 is not being bent here.** That rule keeps the payer's address out of
  * anything this site shows, and logs are where the address lives. This class
  * is given the whole log array and returns exactly one decoded event with
- * three to five integer fields and a contract address; every other line is
- * dropped in this file and never reaches a template. The contract PDA is
- * derived from the reader's own wallet, so it is theirs, and it is already on
- * the screen two sections above.
+ * one to four integer fields and a meter address; every other line is
+ * dropped in this file and never reaches a template. The meter's address is
+ * derived from the site and the reader's fund, so it is theirs, and it is
+ * already on the screen two sections above.
+ *
+ * **The field names are 0.2.0's.** The fund design renamed `contract` to
+ * `meter` and `page_views` to `items`, and added `expiry` to `Renewed`. The
+ * discriminators did not move, because the event names did not: a decoder
+ * left on the old layout read `Metered` and `Closed` correctly under the old
+ * names and refused every `Renewed`, which was eight bytes longer than it
+ * expected (`notes/deployment.md`, "The program's events").
  */
 final class ProgramEvent
 {
@@ -41,7 +48,7 @@ final class ProgramEvent
      * `sha256("event:<Name>")[..8]`, and the field layout that follows it.
      *
      * Sizes are Borsh's, which for these types is little-endian and fixed
-     * width: `Pubkey` is 32 raw bytes, `u32` is 4, `u64` is 8. There is
+     * width: `Pubkey` is 32 raw bytes, `u32` is 4, `u64` and `i64` are 8. There is
      * nothing variable-length in any of the three, so a length mismatch is a
      * decode failure rather than something to parse around.
      *
@@ -50,28 +57,29 @@ final class ProgramEvent
     private const EVENTS = [
         'Metered' => [
             'discriminator' => '1e8e96a17c2e1d7e',
-            'fields' => ['contract' => 'pubkey', 'page_views' => 'u32', 'used' => 'u64', 'paid' => 'u64', 'transferred' => 'u64'],
+            'fields' => ['meter' => 'pubkey', 'items' => 'u32', 'used' => 'u64', 'paid' => 'u64', 'transferred' => 'u64'],
         ],
         'Renewed' => [
             'discriminator' => '8bfcd923492a0757',
-            'fields' => ['contract' => 'pubkey', 'limit' => 'u64', 'carried' => 'u64'],
+            'fields' => ['meter' => 'pubkey', 'limit' => 'u64', 'carried' => 'u64', 'expiry' => 'i64'],
         ],
         'Closed' => [
             'discriminator' => '321f579b87dcc3ef',
-            'fields' => ['contract' => 'pubkey', 'forgiven' => 'u64'],
+            'fields' => ['meter' => 'pubkey', 'forgiven' => 'u64'],
         ],
     ];
 
-    private const WIDTH = ['pubkey' => 32, 'u32' => 4, 'u64' => 8];
+    private const WIDTH = ['pubkey' => 32, 'u32' => 4, 'u64' => 8, 'i64' => 8];
 
     /**
      * @param array<string, int|string> $fields in the program's declaration
-     *                                          order, `contract` as base58 and
-     *                                          the rest as base units
+     *                                          order, `meter` as base58, the
+     *                                          expiry as Unix seconds, and the
+     *                                          rest as base units
      */
     private function __construct(
         public readonly string $name,
-        public readonly string $contract,
+        public readonly string $meter,
         public readonly array $fields,
     ) {
     }
@@ -151,25 +159,28 @@ final class ProgramEvent
 
                 // `V` is a little-endian u32. `P` is little-endian and
                 // *signed*, because PHP has no unsigned 64-bit integer: a
-                // value past PHP_INT_MAX comes back negative, and the honest
+                // u64 past PHP_INT_MAX comes back negative, and the honest
                 // report is that it is out of range rather than a number with
                 // the sign flipped. `Preflight`'s docblock draws the same
                 // ceiling for the same reason; ordinary token amounts are
-                // nowhere near it. The negative check below is what acts on it.
+                // nowhere near it.
+                //
+                // An `i64` is the one field here that may be negative and mean
+                // it, so the refusal is for unsigned types only. `Renewed`'s
+                // expiry is the only one, and a negative expiry is one the
+                // program would have refused as `ExpiryInPast`.
                 $unpacked = unpack($type === 'u32' ? 'V' : 'P', $chunk);
                 if ($unpacked === false) {
                     return null;
                 }
-                $fields[$field] = (int) $unpacked[1];
-            }
-
-            foreach ($fields as $value) {
-                if (is_int($value) && $value < 0) {
+                $value = (int) $unpacked[1];
+                if ($type === 'u64' && $value < 0) {
                     return null;
                 }
+                $fields[$field] = $value;
             }
 
-            return new self($name, (string) $fields['contract'], $fields);
+            return new self($name, (string) $fields['meter'], $fields);
         }
 
         return null;

@@ -22,40 +22,17 @@ use SolPay\Core\Ids;
  * `message`. An afternoon went into a diagnosis the server had already made.
  *
  * These are structural checks on that contract rather than on the chain: they
- * read the route and the client helper as text, because what failed was the
- * agreement between two files, and no test that exercises either one alone
- * would have noticed.
+ * read the class as text, because what failed was an agreement between files,
+ * and no test that exercises one alone would have noticed.
+ *
+ * **The route half is away until the faucet form returns** (slice 4 of the
+ * fund design). `POST /faucet` sent to the session's wallet, and a session
+ * under the fund design holds a meter, not a wallet. The check that the route
+ * answers with a `message` comes back with the route.
  */
 final class FaucetMessageTest extends TestCase
 {
-    private function frontController(): string
-    {
-        return (string) file_get_contents(dirname(__DIR__, 2).'/public/index.php');
-    }
-
-    /**
-     * The agreement itself: `post()` reads `message`, so every error status
-     * this helper can meet must carry one.
-     */
-    public function testPostReadsMessageAndTheFaucetSendsOne(): void
-    {
-        $tx = (string) file_get_contents(dirname(__DIR__, 2).'/public/assets/tx.js');
-
-        self::assertStringContainsString(
-            'payload.message',
-            $tx,
-            'post() is the contract these routes are written against',
-        );
-
-        $faucet = $this->route('/faucet');
-        self::assertStringContainsString(
-            "'message' =>",
-            $faucet,
-            'the faucet answers 409 on refusal, and post() shows message or nothing',
-        );
-    }
-
-    /** The shape `Faucet::grant()` promises, so the route can rely on it. */
+    /** The shape `Faucet::grant()` promises, so a route can rely on it. */
     public function testGrantAlwaysCarriesBothFields(): void
     {
         $source = (string) file_get_contents(dirname(__DIR__, 2).'/src/Chain/Faucet.php');
@@ -122,16 +99,5 @@ final class FaucetMessageTest extends TestCase
     public function testNamedCausesArePassedThrough(): void
     {
         self::assertStringContainsString('InsufficientFunds', $this->told(Ids::TOKEN_PROGRAM_ID, 1));
-    }
-
-    private function route(string $path): string
-    {
-        $source = $this->frontController();
-        $start = strpos($source, "\$app->post('{$path}'");
-        self::assertIsInt($start, "route {$path} not found");
-        $end = strpos($source, "\n});", $start);
-        self::assertIsInt($end);
-
-        return substr($source, $start, $end - $start);
     }
 }
