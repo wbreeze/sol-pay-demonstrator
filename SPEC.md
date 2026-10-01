@@ -2,65 +2,57 @@
 
 The sol-pay demonstrator site.
 
-Status: **implemented**. The site is built and runs, and every platform choice
-in §12 is decided and in service. This began as a draft on 2026-09-02 and has
-been amended in place since, each amendment dated where it sits — so a section
-carries the date it last moved rather than the date the document started. What
-is still genuinely open is collected in §14 and §15.
+Status: **draft for the fund design, begun 2026-10-01.** [sol-pay][solpay]
+0.2.0 replaced the delegate design with a fund, a meter per site per fund,
+and a browser key the meter names. This document specifies Newsprint on that
+design. The implementation still follows the delegate design until the work
+this document describes lands. The delegate-design specification, and the
+site built to it, are at the git tag `Progress_1.1.1`. Decisions here carry
+the date they were made. Where a decision has been proposed and not yet
+ratified, §14 lists it.
 
-Companion to [`sol-pay`](https://github.com/wbreeze/sol-pay). Where this
-document and `wasm-client/SPEC.md` disagree about the library, that document is
-right and this one is a bug. Where this document and the state diagram at the
-sol-pay repository root disagree about the flow, the diagram is right.
+[solpay]: https://github.com/wbreeze/sol-pay
+
+Where this document and `wasm-client/SPEC.md` disagree about the library,
+that document is right and this one is a bug. Where this document and the
+state diagram at the sol-pay repository root disagree about the flow, the
+diagram is right.
 
 ## 1. What this is
 
 **Newsprint** is a working site that meters a small set of articles with
-sol-pay. Each interested person runs their own copy against devnet, with a mint
-it issues on first run — see §12.0. There is no shared deployment and nobody
-operates anything.
+sol-pay. Anyone interested runs their own copy against devnet, with a mint it
+issues on first run (§12.0). One hosted instance also exists, for trying real
+wallets and for a link to share (§12.6). It is a demonstration, operated as
+one.
 
-The name is what a newspaper was made of, and what reading one used to be like.
-You bought a paper, and nobody knew which parts of it you read — not the
+The name is what a newspaper was made of, and what reading one used to be
+like. You bought a paper, and nobody knew which parts of it you read: not the
 newsagent, not the publisher, not an advertiser. Which pages you lingered on
-was between you and the page. Nobody designed that property; it was a property
-of paper, and every digital replacement has quietly removed it. This site is
-the argument that it can be paid for instead, and kept.
-
-So the name carries the thesis, which is §10.2's and is not a claim about
+was between you and the page. Nobody designed that property; it was a
+property of paper, and every digital replacement has quietly removed it. This
+site is the argument that it can be paid for instead, and kept. So the name
+carries the thesis, which is §10.2's, and the thesis is not a claim about
 price.
 
-**An earlier draft called this Penny Press**, after the *New York Sun* of 3
-September 1833 — one cent a copy in the street against six-cent papers sold by
-annual subscription. It is a good parallel to what metering proposes, and it is
-a parallel about *unbundling and price*, which is the less interesting half of
-what is being demonstrated. It also invited an objection about how those papers
-were really funded, which had to be answered in this section before anyone
-raised it. The new name invites no such thing, and the section is shorter for
-it.
-
-The material is kept rather than discarded — it is good history and the
-rebuttal is a sound one — as a working note at `content/NamingTheSite.md`. It
-is background, not the argument.
-
-It exists because `sol-pay-client` is a library that deliberately ships no
-application. `wasm-client/SPEC.md` §1 lists three screens — `set_meter`,
-`manage_meter`, `metered_page` — and says they are the integrator's to build.
-Nobody has built them. Until someone does, every claim the library makes about
+The site exists because the sol-pay client library deliberately ships no
+application. `wasm-client/SPEC.md` names the screens a site builds —
+`set_meter`, `manage_meter`, `metered_page` — and says they are the
+integrator's. Until someone builds them, every claim the library makes about
 being integrable is untested, and the first integrator pays to discover what
 the library forgot.
 
 So this is two things at once, and the second is the one that constrains the
 design:
 
-1. **A demonstration.** Someone evaluating sol-pay reads the article, watches
+1. **A demonstration.** Someone evaluating sol-pay reads an article, watches
    the meter move, and sees the transfer land on the explorer.
 2. **The reference integration.** Someone who has decided to adopt sol-pay
    reads this repository to find out what they have to write. Every part the
-   library does not supply — remote procedure calls to a node (RPC), a wallet
-   adapter, session, the viewer-to-wallet map, the decision to meter, error
-   attribution, log hygiene — appears here in one place, in the smallest honest
-   form.
+   library does not supply appears here in one place, in the smallest honest
+   form: remote procedure calls to a node (RPC), the Solana Pay transaction
+   request, the browser key and its proof, the session, the viewer-to-meter
+   map, the decision to meter, error attribution, and log hygiene.
 
 The second purpose is why the machinery is visible (§9) rather than hidden. A
 demo that conceals the plumbing proves the reading experience is unobtrusive
@@ -69,90 +61,87 @@ and teaches nothing. This one shows both halves at once.
 ### What it is not
 
 Not a product, not a template to fork into production, and not a content
-management system (CMS). It runs on devnet with a token that is worth nothing,
-and it holds a signing key on a web server, which is defensible only because
-that key controls nothing of value. Both facts are stated on the site itself,
-not only here.
+management system (CMS). It runs on devnet with a token that is worth
+nothing. It holds signing keys on a web server, which is defensible only
+because those keys control nothing of value. It hands out its token from a
+form (§4.3), which no real site would do. All three facts are stated on the
+site itself, not only here.
 
 ## 2. What the demo has to prove
 
-The list is short and every item is falsifiable. If the finished demo cannot do
-one of these, it has failed, whatever else it does.
+The list is short, and every item is falsifiable. If the finished demo cannot
+do one of these, it has failed, whatever else it does.
 
 | # | Claim | Where it is proven |
 | --- | --- | --- |
-| 1 | A reader with no relationship to the site can start paying in one wallet interaction | `set_meter`: `approve_and_open` is one transaction, one signature |
-| 2 | Reading afterwards costs no interaction at all | The article path never touches the wallet |
-| 3 | The site charges only when a charge is worth making | The settle fires on the tenth view, not the first |
-| 4 | The payer's exposure is bounded by a number they chose | The limit stops metering, on chain, and the demo shows the block |
-| 5 | Reaching the limit is an ordinary screen, not an error | `manage_meter` offers renew or close |
-| 6 | Leaving costs nothing and leaves nothing behind | `close_and_revoke`, and the payer's token account shows no delegate afterwards — in the inspector, and on any explorer |
+| 1 | A reader with no relationship to the site can start paying in one wallet gesture | `set_meter`: one scan, one transaction, one signature (§6.3) |
+| 2 | Reading afterwards costs no wallet interaction at all | The browser key answers for the reader (§5); the wallet is not involved again until a renewal |
+| 3 | The site charges only when a charge is worth making | The settle fires at the collection threshold, not on every view (§4.2) |
+| 4 | The reader's exposure is bounded by numbers the reader chose | The limit and the expiry stop metering on chain, the fund's balance caps what any site can take, and the demo shows each block |
+| 5 | Reaching the limit or the expiry is an ordinary screen, not an error | `manage_meter` offers renewal or closing the meter |
+| 6 | Leaving costs nothing | Closing the meter takes it off the chain, and it is then gone from the chain — in the inspector, and on any explorer |
 | 7 | Every number on the screen came from an account, not from the server's memory | The inspector shows the decode beside the render |
 
-Claim 7 is the one that makes the other six credible. A demo that reports its
-own state proves nothing; this one reports what it read.
+Claim 4 is `wasm-client/SPEC.md` §4.7's sentence, and it is worth repeating
+because the design has to keep it true: *a site can take at most its meter's
+limit before its expiry; a browser can take nothing; the program can take at
+most the fund's balance; the reader sets all three.*
 
-**Claim 6 named the wrong witness until 2026-09-07**, and it is worth saying
-why rather than quietly editing it. It read "the wallet shows no delegate
-afterwards". It does not: the delegate is two fields on the payer's **Solana
-Program Library (SPL) token account** — `delegate` and `delegated_amount` —
-and a wallet shows balances. Tested against Phantom, the reader could not
-perform the check the claim required. So the claim now points at the account,
-which §9 was already going to decode, and at an explorer, so the check does
-not depend on this site's own rendering either. A falsifiable claim whose test
-nobody can run is not falsifiable.
+Claim 6 is about the meter, not the fund. Closing a meter ends this site's
+claim on the reader's money. The money itself stays in the reader's fund,
+where other sites may still be drawing on it, and taking it back out is the
+reader's business through a wallet (§11). The site says so at the close
+rather than implying that leaving returns the deposit.
+
+Claim 7 makes the other six credible. A demo that reports its own state
+proves nothing; this one reports what it read.
 
 ## 3. Shape
 
-Three pieces, and the split follows `wasm-client/SPEC.md` §3 exactly — the two
-consumers of the library sign different things and therefore run in different
-places.
+Four parties. The split follows `wasm-client/SPEC.md` §3, with the wallet
+moved out of the page by the fund design.
 
-**Browser.** Holds the payer's wallet. Signs `approve_and_open`,
-`approve_and_renew`, `close_and_revoke`, and the sign-in message. Uses the npm
-package. Never sees the site authority.
+**The page.** Holds the browser key, an Ed25519 key it generated for this site
+on this device (§5). Signs two things with it: key proofs, and the close of its meter.
+Holds no wallet, and loads no Solana library: WebCrypto signs, and the server
+compiles every message the key signs (§12.2).
 
-**Server.** Holds the site authority. Signs `meter_and_settle` and nothing
-else. Reads accounts over RPC, decodes them, runs preflight, decides whether
-this request is metered, and delivers the article. Uses `php-client`, published
-as `wbreeze/sol-pay-client` on Packagist, since §12.1 decided PHP; a Rust
-server would take the crates.io crate for the same row. Never sees the payer's
-key.
+**The wallet.** The reader's own, on whatever device it lives. It signs one
+transaction per site per device: the setup that opens or renews a meter. It
+fetches that transaction from this site's server by a Solana Pay scan or tap
+(§6.3). It never talks to the page.
 
-**First-run setup.** Creates the demo mint and the treasury account, calls
-`initialize_site` once, and writes the resulting addresses into the
-configuration the server and browser both read.
+**The server.** Holds the site authority. Composes the setup transaction the
+wallet fetches, verifies key proofs, decides whether a request is metered,
+signs `meter_and_settle`, and pays the fee for every close the browser key signs. Reads accounts
+over RPC, decodes them, and runs preflight, using `wbreeze/sol-pay-client`
+from Packagist, since §12.1 decided PHP. Never sees the reader's wallet key or
+the browser key's private half.
 
-It is a **screen rather than a command**, decided at §12.0. An earlier draft of
-this section made it an operator CLI, on the grounds that setup is rare,
-irreversible on a given deployment, and needs authority the request path should
-not carry. Every one of those is still true; what changed is where the answer
-lives. §12.0's shape — each person runs their own copy, and the prerequisite is
-one language runtime — makes a setup step that needs anything else the largest
-obstacle between a clone and a running page, and every call it makes is
-available over JSON-RPC including `requestAirdrop`. So the separation is
-enforced in the code rather than by the shape of the entry point: setup runs
-before a site authority exists, because generating one is the first thing it
-does, and it refuses once the site is provisioned. The operator never handles a
-keypair, which was never something a CLI was going to give them.
+**First-run setup.** Creates the demo mint and the treasury, calls
+`initialize_site` once, and records the resulting addresses. It is a screen
+rather than a command (§12.0). Setup runs before a site authority exists,
+because generating one is the first thing it does, and it refuses once the
+site is provisioned. The operator never handles a keypair.
 
-The article text is static content in the repository. There is no database of
-articles and no editor.
+The article text is static content in the repository. There is no database
+of articles and no editor.
 
 ## 4. Chain setup
 
 ### 4.1 The mint
 
-The demo issues its own SPL mint, **DEMO**, six decimals. Six because USDC has
-six, and an integrator reading this repository should see the same arithmetic
-they will meet in production rather than a simplified version of it.
+The demo issues its own SPL mint, **DEMO**, with six decimals. Six because
+USDC has six, so an integrator reading this repository meets the same
+arithmetic they will meet in production rather than a simplified version.
 
-Its authority is the operator key. Nothing else can mint DEMO, and DEMO buys
-nothing. The site says so.
+Its mint authority is the faucet key (§4.4). Nothing else can mint DEMO, and
+DEMO buys nothing. The site says so.
 
-Devnet USDC was considered and rejected: it makes the amounts read
-realistically but puts the demo's ability to onboard a visitor behind a faucet
-nobody here operates. A demo that cannot fund its own visitor is not a demo.
+Devnet USDC was considered and rejected on 2026-09-02. It makes the amounts
+read realistically, but it puts the demo's ability to fund a visitor behind
+a faucet nobody here operates. A demo that cannot fund its own visitor is not
+a demo.
 
 ### 4.2 Site parameters
 
@@ -161,2509 +150,1570 @@ with the DEMO figure beside them:
 
 | parameter | base units | DEMO | in views |
 | --- | --- | --- | --- |
-| `page_price` | 10_000 | 0.01 | 1 |
+| `item_price` | 10_000 | 0.01 | 1 |
 | `collection_threshold` | 100_000 | 0.10 | 10 |
 | `min_limit` | 500_000 | 0.50 | 50 |
 
-The program requires `page_price > 0` and `min_limit > collection_threshold`;
-500_000 > 100_000 holds. The sol-pay README asks for a minimum limit of forty
-or fifty times the page price, which is where fifty views comes from.
+The program requires `item_price > 0` and `min_limit > collection_threshold`.
+The sol-pay README asks for a minimum limit of forty or fifty times the item
+price, which is where fifty views comes from. One item here is one article
+view.
 
-**`page_price` is a demo figure and not a recommended price.** It was chosen so
-a visitor reaches the collection threshold in ten views, not from any analysis
-of what an article is worth. The evidence says a real deployment would price
-several times higher — every venture that has actually sold articles landed
-between 10¢ and 40¢, and the break-even arithmetic against news ad revenue
-agrees with them. Nothing in the program constrains `page_price`, so this is a
-per-site decision rather than a property of the design.
+**The item price is a demo figure, not a recommended price.** It was chosen so
+a reader reaches the collection threshold in ten views, not from any analysis
+of what an article is worth. Every venture that has actually sold single
+articles landed between 10¢ and 40¢, and the break-even arithmetic against
+news advertising revenue agrees with them. Nothing in the program constrains
+the price, so a real deployment's price is its own decision.
 
-What the visitor experiences follows from those three numbers and is the reason
-they were chosen: a settle transaction on the tenth article, and the limit on
-the fifty-first. Both are reachable inside one sitting, which is the whole
-requirement.
+What the reader experiences follows from the three numbers, and is the
+reason they were chosen: a settle on the tenth view, and the limit on the
+fifty-first. Both are reachable inside one sitting. Fifty articles is more
+clicking than a visitor will do, so §7.4 lets them skip ahead without lying
+about it.
 
-Fifty articles is more clicking than a visitor will do. §7.4 says how the demo
-lets them skip ahead without lying about it, and why its step is seven views
-rather than ten.
+These are the values `Progress_1.1.1` initialized on devnet. The upgrade to
+the fund design kept the `Site` account's layout, and `bin/fund-trials site`
+confirmed on 2026-09-30 that the 0.2.0 client library decodes the existing
+account and that it agrees with `config/site.php`.
 
-### 4.3 The faucet
+### 4.3 The faucet: a fountain for the demo
 
-A visitor arrives with a wallet holding no devnet SOL and no DEMO. The site
-funds them:
+**No implementation would ship this.** It exists because a demonstration on
+devnet has no exchange to buy from, and it stands in for exactly that step.
 
-- **0.05 SOL**, transferred from the site's own funded wallet — the one §12.0's
-  setup page airdropped at first run — rather than requested from the public
-  devnet faucet on the visitor's behalf. One reader against their own copy would
-  probably survive the public faucet; routing it through the site keeps the
-  faucet honest about who is paying, which is the site.
-- **0.60 DEMO**, minted to the visitor's associated token account, creating
-  that account idempotently in the same transaction. A little over one full
-  minimum limit, and well under two.
+On mainnet a reader buys USDC into a wallet first, somewhere other than the
+site, along with a little SOL for fees and rent. The site's setup then creates
+a fund and moves coin into it. The faucet is Newsprint's stand-in for the
+buying, and it is kept separate from setup so that setup stays the same
+transaction it would be on mainnet. Decided 2026-10-01.
 
-That figure, and not a generous one, is deliberate. A visitor who opens at the minimum,
-spends to the limit, renews and keeps going runs out of *balance* three clicks
-into the second period — which is the second acceptance walkthrough in §13.2
-and the only way to reach `diagnose`'s `balance_short` branch. A generous
-faucet would make that state unreachable and quietly delete one of the two
-failure modes the demo exists to show. The faucet's stinginess is a feature and
-the site says so on the way past.
+**The reader pastes a wallet address into a form**, the way they would give an
+address to an exchange, or to the public devnet faucet. The site sends to it:
 
-One grant per wallet address, and a rate limit per address and per source
-address. The faucet is the only part of this demo with an abuse surface worth
-naming, because it is the only part that gives anything away. What it gives
-away is worthless, so the limit exists to keep the operator wallet solvent, not
-to protect an asset.
+- **SOL** from the faucet key, for the rent and fees the reader's wallet pays
+  at setup;
+- **DEMO**, minted to the address's associated token account, which the same
+  transaction creates if it is missing.
 
-**Nothing is behind a click.** What is about to happen — which wallet, how much
-SOL, how much DEMO, that it is once per wallet, that none of it is worth
-anything, and that the SOL is for the contract's rent and fees — is on the
-screen *before* the reader touches anything, and a single button fires it.
+The page never learns the wallet otherwise (§5), so the form is the only place
+the site is told an address on purpose, and the privacy page lists it (§10.2).
 
-One click that silently moves tokens into someone's wallet is exactly the
-interaction pattern a reader should be suspicious of everywhere else. A demo
-that trains the reflex out of them is teaching the wrong thing, whatever the
-tokens are worth. **That is the property being protected, and the count of
-buttons was only ever a means to it.**
+**The amounts.** The DEMO grant is 0.60: a little over one minimum limit and
+well under two. That stinginess is deliberate. A reader who opens at the
+minimum, reads to the limit, renews and keeps going runs the *fund* short
+three clicks into the second period, which is §13.2's walkthrough and the only
+way to reach a settle refused for want of money. A generous faucet would make
+that state unreachable.
 
-**Amended 2026-09-07: one step, not two.** This section originally specified a
-button that opens an explaining screen and a second button on that screen. That
-shape assumed the reader arrives at the faucet by asking for it — which was
-true when there was a sign-in screen to be sent onward from. With the meter in
-the article (§5, §6), the reader arrives at the explanation without clicking
-anything: it is simply the state the panel is in when they hold no DEMO. There
-is no prior click for the explanation to sit behind, so a confirm step would
-add a click without adding a disclosure, and the paragraph above is satisfied
-as written.
+The SOL grant is 0.01. Measured on devnet on 2026-09-30, the reader's first
+setup costs 0.003886 SOL in all: rent of 0.001046 for the fund, 0.001488 for
+its token account and 0.001346 for the meter, plus a 0.000005 fee. Each later
+renewal, deposit or wallet-signed close costs a fee alone, and closing returns
+the rent. So 0.01 covers a first setup, a second fund or a second device's
+setup, and hundreds of fees besides. The grant under the delegate design was
+0.05, about thirteen times a setup. At 0.01, the faucet key's reserve of
+0.25 SOL funds about twenty readers rather than about five. Proposed (§14).
 
-The faucet is a demo affordance and is marked as one in the panel. No
-integrator should copy it.
+**Nothing is behind a click.** Before the reader submits the form, the screen
+says which address will receive what, that it is once per address, that none
+of it is worth anything, and that this is the demo's fountain rather than
+anything a real site would offer. A single button sends it.
+
+**One grant per address**, recorded in the faucet ledger, and a rate limit per
+address and per source IP address. The faucet is the only part of this demo
+with an abuse surface worth naming, because it is the only part that gives
+anything away. What it gives away is worthless, so the limit exists to keep
+the faucet key solvent, not to protect an asset.
 
 ### 4.4 Keys the server holds
 
-Two, and they may be the same key:
+Two:
 
 - the **site authority**, which signs `meter_and_settle` and is what
-  `has_one = authority` checks;
-- the **faucet key**, which holds SOL to distribute and mint authority over
-  DEMO.
+  `has_one = authority` checks. It also pays the fee for every close of a meter,
+  because the browser key that signs `close_meter` holds no SOL (§5.4).
+- the **faucet key**, which holds SOL to distribute and is the mint authority
+  over DEMO.
 
-Separating them costs nothing and is what a real deployment would do, so they
-are separate here even though the demo would work with one. What custody a real
-deployment owes this key is deferred to §15. Neither is in the
-repository. Both are devnet keys controlling nothing of value, and the site
-says that out loud rather than implying a security posture it does not have.
+Separating them costs nothing and is what a real deployment would do. Neither
+is in the repository. Both are devnet keys controlling nothing of value, and
+the site says so rather than implying a security posture it does not have.
+What custody a real deployment owes the authority key is §15.
 
-## 5. Identity
+The hosted instance (§12.6) has its own site, with its own authority, mint and
+faucet key. Decided 2026-10-01: an environment that shares a key with another
+shares its compromise too (§15.2).
 
-The library takes a wallet address and is silent about where it came from
-(`wasm-client/SPEC.md` §4). The demo has to choose, and it chooses **Sign In
-With Solana (SIWS)** over a server session, because `wasm-client/SPEC.md` §6.6
-recommends exactly that and ships none of it. Supplying the worked example it
-recommends is what the rest of this section is: everything below is implemented
-here and nowhere upstream.
+### 4.5 Funding the server
 
-**Decided 2026-09-05: `signIn`, and no fallback.** A wallet that does not
-offer the Wallet Standard `signIn` feature is not supported here, and the
-meter panel says so and names a wallet that does. A demonstration is
-entitled to require its dependencies; a product is not, and the difference is
-worth stating rather than blurring. The consequences are in "What requiring it
-costs" below.
+Both keys spend SOL, and on devnet nothing replenishes them unless someone
+does. This section says who pays what and how the site stays funded.
 
-**Decided 2026-09-07: there is no sign-in screen.** Identifying happens inside
-the meter panel on the article, one click before the limit.
+**Who pays what.** Measured on devnet, 2026-09-30:
 
-Two reasons, and the first is that sol-pay's own diagram never had one.
-`state-machine.plantuml` has no sign-in node: `identified` is a `<<choice>>`,
-and "viewer not identified" goes straight to `set_meter`. The screen was this
-document's addition, and §6 admitted as much.
+| action | paid by | cost |
+| --- | --- | --- |
+| first setup: fund, its token account, meter | the reader's wallet | 0.003886 SOL (rent 0.003881, returned on close; fee 0.000005) |
+| renewal, or a deposit alone | the reader's wallet | 0.000005 SOL fee |
+| `meter_and_settle`, settling or not | the site authority | 0.000005 SOL fee |
+| closing the meter, `close_meter` signed by the browser key | the site authority | 0.000010 SOL (two signatures: the authority's and the key's) |
+| a faucet grant | the faucet key | the grant, plus the reader's token account rent (0.001488) when it is new, plus a fee |
 
-**And neither does this repository's own flow diagram, since 2026-09-13.**
-`metered-request.plantuml` had a `sign_in` branch on the no-session path, which
-made the diagram the last place the screen still existed; `94da085` replaced it
-with a note reading that identifying happens on the article and there is no
-sign-in page. Recorded here because a diagram that disagrees with a published
-article is the kind of thing somebody finds by reading rather than by testing —
-and because this document went on listing the old branch as an outstanding job
-for five days after it was fixed.
+**The reader pays the rent, and sol-pay decides that.** `open_fund` and
+`open_meter` create their accounts with the reader as payer, so a site cannot
+pay a reader's rent without a change to the program. It matters less than it
+looks. The rent is a deposit, not a fee: the program returns the meter's rent
+to the reader at the close and the fund's at `close_fund`, whoever signs. A
+site that paid it would be making the reader a gift. What the reader has to
+hold is SOL for the moment of setup, which is what §4.3's grant is for.
 
-The second is the site's own argument. A page whose only purpose is to collect
-an identity reads as identifying for tracking, which is the thing §10 disputes.
-The identification here is real but narrow — one address, one session id — and
-putting it where the money is about to move is what makes the narrowness
-visible. A reader who declines has lost nothing and is still reading the lede.
+**How much.** The authority's cost is a fee per page view that charges, plus
+two per close. At 0.000005 SOL, a tenth of a SOL meters twenty thousand
+views. The faucet key's cost is dominated by the SOL grant, which is why §4.3's
+figure matters.
 
-**Decided 2026-09-08: the identity is shown on the meter, not in the
-masthead.** The site used to carry `signed in as 4xkQ…9fT` and a sign-out link
-across the top of every page. That is the same mistake one revision later. A
-name and a way out, repeated on every screen, is the furniture of an account,
-and it invites a reader to assume the account has contents — a profile, a
-history, preferences — when what exists is a cookie, a row mapping it to one
-address, and a contract on a public chain. Answering "who does this site think
-I am" only where the answer does work is the more honest placement, and
-`manage_meter` is already reachable at any time (§6), so nothing is buried.
+**How, on devnet.** First-run setup asks the public endpoint for an airdrop to
+the authority, then moves a reserve to the faucet key (§12.0). The endpoint's
+faucet refuses more often than it works and does not say why. The other routes
+are the web faucet at faucet.solana.com and a transfer from any funded devnet
+wallet. `bin/devnet-smoke` prints the address and these routes when the
+authority is empty.
 
-The vocabulary follows. **"Signed in" and "signed out" name a relationship this
-site does not have**, so the screens say the **paying wallet** is *stored* or
-*forgotten*. Storing one is not joining anything and forgetting one is not
-closing anything, which is why the wording has to distinguish them: the meter
-carries **Forget this wallet**, which drops the cookie and the row and touches
-nothing on chain, and it says so beside the button. The contract, the delegate
-and the unpaid residue survive it, and identifying again finds all three,
-because a contract address is derived from the site and the payer rather than
-remembered. A reader who confused the two would think they had revoked an
-authorization that is still live.
+**Knowing before it runs out.** `bin/devnet-canary` already exits 1 when the
+faucet key can no longer fund a visitor. It gains the same check for the
+authority: enough for a configured number of charging views and closes.
+`GET /health` reports both. A demonstration that fails because a key ran
+dry looks broken, not poor, so the warning belongs where the operator already
+looks. Decided 2026-10-01: good enough for a demonstration.
 
-**What was not dropped is the signature.** It is tempting, with no screen, to
-let the contract itself be the identity: the browser reports the signature of
-the transaction that opened it, and the server reads the payer off the account.
-That is not authentication. Signatures are public, so anyone watching the
-cluster could claim another reader's contract and read against their limit.
-First-claim-wins narrows the window to about a second and does nothing at all
-for renewals; a race is not a boundary. So the wallet still signs something the
-server issued, and everything below is unchanged.
+**How, anywhere real.** Out of scope beyond one sentence: fee payment is one of
+the roles §15.2 says a deployment may hold apart from the authority.
 
-The cost is **two wallet dialogs on a first visit** — one proving who you are,
-one authorizing the spend — behind two clicks rather than one. No wallet offers
-both in a single prompt, and after the first `await` the second call is no
-longer inside a user gesture, which §6.3 records as an outright blocker on
-Android. One dialog per click is also the more honest description of what is
-happening.
+## 5. Identity: the browser key
 
-The flow, all of it outside sol-pay:
+The library verifies a key proof and leaves the rest of identity to the site
+(`wasm-client/SPEC.md` §6.6). This section is the rest. Everything here is
+implemented in this repository and nowhere upstream.
 
-1. Server generates a nonce, stores it against the pending sign-in with an
-   expiry, and composes the **`signInInput`** — domain, statement, uri,
-   version, chainId, nonce, issuedAt, expirationTime. **`address` is omitted**
-   (amended 2026-09-07): a first-time reader has not connected, so the server
-   does not know it, and asking for it would mean `connect` and *then*
-   `signIn` — the two-gesture flow this section dropped the fallback to avoid.
-   The wallet fills it in, and step 3 binds it. Note what this is
-   not: it is a set of fields, not a message. `signIn` "shifts the
-   responsibility of message construction from apps to the wallet", in
-   Phantom's words, and the SIWS specification is explicit that "the wallet
-   constructs a message in the ABNF format using the message parameter
-   strings".
-2. Wallet constructs the message from those fields, displays it, and signs it.
-   `signInOutput` returns three things: the `account`, the `signedMessage`
-   bytes, and the `signature`.
-3. Server verifies the signature over **the bytes the wallet returned** — not
-   over anything the server composed, because it composed no message — then
-   parses that message and checks every field against the input it issued:
-   domain, uri, version, chainId, nonce, `issuedAt` and `expirationTime`. The
-   **address** is the one field the server did not issue, so it is checked
-   against the account the wallet returned instead: the message must name the
-   wallet that signed it. It checks the nonce is one it generated and has not
-   seen used, and **checks `expirationTime`**. A verifier that skips the expiry
-   accepts a replay forever; a verifier that skips the field comparison accepts
-   a signature over a message about somebody else's domain.
+What the site needs to know about a reader is narrow: *is the browser in front
+of it the one a meter names?* Not who the reader is, and not which wallet they
+hold. The meter answers the question itself, because it names a public key,
+and only the browser holding the private half can sign for it.
 
-   Then one check this section did not originally require (added 2026-09-07):
-   the parsed fields are **re-rendered and must equal the signed bytes
-   exactly**. Field equality alone accepts a message carrying the right fields
-   with extra content around them; byte equality does not. Against a wallet
-   that builds the canonical text this recovers most of what the dropped
-   `signMessage` fallback would have given for free, and against one that does
-   not it is a clear refusal rather than a silent acceptance — which is the
-   direction a second implementation of a byte-exact format should fail in.
-4. Server sets a session cookie holding the verified wallet address. Session
-   cookie, `HttpOnly`, `SameSite=Lax`, `Secure`, no persistent "remember me".
+### 5.1 The key
 
-That last property is not incidental. §4.2 of the library spec argues that an
-authentication session cookie used only for authentication is the textbook
-"strictly necessary" case and needs no consent banner, and the demo is only
-entitled to that argument if the cookie actually behaves that way. It carries a
-session id and nothing else. (Not legal advice; an integrator's counsel
-decides.)
+The page generates an **Ed25519 key with WebCrypto, non-extractable**, and
+keeps the `CryptoKey` in IndexedDB. One key per site per device. This is
+`wasm-client/SPEC.md` §4.8's recommendation, and the reasons carry over
+unchanged. A non-extractable key can sign but cannot be read out, so a script
+that gets into the page can use it while the page is open and cannot carry it
+away. Solana signatures are plain Ed25519 over the message bytes, so the same
+key signs a `close_meter` with no wallet code in the page.
 
-**The verification is written here, and `wasm-client/SPEC.md` §6.6's advice
-does not reach this
-server.** It names `@solana/wallet-standard-util`'s `verifySignIn` for the
-browser and an existing `siws` crate for the server, and its reason is sound —
-two implementations of one byte-exact format disagree eventually. But that was
-written for a Rust server, and §12.1 chose PHP, which has no such crate.
-Deferring is not available, so the parser is written here, and it is the worked
-example the 70% §12.1 exists to reach cannot get anywhere else.
+The public key, base58-encoded, is what the server names in `open_meter` or
+`renew_meter`. Beside the key the page stores the meter's address once the
+server tells it, so that a returning browser can say which meter it holds
+(§5.3). Neither is secret.
 
-`verifySignIn` in the browser is not used either, and would add nothing: the
-browser is not the party that needs convincing. A page that verifies its own
-wallet's response and then asks the server to trust the result has verified
-nothing.
+**JavaScript is required to identify.** WebCrypto has no form-based fallback.
+A reader without JavaScript can read every lede, and the site says why the
+meter needs a script. Once identified, a session reads and pays without
+further script, because §7.1's charging form works as a plain form.
 
-### What requiring it costs
+### 5.2 The proof
 
-Stated plainly, because the decision to drop the fallback is what buys them.
+The protocol is the site's own. The library supplies only `Proof::verifyKey`,
+which answers whether a signature is valid and nothing else.
 
-- **Wallet availability is narrower than it looks.** The SIWS specification's
-  own note says support is "currently only … Phantom extension (version
-  >=23.11.0)", and Phantom's page says mobile support is coming rather than
-  shipped. Other wallets may have added the feature since; that is a claim to
-  verify against a wallet, not to assume. The panel therefore feature-detects,
-  names what it was tested against, and refuses clearly rather than failing
-  obscurely. **Measured 2026-09-07:** Phantom's extension in Firefox 155 offers
-  `solana:signIn`, and the message it builds is byte-identical to the canonical
-  text — so the desktop half of this doubt is now settled by observation rather
-  than by a vendor's note.
-- **§6.3's mobile paths are affected and the resolution is deferred.** The
-  Android table there assumes `signIn` with a fallback for wallets that lack
-  it, and iOS depends on whichever wallet's in-app browser the reader arrives
-  in. If those wallets do not offer `signIn`, mobile does not sign in at all.
-  This is not resolvable from a desk: it needs a device and a wallet build, and
-  it is the first thing §6.3 should test.
-- **The fallback that was dropped was the stronger check.** `connect` plus
-  `signMessage` over server-composed bytes would have been verified
-  byte-for-byte, with no parser in existence to disagree. Requiring `signIn`
-  means the format risk `wasm-client/SPEC.md` §6.6 warns about is taken on
-  deliberately, in exchange
-  for one user gesture instead of two and for demonstrating the feature the
-  ecosystem actually recommends.
-- **A browser can stand in front of the wallet, and the refusal then lands on
-  the wrong party. Added 2026-09-08, from a measurement.** Brave ships its own
-  Solana wallet, and with `brave://settings/wallet` set to *Brave Wallet* it
-  registers only itself and prevents an extension from taking the provider.
-  Brave Wallet has no `solana:signIn`, so this site refused it by name — which
-  is exactly what this section's first bullet promises — while a Phantom with
-  the feature sat one setting away, having never reached the page. Everything
-  worked on the default setting. Two consequences, and the second is the
-  general one.
+1. **The server issues a nonce:** 32 random bytes, stored in SQLite (§12.5)
+   with the time it was issued.
+2. **The page signs** the bytes `Newsprint key proof\n`, then the site's
+   origin, then the nonce. The prefix and origin are there so that a proof is
+   never also a valid message of any other kind, here or at another site.
+3. **The server checks**, in this order, and refuses on the first failure:
+   - the nonce is one it issued, not more than five minutes ago. It forgets
+     the nonce at this first presentation, whether the proof then passes or
+     not;
+   - the signature is valid for the key the meter names
+     (`Proof::verifyKey`, with the meter fetched from the chain);
+   - the meter's `site` is this site;
+   - the meter has not expired.
 
-  What the reader sees is *their* wallet being called unsupported, and they
-  have no way to know that the browser, not the wallet and not the site, is
-  what refused. So the panel names the setting when it detects Brave: a
-  dead end a reader can clear in ten seconds is worth a paragraph, and a
-  demonstration cannot afford readers who leave believing it is broken.
+A proof accepted twice can be replayed by whoever copies it, and each article
+the replayer reads is charged to the reader's fund. Only the site's nonce store
+can refuse the replay, which is why the nonce is forgotten at first use rather
+than at expiry. The five minutes is the time a page needs to sign and answer.
+It bounds something different from the meter's expiry, which is hours or days.
 
-  And a wallet that is *present but shadowed* is a case with no fallback to
-  degrade into. §6.3's mobile doubt above is about a wallet that lacks the
-  feature; this is a capable wallet the page never sees. **It is not an
-  argument for restoring the fallback** — a fallback would have papered over a
-  browser preference and left a second sign-in path in the code forever — but
-  it is a cost, and it belongs to the no-fallback decision rather than to
-  Brave.
+### 5.3 The session: the viewer-to-meter map
 
-  One measurement worth carrying past this section: while Brave stood in
-  front, `window.solana.isPhantom` was **`true`**. A site that identified
-  wallets by the injected object rather than by the Wallet Standard registry
-  would have believed Phantom was present and called into Brave Wallet. This
-  site asks the registry, which is why the failure was legible rather than
-  strange. That shim is present on the default setting too.
+The integrator's one obligation under the fund design is to remember which
+meter a browser uses (`wasm-client/SPEC.md` §4). Here that is a session
+cookie and a row: the session id, the meter's address, its fund's address,
+and the key that was proven. The fund's address saves a read: the meter names
+its fund, and the charge needs the fund's token account in the same call. The cookie carries the id and nothing else, `HttpOnly`,
+`SameSite=Lax`, `Secure`, with no persistent "remember me".
 
-**The session is the viewer-to-wallet map.** That is the integrator's one
-obligation (§4.1), and in this demo it is a cookie and a session store. A
-publisher with accounts would put the address on the account row instead, and
-nothing else in this design would change.
+A session is bound by a proof in three places:
 
-## 6. The viewer's path
+- at the end of setup, when the reader presses *continue* (§6.3);
+- when a browser that holds a key and a meter address arrives with no session.
+  The page sends both with a proof, and the server binds a new session
+  without the wallet;
+- after a renewal from this device, which names the same meter.
 
-Four screens. Three of them are the cyan nodes in the sol-pay state diagram;
-the fourth exists because a demo needs a front door.
+**The chain ends sessions, not a timer alone.** The metering path reads the
+meter on every charge anyway (§7). Each read also checks that the meter still
+names the session's key and has not expired. When another device renews the
+meter to its own key, this device's session ends at its next read, with no
+message between the two devices. `bin/fund-trials renew` showed the chain
+half on 2026-09-30: after a renewal, the old key's proof was refused and the
+new key's accepted.
 
-**There were five (2026-09-07).** The sign-in screen is gone, and identifying
-now happens inside `set_meter` — see §5 for why, and note that the state
-diagram never had a sign-in node to begin with.
+**Why the proof binds a session rather than every request.** Signing each
+charge would need a fresh nonce per page view and a script on every read, and
+it would add nothing the meter read does not already check. The proof
+answers *is this the browser*; the read on every charge answers *is it still*.
 
-| screen | reached when | the payer signs |
+A publisher with accounts would put the meter address on the account row
+instead of a session, and nothing else here would change.
+
+### 5.4 Closing the meter
+
+The reader leaves by closing the meter. The page sends `close_meter`, signed
+by the browser key. The key holds no SOL, so the site authority pays the fee,
+and the meter's rent returns to the reader. Closing forgives whatever is
+unpaid, which is always below the collection threshold. A close carrying a
+transfer could fail and leave the reader unable to leave, so the program
+declines to try.
+
+1. The page asks the server to prepare the close. The server compiles the
+   message with `SolPay\Tx`: `close_meter`, the authority as fee payer, a
+   recent blockhash. It keeps the message against the session and returns its
+   bytes.
+2. The page signs the bytes with the key.
+3. The server checks the signature against the message it kept, adds the
+   authority's signature, sends, and erases its record of the reader
+   (§10.4).
+4. The page deletes the key and the meter address from IndexedDB.
+
+**The key signs bytes the server composed, and that is safe because of what
+the key may do.** The program refuses the browser key as signer for every
+instruction but `close_meter` (`wasm-client/SPEC.md` §4.8). A server that
+handed the page a different message would get a signature the program does
+not honour.
+
+Measured on devnet, 2026-09-30: a close costs the site 0.000010 SOL, which
+is two base fees for two signatures.
+
+**The control is on the meter panel and on `manage_meter`, at any time**,
+labelled for what it does: *close this meter*. Decided 2026-10-01. A separate
+"forget me" control, dropping the session and keeping the meter, is not
+offered. The key would stay in IndexedDB, and the next visit to the site would
+bind a new session from it (§5.3), so such a control would undo itself. A
+reader on a machine they do not own chooses a short expiry at setup (§6.3) and
+closes the meter when done.
+
+### 5.5 Walking away
+
+Most readers will not close anything. They will close the tab, or the
+browser, and not come back. This is what happens then.
+
+**At the site, nothing waits on the reader.** The session ends when the
+browser ends it or when its time runs out, and the sweep removes the row
+within five minutes. Grants go within thirty-five minutes (§10.4). No charge
+is ever made without a request from the reader's browser, so nothing is
+charged while they are away. That is this site's policy, not the program's:
+the program would let the authority meter up to the limit at any time before
+the expiry, and §2's claim 4 is the bound the reader relies on.
+
+**On chain, the meter stays open until someone closes it.**
+
+- **Before its expiry**, a return to the same browser binds a new session from
+  the key (§5.3), and reading continues where it stopped.
+- **After its expiry**, nothing can meter it. The unpaid residue, which is
+  below the threshold, is never collected. The meter still holds the reader's
+  rent, 0.001346 SOL, and the fund counts it as open, so the reader cannot
+  close that fund until the meter is closed (`FundHasMeters`).
+
+**Three ways to end it, none needing the abandoned browser's cooperation
+except the first:**
+
+1. **The key**, if the reader returns to that browser. The panel offers the
+   close, whether the meter has expired or not.
+2. **A renewal from another device**, choosing the same fund. The new device
+   takes the meter over (§6.4), and the old key is dead.
+3. **The reader's wallet, from anywhere.** The program accepts the reader as
+   signer of `close_meter`. The panel on an article, with no session, offers
+   *close a meter with your wallet*: it asks for the fund index and shows a
+   scan, the same way setup does (§6.3). The server composes `close_meter`
+   signed by the reader, who pays the fee, and refuses if that fund has no
+   meter here. Proposed (§14).
+
+**Why the expiry matters as much as the limit.** Walking away is the common
+case, and the expiry is what bounds it. A meter left on a machine the reader
+does not own is safe once its expiry passes, whatever happens to the machine.
+That is why the panel offers short expiries plainly (§6.3).
+
+### 5.6 Where identity shows
+
+**There is no sign-in screen.** Identifying happens inside the meter panel on
+the article. sol-pay's own state diagram has no sign-in node: `identified` is
+a choice, and "not identified" goes straight to `set_meter`. A page whose
+only purpose is to collect an identity reads as identifying for tracking,
+which is what §10 disputes. Putting the identification where the money is
+about to move is what keeps its narrowness visible.
+
+**Identity is shown on the meter, not in the masthead.** A name and a way out,
+repeated on every screen, is the furniture of an account. It invites a reader
+to assume the account has contents — a profile, a history, preferences — when
+what exists is a cookie, a row naming one meter, and a meter on a public
+chain. The meter panel shows the meter's short name (§9) and the control that
+closes it.
+
+The words follow from that. The screens do not say "signed in" or "signed
+out". They say this browser holds a meter for this site, and *close this
+meter* ends it.
+
+## 6. The reader's path
+
+Six screens. Three are the cyan nodes of sol-pay's state diagram. The other
+three exist because a demonstration needs a front door, a fountain and a
+privacy statement.
+
+| screen | reached when | the wallet signs |
 | --- | --- | --- |
 | index | always public | — |
-| faucet | in the meter panel, when the reader holds no DEMO | — (the site pays) |
-| `set_meter` | on a metered article, no contract | the SIWS message if not yet identified, then `approve_and_open` |
-| `metered_page` | session, contract, `can_meter` passes | — |
-| `manage_meter` | limit reached, or navigated to at any time | `approve_and_renew` or `close_and_revoke` |
+| faucet | from `set_meter`, or directly | — (the faucet key sends) |
+| `set_meter` | in the panel on a metered article, with no session | the setup transaction, by a scan |
+| `metered_page` | a session whose meter passes preflight | — |
+| `manage_meter` | the limit or the expiry is reached, or navigated to at any time | a renewal, by a scan; closing the meter needs no wallet |
 | privacy | always public | — |
 
-**`manage_meter` is reachable at any time**, not only at the limit. Decided
-2026-09-02, reversing an earlier decision that it should be limit-only.
-
-The state diagram draws no route in below the limit, and reading it as a
-prohibition was the error. It draws the *metered path*; it does not enumerate
-the site's navigation. A reader who has authorized a site to draw from their
-wallet may reasonably expect to find, at any moment and without exhausting
-anything first, a page that says what they have spent and offers a way out.
-Making them hit a limit first to reach the exit is not a defensible product,
-whatever the diagram omits.
-
-So `manage_meter` carries a permanent link from the meter widget, and its
-delete path — `close_and_revoke` — is available from the first page view
-onward. That is what makes claim 6 in §2 true, acceptance step 9 reachable, and
-`content/privacy.md`'s promise that a reader can close whenever they like an
-accurate statement rather than an aspiration.
+**`manage_meter` is reachable at any time**, decided 2026-09-02. The state
+diagram draws the metered path and does not enumerate the site's navigation.
+A reader who has let a site draw on their fund may reasonably expect to find,
+at any moment, a page that says what they have spent and offers a way out.
 
 ### 6.1 Index and teasers
 
 The index lists the articles. Each article page is two parts: a **lede** that
-is public and unmetered, and a **body** that is not.
+is public and unmetered, and a **body** that is not. The lede gives the server
+something honest to render to a reader with no meter, so `set_meter` appears
+beside real content instead of as a wall. It also makes §2's claim 2 — *reading
+costs no wallet interaction* — observable: the reader sees the same page
+twice, once truncated and once whole.
 
-The lede is not decoration. It gives the server something honest to render to a
-visitor who has no contract, so `set_meter` can appear beside real content
-instead of as a wall. It is also what makes claim 2 in §2 observable — the
-visitor sees the same page twice, once truncated and once whole, and the only
-thing that changed was a contract account.
-
-**Amended 2026-09-12: the index has an order, and the pieces link each other.**
-
-The index runs **newest first** by the piece's `created` date (§10.1), with the
-slug breaking a tie and an undated piece last. Until then it was the order
-`glob()` returned, which is alphabetical by *source filename*: deterministic,
-and a fact about filenames rather than about the writing. A reader saw one
-piece above another for a reason invisible from the page, and renaming a file
-reordered the front page silently. `revised` is deliberately not the key —
-correcting a typo in an old piece should not carry it back to the top.
+The index runs **newest first** by each piece's `created` date (§10.1), with
+the slug breaking a tie and an undated piece last. `revised` is deliberately
+not the key, so that fixing a typo in an old piece does not carry it back to
+the top. Decided 2026-09-12.
 
 Each article links **the piece before and after it, chronologically**, and
-*previous* is the older one. That runs against the index's own direction on
-purpose: it is how the two words read to a reader, who is not holding the
-list's ordering in their head.
+*previous* is the older one. The links come after whatever the page is for:
+under the body for a reader who has paid, under the meter for one who has not.
+That puts them in the same place in both states, so a meter is the only thing
+that changes between the two renderings. The waiting shell (§7.1) carries
+none, since it is on screen for the second or two a charge is in flight.
 
-**Where those links sit is the part worth recording**, and the paragraph above
-is why. They come *after whatever the page is for* — under the body for a
-reader who has paid, under the meter for one who has not — which puts them in
-the same place on the screen in both states. Navigation that moved between the
-two renderings would be a second thing that changed, and the claim this section
-makes is that only a contract account did. The waiting shell carries none: it
-exists for the second or two a POST is in flight, and links nobody has time to
-read are furniture.
-
-The article's own head is the title, then the lede, then the reading time and
-price — the order the index has always used, and the article did not. The lede
-is set in a different family from the body, as a newspaper deck is: a reader
-meets it twice, and the second time it is something to get past rather than to
-read.
+The article's head is the title, then the lede, then the reading time and
+price, in the order the index uses. The lede is set in a different family from
+the body, as a newspaper deck is.
 
 ### 6.2 A metered request, end to end
 
 ![a metered page request](metered-request.png)
 
 The source is `metered-request.plantuml` at the repository root, rendered with
-`plantuml -tpng`, on the same convention as `state-machine.plantuml` in
-sol-pay. Its colours follow that diagram's: pink is on chain, teal is a screen
-this site builds. Regenerate the PNG whenever the source changes.
+`plantuml -tpng`, on the convention of `state-machine.plantuml` in sol-pay:
+pink is on chain, teal is a screen this site builds. **It is redrawn for the
+fund design**: the meter is found through the session (§5.3), the key proof
+binds the session, and the setup scan replaces the wallet in the page.
+Rendering it is the author's.
 
-Every branch that leaves this diagram early is a screen, not an error page.
-That is the point of claim 5.
+Every branch that leaves the diagram early is a screen, not an error page.
+That is §2's claim 5.
 
-### 6.3 Mobile
+### 6.3 The wallet gesture
 
-In scope, decided 2026-09-02, and promoted out of the non-goals because it is
-what people actually do. A demonstration of metered reading that only works at
-a desk is demonstrating something nobody does.
+The reader's wallet signs one transaction per site per device: the setup. It
+fetches it from this server through a **Solana Pay transaction request**.
+`wasm-client/SPEC.md` §4.9 sets out why, and the short form is that the three
+barriers to reach the delegate design carried all sat on a wallet in the page.
 
-It is not one extra path. It is two, and they share almost nothing.
+**The steps.**
 
-| | Android | iOS |
-| --- | --- | --- |
-| mechanism | Mobile Wallet Adapter, from mobile Chrome | none — the page must be opened *inside* a wallet's own browser |
-| library | `@solana-mobile/wallet-standard-mobile`, `registerMwa()` | nothing; the in-app browser injects a Wallet Standard provider |
-| how the reader arrives | normally | a user-clicked "open in Phantom / Solflare" link |
-| SIWS `signIn` | required (§5); untested on a device | required (§5); depends on the wallet browser the reader arrives in |
+1. **The panel asks** for a limit, an expiry, a deposit and a fund index
+   (§6.4). It states the price per article, the minimum limit, and what the
+   reader's wallet will pay in rent and fees, before anything is signed. The
+   expiry is a choice among a few, never a date to type: *an hour* (a machine
+   the reader does not own), *a day*, *a week*, *thirty days*. Decided
+   2026-10-01; the four values and the default of *a day* are proposed
+   (§14).
+2. **The page makes its key** if it has none (§5.1), and posts the key and
+   the four answers. The server records a **pending setup**: a random id, the
+   session it belongs to, the key and the answers. It lives ten minutes.
+3. **The page shows the link** `solana:https://<site>/pay/<id>`, as a link to
+   tap on a phone and as a QR code to scan from a desktop. The QR code is
+   rendered by the server as inline SVG (§12.2).
+4. **The wallet fetches it.** `GET /pay/<id>` answers with a label and an
+   icon, both served by this site (§10.3). `POST /pay/<id>` carries the
+   wallet's `account`. The server records the account on the pending setup,
+   composes the transaction (below), and returns it, unsigned, with the
+   account as fee payer, as the Solana Pay specification requires. The wallet
+   shows it, the reader signs, and the wallet submits.
+5. **The reader presses *continue*.** The page asks for a nonce, signs it
+   with its key (§5.2) and posts the signature. The server derives the meter
+   from the recorded account and the fund index, reads it once, and checks
+   that it names the pending key. It then checks the proof (§5.2), binds the
+   session (§5.3), tells the page the meter's address, and erases the pending
+   setup. If the meter is not there yet, the page says so and offers the same
+   control again.
 
-**Android.** The Mobile Wallet Adapter (MWA) registers as a Wallet Standard
-wallet and the rest of the integration is the desktop one. Four constraints
-that are not obvious and each of which breaks the flow outright:
+**Nothing polls.** The wallet tells the page nothing, so the reader's own
+gesture is what asks whether the meter exists: one read, on a click. On a
+phone the return from the wallet app is already that gesture; at a desk the
+reader was always going to turn back from the phone. This is
+`wasm-client/SPEC.md` §4.9's rule, and it holds throughout this site.
 
-- **Chrome for Android only**, over **HTTPS** — the support check tests
-  `window.isSecureContext` and an Android user agent, so there is no
-  plain-`http` local development shortcut.
-- **Pin `@solana-mobile/wallet-standard-mobile` at 0.5.0 or later.** Chrome 142
-  introduced a Local Network Access permission prompt that breaks MWA's local
-  association; 0.5.0 and later handle it. Other browsers are adopting the same
-  prompt.
-- **Every wallet call must originate from a real user gesture.** Android
-  Chrome's trusted-event policy blocks the intent navigation otherwise, which
-  rules out connecting from an effect on page load — and is a second reason to
-  use `signIn`, which is one gesture rather than connect-then-sign — and §5
-  now requires it outright, which makes verifying that the mobile wallets offer
-  it the first thing to test on a device.
-- **Register it client-side only**, never during server rendering.
+**What the server composes.** It reads, in one call, the fund that the
+account and the index derive, this site's meter on that fund, and the
+reader's own token account. Then:
 
-**iOS has no Mobile Wallet Adapter and is not going to have one soon.** MWA
-needs a persistent local socket between page and wallet, and iOS suspends
-backgrounded apps; the specification has said "planned for a future version"
-for years. Every iOS browser is WebKit under the same rules, so this is not a
-Safari quirk to route around. There are no Solana wallet extensions for iOS
-Safari worth building on — Solana Mobile archived its own Safari extension
-library in August 2026.
+- **no fund:** `open_fund` at the index, which must come before the deposit,
+  since the fund's token account has to exist first;
+- **a deposit of more than zero:** the transfer from the reader's token
+  account into the fund;
+- **no meter:** `open_meter`, naming the pending key, limit and expiry;
+- **a meter:** `renew_meter` with the same three, which is how a second device
+  takes the meter over (§6.4).
 
-What is left is the wallet's in-app browser, which injects a provider and
-behaves like the desktop case once you are inside it. Getting there is a link
-the reader clicks — `https://phantom.app/ul/browse/<encoded url>` or
-`https://solflare.com/ul/v1/browse/<encoded url>`. Both vendors are explicit
-that these must be clicked, not issued as a programmatic redirect.
+`bin/fund-trials` composed each of these on devnet on 2026-09-30, and each
+confirmed.
 
-So the iOS path is a *screen*, not a code path: detect iOS outside a wallet
-browser, explain in one sentence that a wallet's browser is needed and why, and
-offer the two links. That is more honest than a connect button that cannot work
-and is less work than the alternative.
+**What the server refuses to compose.** These are checked before the wallet
+sees anything, because a transaction that fails the wallet's own simulation
+is a worse screen than a refusal:
 
-**What is deliberately not built:** the encrypted deep-link protocol
-(`phantom.app/ul/v1/...`). It works, and it costs an x25519 keypair persisted
-across app switches, TweetNaCl in the page, a session token, base58 rather than
-base64 payloads, and a return that can land in a *new browser tab* with the
-page's state gone. That is a large amount of machinery, none of it about
-metering, for readers who declined to open the in-app browser.
+- **a deposit the wallet cannot cover.** The server knows the wallet when it
+  composes, so it reads the balance. Devnet taught this twice on 2026-09-30:
+  SPL Token refused the deposit with `InsufficientFunds`, and the wallet would
+  have shown the failure as its own;
+- **a limit below `limit_floor`, or an expiry in the past.** The program
+  would refuse both, with `LimitBelowMinimum`, `LimitBelowUsage` or
+  `ExpiryInPast`;
+- **`open_fund` on an index in use.** The composition rules above never
+  produce it. `bin/fund-trials wrong` sent it anyway, and the System program
+  refused it as an account already in use.
 
-**One property of sol-pay makes all of this much easier than it would otherwise
-be, and it is worth stating.** Every transaction the payer signs —
-`approve_and_open`, `approve_and_renew`, `close_and_revoke` — has exactly one
-signer, the payer. The site never co-signs and never needs the signed bytes
-back. So all of them work through `signAndSendTransaction`, which is the method
-MWA 2.0 guarantees; `signTransactions` is listed there as deprecated. A design
-that needed the site to counter-sign would have run into that immediately.
+A refusal is an error response with a sentence and no transaction. How
+wallets show such a response is untested until a real wallet scans the link,
+which waits for the hosted instance (§13.4).
 
-**One that makes it harder.** A blockhash has to survive an application switch.
-Fetch it immediately before handing off, and be ready to rebuild and retry when
-the reader takes thirty seconds in their wallet. This does not arise with a
-desktop extension popup and it will arise on the first real device.
+**The pending setup holds the wallet's address for at most ten minutes**, and
+§10.4 lists it. Once *continue* succeeds, the session holds the meter's and
+the fund's addresses, and not the wallet's.
+
+### 6.4 Which fund
+
+A reader may hold several funds in one mint, each at its own index from 0 to
+255 (`wasm-client/SPEC.md` §4.7). Which fund a transaction draws on is the
+reader's choice. The server never makes it for them (`wasm-client/SPEC.md`
+§4.9).
+
+**The panel asks because nothing else can answer at the moment of choosing.**
+The page does not know the wallet until the wallet fetches the transaction.
+By then the panel has already drawn the link, with the index in it. A list of
+the reader's funds, however quickly fetched, would arrive after the choice it
+was meant to inform.
+
+**The site does not list a reader's funds, even where it knows the wallet.** A
+fund records its reader and its mint, so one `getProgramAccounts` call,
+filtered on those two fields, would return all of a reader's funds in a mint
+with their indexes. This site avoids that call because managed RPC providers
+throttle it, charge for it, or switch it off (`wasm-client/SPEC.md` §4.7). A
+reference integration should not lean on a call that a production site may
+not be allowed to make. The alternative that avoids the call, deriving all 256
+fund addresses and fetching them, took 2.6 s on 2026-09-30. Listing belongs to
+the management page that `wasm-client/SPEC.md` §4.10 sets aside.
+
+So **the panel asks**, and says what the answer means in one sentence: a fund
+is a pocket of DEMO in the reader's wallet that sites draw from, and most
+readers need one. The first-visit default is fund 0, stated on the screen
+rather than left implicit. A reader who wants another types the number.
+
+Three situations follow from the composition rules in §6.3, and the panel
+covers each with the same scan:
+
+- **First visit, fund 0 absent:** open the fund, deposit, open the meter.
+- **A second device, same fund:** the meter exists, so the transaction renews
+  it to the new device's key, with no deposit unless one is asked for. The
+  old device's session ends at its next read (§5.3). Renewing to a new key
+  costs the reader a fee only.
+- **A second fund, same site:** a different index opens a second fund and a
+  second meter. The site sees two meters from what it cannot tell is one
+  reader. That is the arrangement `wasm-client/SPEC.md` §4.8 recommends for
+  reading on two devices at once.
+
+**Adding money without renewing is its own scan**, decided 2026-10-01 as an
+important convenience. Through the setup route, a top-up would always renew,
+because the composition ends with `open_meter` or `renew_meter`. A renewal
+resets `used` and `paid`, moves the expiry and needs a limit at or above the
+floor. A deposit alone is a valid transaction and touches no meter. So
+`manage_meter`, and §8.2's short-fund screen, offer *add to the fund*: the
+same pending setup and the same route, composing the transfer and nothing
+else.
+
+### 6.5 Mobile
+
+Mobile needs no path of its own under the fund design. The page holds no
+wallet, so the Mobile Wallet Adapter, wallets' in-app browsers and the iOS gap
+that shaped the delegate design do not arise. On a phone, the setup link opens
+the wallet app. At a desk, the reader scans the QR code with the phone.
+Either way, the reader comes back to the page and presses *continue*.
+
+What remains is HTTPS. The wallet fetches the transaction itself, from
+whatever network the phone is on, so the server must be reachable at a public
+HTTPS address. That is why the hosted instance exists (§12.6), and why
+running locally uses the development wallet instead (§12.6).
 
 ## 7. The metering decision
 
-This section is the one an integrator comes here for. The library says
-`can_meter` "reports whether a charge would succeed, not whether it should
-happen. Only the site knows that." Everything below is this site knowing it,
-and every rule here is the demo's policy rather than sol-pay's.
+This is the section an integrator comes here for. The library says preflight
+"reports whether a charge would succeed, not whether it should happen. Only
+the site knows that." Everything below is this site knowing it, and every rule
+here is the demo's policy rather than sol-pay's.
 
 ### 7.1 One charge per article, not per request
 
-A request is not a page view. A refresh is a request. So is a back button, a
+A request is not a page view. A refresh is a request. So are a back button, a
 browser prefetch, a bot, a double-submitted form, and the inspector re-reading
 its own panel. Metering each of them charges a reader several times for one
-article and is the defect most likely to be shipped by an integrator who wires
+article. It is the defect most likely to be shipped by an integrator who wires
 `meter_and_settle` straight into a route handler.
 
-The demo issues a **view grant**: on a successful meter, the server records
-`(wallet, article, expires_at)` with a thirty-minute life. A request that finds
-a live grant is served without touching the chain.
+So the demo issues a **view grant**: on a successful charge, the server
+records the meter, the article and an expiry thirty minutes out. A request
+that finds a live grant is served without touching the chain.
 
-**The guards that hold this, named here so the list is somewhere**
-(2026-09-23). `PrerenderTest` drives a real prerender and fails if the page
-charges before the reader opens it; `SessionCookieTest` pins `SameSite=Lax`,
-which is what stops a cross-site POST arriving with a session;
-`MeterMiddlewareTest` covers the server's own refusal of a request carrying
-`Sec-Purpose: … prerender`, which is the half that does not depend on the
-page's script being right; and `RouteTest` asks the routing table itself
-whether any GET route can reach a `Meter`, by reading what each route's handler
-closed over rather than by looking for names somebody remembered to check.
+**Thirty minutes is policy, settled.** It says a reader who paid for an
+article may finish it, follow a link away, and come back. A publisher who
+wanted grants per session or per day would change one constant. Someone will
+ask for "pay once, keep it forever", and the answer is the reason a window
+exists: **a permanent entitlement requires permanent memory**, and permanent
+memory of what a reader read is what §10.4 is built to avoid. The window is
+not protection either. Anyone can copy what they have paid for. A grant is a
+rental window, not DRM.
 
-Thirty minutes is a policy number with no chain meaning, and it is settled at
-thirty. It says a reader who paid for an article may finish it, follow a link
-away, and come back. A publisher who wanted per-session or per-day grants would
-change one constant and nothing else.
+**The page view is a POST, and a GET never meters**, decided 2026-09-11. A GET
+is what a browser makes on its own account — a prefetch, a prerender, a
+restore from history, a link preview — and HTTP defines it as safe to repeat.
+A charge is not. So `GET /a/{slug}` answers from a live grant or, for a reader
+the site could charge, sends a *shell*: the lede and a form posting to the
+same URL, rendered without a chain read so that it arrives at once. A small
+script posts the form straight away and swaps the answer in. Without
+JavaScript the form is a button, and the POST answers with the whole page.
+The one speculative load that can still reach the POST is a prerendered page
+running the script, so the script waits for `document.prerendering` to
+clear. A cross-site page cannot spend a reader's money by posting here: the
+session cookie is `SameSite=Lax`, which a browser does not send on a
+cross-site POST, so such a request arrives without a session and nothing is
+metered.
 
-Someone will ask for "pay once, keep it forever", and the answer is the whole
-reason a window exists: **a permanent entitlement requires permanent memory.**
-Either the reader carries the permission with them, or the site remembers them
-indefinitely — and the second is the thing §10.4 is built to avoid. The
-expiry is not stinginess. It is what makes forgetting possible at all.
+**The guards that hold this**: `PrerenderTest` drives a real prerender and
+fails if the page charges before it is opened. `SessionCookieTest` pins
+`SameSite=Lax`. `MeterMiddlewareTest` covers the server's refusal of a request
+carrying `Sec-Purpose: prerender`. `RouteTest` asks the routing table itself
+whether any GET route can reach a `Meter`.
 
-The window is bounded on both sides by something real. Longer, and the claim
-not to be tracking readers dilutes until it stops meaning anything. Shorter,
-and reading starts to feel like a race against a clock. A reader returning
-after a long gap is deriving fresh value and can pay a cent for it.
+### 7.2 One charge at a time per meter
 
-And the window is not a protection mechanism. Anyone can copy, paste or cache
-what they have paid for. What the site sells is metered access to the site; the
-content itself is protected by its licence and by very little else. A grant is
-a rental window, not DRM, and nothing in this design should be built as though
-it were.
+Two requests on one session that both reach the metering step would build two
+`meter_and_settle` instructions from the same read. They do not conflict on
+chain, because the program increments whatever it finds. So both succeed, and
+the reader is charged twice for a race they did not cause.
 
-The grant is keyed by article rather than by request because that is what
-"a fee per page view" means when the site is honest about it. Charging for a
-refresh is not metering, it is a billing bug with a chain underneath.
+The server therefore serializes the read, preflight, charge and grant **per
+meter address**, with a transaction on the meter's row in SQLite (§12.5). The
+lock and the state it guards are one object. The grant check happens inside
+the lock, never in front of it: a check in front is this defect exactly,
+because both requests read "no grant" before either waits. A request that
+queued behind another finds the grant the first recorded and does not charge.
 
-**The page view is a POST, and a GET never meters** (2026-09-11). A GET is
-what a browser makes on its own account — a prefetch, a prerender, a restore
-from history, a link preview — and HTTP defines it as safe to repeat. A charge
-is not. So `GET /a/{slug}` answers from a live grant or, for a reader the site
-could charge, sends a *shell*: the lede and a form posting to the same URL,
-rendered without a chain read so that it arrives at once. A small script posts
-the form straight away and swaps the answer in, so the seconds the validator
-takes pass on the new page with a line saying what it is waiting for, instead
-of on the old page with nothing. Without JavaScript the form is a button and
-the POST answers with the whole page.
+**Any deployment running more than one instance needs a lock that spans
+them.** One SQLite file is one machine's answer.
 
-This replaced a GET that metered and defended itself with a list of prefetch
-headers, which covered the requests that announced themselves and nothing
-else. The one speculative load that can still reach the POST is a prerendered
-page running the script, and the script waits for `document.prerendering` to
-clear. A cross-site page cannot spend a reader's money by posting a form here
-either: the session cookie is `SameSite=Lax`, which is not sent on a
-cross-site POST, so such a request arrives anonymous and nothing is metered.
-A repeated POST — a double click, a retry after a lost answer, a second tab —
-finds the grant the first one recorded under §7.2's lock.
-
-**The POST answers before the charge confirms** (2026-09-17). §7.3 says why and
-what follows. The page asks what became of the charge in a second POST,
-`/a/{slug}/confirm`, sent by the same kind of script as soon as the article is
-on screen. It charges nothing, and neither does the check `GET /a/{slug}` makes
-for a reader without JavaScript: the class behind both holds no key and builds
-no instruction, which is what keeps "a GET never meters" true while a GET may
-ask the chain one question.
-
-### 7.2 One meter at a time per payer
-
-Two requests from one reader that both reach the metering step build two
-`meter_and_settle` instructions against the same contract account from the same
-read. They do not conflict on chain — the program increments whatever it finds
-— so both succeed and the reader is charged twice for a race they did not
-cause.
-
-The server therefore serializes the read-preflight-meter-confirm sequence per
-wallet address. Requests for that wallet queue; the second one, arriving after
-the first recorded its grant, finds the grant and never meters.
-
-The demo does this with a transaction on the payer's row in its SQLite store
-(§12.5), so the lock and the state it guards are the same object. **Any
-deployment running more than one instance needs a lock that spans them**, and
-that is a real constraint on §12's hosting decision rather than an
-implementation detail — one file on one machine is not such a lock.
-
-**How this is tested.** The original plan was two browsers, one wallet, the
-same article requested simultaneously, with the pass condition one
-`meter_and_settle` on chain. That needs devnet, a funded payer and a real
-wallet, so it is an observation someone makes and not something CI can hold —
-which is why it went unwritten for as long as it did.
-
-Since 2026-09-12 the half that carries the defect *is* held, by
-`tests/Metering/OneMeterAtATimeTest.php`: four separate PHP processes, one
-wallet, one article, one SQLite file, rendezvousing so they enter together.
-Exactly one does the work and the other three find it done. The same four with
-the lock removed and nothing else changed must double-charge — a race test
-that cannot fail proves nothing, so the control is asserted rather than
-assumed. A second, positional check keeps `Meter::forArticle` honest: the lock
-is its first statement and the grant check happens inside it, because a grant
-check in front of the lock is this defect exactly — both requests read "no
-grant", both queue, and the second meters anyway because it decided before it
-waited.
-
-Writing it found one. `Database::open()` set `PRAGMA journal_mode` before
-`PRAGMA busy_timeout`, and SQLite's default timeout is zero, so a request
-opening the database while another held the write lock died with `database is
-locked` before it reached the queue at all. The metering path holds its
-transaction across an RPC round trip, which made that window exactly §7.3's
-confirmation window wide (since 2026-09-17, only as wide as the send). Fixed by
-arming the timeout first.
-
-What remains an observation rather than a test is the chain half: one
-`meter_and_settle` for two simultaneous readers. `bin/two-readers` makes that
-observation — it checks the five preconditions that would each turn a failure
-into a false pass, races two requests through the whole stack, and judges by
-the contract's own `used` rather than by anything the site reports about
-itself.
-
-**Made 2026-09-12.** Two overlapping requests for `no-sign-in-page`, both HTTP
-200 in 3.47s and 2.84s; `used` moved by one page price and the purchase counter
-by one; signature
-`4WsXACXRZNhD9zHr2bguGDU2r5ZGmfBtRv8nKjdDVaE4PrUWeTMzqn3HoP3DhrDKSYPoDdEiUZ5chUYWuT2aWm1`.
-One meter, one grant, the second request served from it.
-
-Made again the same day, after a fault in the script's own verdict was fixed —
-signature
-`3THBQqBLtianfcR4vvTZ8M8DYiRddcYdnmCETH2qU8Dj8uBJdYTxziPebtT3GwhXZUy9S71LpzawtMfrinyWWKo2`,
-`used` 0.01 → 0.02. Worth recording as a separate fact: the first run is the
-observation, and the second is the observation made by a tool that judged it
-correctly without help. Only the second makes the procedure repeatable by
-someone who was not there.
-
-The reading has to come from the chain and not the page, because both browsers
-show the same article either way — which is the point. The defect this prevents
-is invisible from the front end, and it is invisible from the store too:
-`grants` is keyed on `(wallet, article)` and upserts, so two charges leave one
-row naming only the second signature.
+`tests/Metering/OneMeterAtATimeTest.php` holds the server half. Four PHP
+processes enter together on one meter, one article and one SQLite file.
+Exactly one does the work, and the same four with the lock removed must
+double-charge, which keeps the test honest. `bin/two-readers` makes the
+chain-half observation by hand: two overlapping requests through the whole
+stack, judged by the meter's own `used` rather than by anything the site
+reports. Both move from wallet to meter address with the redesign.
 
 ### 7.3 Order: meter, record, render, then confirm
 
-**Amended 2026-09-17.** The order was meter, confirm, record, render, and the
-confirmation sat inside the request the reader was waiting on. It is now
-**meter, record, render — and confirm afterward, on a later request.**
+The server sends the charge and serves the article as soon as the RPC
+endpoint has **accepted** it, decided 2026-09-17. Acceptance is not nothing.
+The site does not pass `skipPreflight`, so the endpoint simulates first, and a
+charge the program or SPL Token would refuse against current state is refused
+there. Nothing is served, nothing is recorded, and the reader gets §8's
+screen. A short fund, a spent limit and an expired meter are all caught
+there.
 
-The grant is still recorded before the body is rendered, so a render failure
-still leaves the reader holding what they paid for.
+The grant is recorded **pending** before the body is rendered, so a render
+failure still leaves the reader holding what they paid for. The page's
+follow-up, `POST /a/{slug}/confirm`, asks the cluster whether the charge
+landed. A reader without JavaScript gets the same answer from
+`GET /a/{slug}`, which asks once and does not wait. The answer is written onto
+the grant once:
 
-What moved is the wait. The server sends the charge and serves the article as
-soon as the endpoint has **accepted** it. Acceptance is not nothing: the site
-does not pass `skipPreflight`, so the endpoint simulates the transaction first,
-and a charge the program or SPL would refuse against current state is refused
-there — nothing is served, nothing is recorded, and the reader gets §8's
-screen. This is where a short balance, a revoked approval and a spent limit are
-caught, as they were before. What the wait was protecting against was never
-those; it was not knowing.
-
-So the grant is recorded **pending**, and the page's follow-up
-(`POST /a/{slug}/confirm`) asks the cluster whether the charge landed. That
-wait used to sit in the charging request. A reader without JavaScript gets the
-same answer from `GET /a/{slug}`, which asks once and does not wait. Either
-way the answer is written onto the grant, once:
-
-- **Landed.** `confirmed`. The follow-up also reads the charge's event, so the
-  strip's "this one settled" comes from the chain rather than from the request
-  that predicted it.
-- **Landed and failed.** `refused`. This needs the accounts to move between the
-  endpoint's simulation and inclusion — the reader acting in their wallet in
-  that second, or a second site delegated on the same token account (§8.3).
-  **The grant stays.** The reader already has the article, and taking it back
-  after the fact is the mysterious experience this order exists to avoid. The
-  strip says the charge was turned down and nothing was charged; the site loses
-  one page price and the fee.
-- **Never seen, and the blockhash has expired.** `unknown`, after
+- **Landed:** `confirmed`. The follow-up also reads the charge's event, so the
+  strip's "this one settled" comes from the chain.
+- **Landed and failed:** `refused`. The accounts moved between simulation and
+  inclusion: a withdrawal from the fund in that second, or another site's
+  settle draining it. **The grant stays.** Taking the article back after the
+  fact is the mysterious experience this order exists to avoid. The site
+  loses one item price and a fee.
+- **Never seen, and the blockhash has expired:** `unknown`, after
   `charge_settle_s`, asked with history search so that "not found" means what
-  it says. The grant stays, for the same reason.
-- **No answer yet, or the endpoint did not answer.** Still `pending`. Nothing is
-  decided on a maybe.
+  it says. The grant stays.
+- **No answer yet:** still `pending`. Nothing is decided on a maybe.
 
 **How it asks: up to six times, two seconds apart** (`confirm_attempts`,
-`confirm_spacing_ms`; 2026-09-17). The first ask is immediate and there is no
-wait after the last, so the worst case is ten seconds of waiting plus six
-round trips — about twelve seconds, and six requests. It replaced a 500 ms
-poll inside a twenty-second window, which could make some twenty requests to
-learn one fact. The numbers come from the captures. Of some sixty
-confirmations between 2026-09-09 and 09-17, all but three answered on the
-first ask, and those three on the second. A devnet transaction confirms in a
-second or two, and the article's follow-up asks about two seconds after the
-send. Stopping after the last ask costs nothing: a later request asks again,
-and `charge_settle_s` decides when a charge nobody has seen can no longer
-land. The same schedule, in the same method (`Submitter::confirm`), serves
-every transaction the site waits on, including the two the reader's wallet
-sends (`/meter/opened`, `/meter/close/done`) and first-run setup's airdrop.
+`confirm_spacing_ms`). Of some sixty confirmations captured between 2026-09-09
+and 2026-09-17, all but three answered on the first ask and those three on the
+second. `Submitter::confirm` serves every transaction the site waits on.
 
-Devnet produces none of the last three on request: its endpoint refuses the
-charges that would fail, and the rest confirm within a second. So a test fault
-exists, `NEWSPRINT_CHARGE_FAULT`, read only against a devnet endpoint and shown
-in §9's deployment section while it is on. `fail-after-serving` skips the
-endpoint's simulation, so a charge the reader cannot cover lands and fails.
-`never-land` also signs against a blockhash nobody issued, so the charge is
-dropped. `bin/run-dev` documents both.
+**While the charge is pending, the page shows no account figure.** A read
+taken straight after the send returns the accounts from before it: numbers
+from an account, and the wrong ones, which is §2's claim 7 failing without a
+symptom. The strip says the charge is on its way, and the follow-up brings the
+figures.
 
-**While the charge is pending, the page shows no account figure.** A read at
-`confirmed` taken straight after the send returns the accounts from before it
-— numbers from an account, and the wrong ones, which is §2's claim 7 failing
-without a symptom. The strip says the charge is on its way, the advance is not
-offered, and the inspector marks its reading of the reader's accounts as taken
-before the charge confirmed. The follow-up's answer brings the figures, read
-after the chain answered.
+**Why serve first.** The two failure modes are not symmetric. Refusing to
+serve risks charging a reader for nothing, which destroys trust in a payment
+system. Serving risks giving away one article at the item price. The site
+absorbs the cheaper error. An integrator who disagrees should disagree
+explicitly rather than inherit this by accident.
 
-The reasoning for serving is the one this section always gave, and it now
-covers two cases instead of one. The two failure modes are not symmetric.
-Refusing to serve risks charging a reader for nothing, which is the failure
-that destroys trust in a payment system. Serving risks giving away one article
-at `page_price`, which for this site is 0.01 DEMO and for a real one is a cent.
-The site absorbs the cheaper error. An integrator who disagrees should disagree
-explicitly rather than inherit this by accident, which is why it is written
-down.
-
-What it bought, at the medians §12.4 records: the charging request fell from
-six calls to four — about 7.5 s to 5 s on a 1.2-second morning — and the
-twenty-second worst case left it entirely. The payer lock is released once the
-grant is written, so §7.2's queue is no longer as long as the confirmation
-window. `content/TwoOrderings.md` describes the earlier order and needs the
-same amendment.
+**A test fault exists** because devnet produces none of the last three
+outcomes on request. `NEWSPRINT_CHARGE_FAULT`, read only against a devnet
+endpoint and shown in §9's deployment section while it is on:
+`fail-after-serving` skips the simulation, so a charge the fund cannot cover
+lands and fails; `never-land` signs against a blockhash nobody issued.
 
 ### 7.4 Advancing the meter on purpose
 
-`meter_and_settle` takes `page_views: u32`, and the demo exposes it: a control
-that meters **seven** views in one instruction, so a visitor can reach the
-limit inside a handful of clicks instead of fifty page loads.
+`meter_and_settle` takes an item count, and the demo exposes it: a control
+that meters **seven** views in one instruction, so a reader can reach the
+limit in a handful of clicks instead of fifty page loads.
 
-**Seven, and not ten.** Ten is the collection threshold, so a ten-view step
-would settle on every single click and the reader would conclude that metering
-means a transaction per charge — which is the opposite of what the design is
-for. Seven is below the threshold, so the settle fires on some clicks and not
-others:
+**Seven, not ten.** Ten is the collection threshold, so a ten-view step would
+settle on every click, and the reader would conclude that metering means a
+transaction per charge. Seven is below the threshold, so the settle fires on
+some clicks and not others. From a fresh meter at the minimum limit, on a fund
+holding 0.50:
 
-| click | `used` | `unpaid` before | settles? | `paid` after |
-| --- | --- | --- | --- | --- |
-| 1 | 0.07 | 0.07 | no | 0.00 |
-| 2 | 0.14 | 0.14 | **yes** | 0.14 |
-| 3 | 0.21 | 0.07 | no | 0.14 |
-| 4 | 0.28 | 0.14 | **yes** | 0.28 |
-| 5 | 0.35 | 0.07 | no | 0.28 |
-| 6 | 0.42 | 0.14 | **yes** | 0.42 |
-| 7 | 0.49 | 0.07 | no | 0.42 |
-| 8 | — | — | blocked: `LimitReached` | 0.42 |
+| click | `used` | unpaid before | settles? | `paid` after | fund after |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 0.07 | 0.07 | no | 0.00 | 0.50 |
+| 2 | 0.14 | 0.14 | **yes** | 0.14 | 0.36 |
+| 3 | 0.21 | 0.07 | no | 0.14 | 0.36 |
+| 4 | 0.28 | 0.14 | **yes** | 0.28 | 0.22 |
+| 5 | 0.35 | 0.07 | no | 0.28 | 0.22 |
+| 6 | 0.42 | 0.14 | **yes** | 0.42 | 0.08 |
+| 7 | 0.49 | 0.07 | no | 0.42 | 0.08 |
+| 8 | — | — | blocked: `LimitReached` | 0.42 | 0.08 |
 
-Three things fall out of that table that no amount of prose achieves. The
-settle is *intermittent*, which is the whole economic argument for a collection
-threshold. The reader is blocked at 0.49 against a limit of 0.50 — because
-`can_meter` asks whether `used + charge <= limit`, not whether any of the limit
-remains. And they arrive at the limit carrying 0.07 unpaid, which is exactly
-the residue that `limit_floor` folds into the renewal minimum and that
-`close_contract` forgives. The demo does not have to explain any of that; it
-has to let someone click eight times with the inspector open.
+The first two rows ran on devnet on 2026-09-30, twice, through
+`bin/fund-trials meter 0 7`.
 
-Mixed with real reading the pattern stops being a cycle and starts being
-arithmetic the reader has to look up, which is better still.
+Three things fall out of the table that prose cannot do as well. The settle is
+*intermittent*, which is the economic argument for a collection threshold. The
+reader is blocked at 0.49 against a limit of 0.50, because preflight asks
+whether `used + charge <= limit`, not whether any limit remains. And the
+reader arrives at the limit carrying 0.07 unpaid: the residue that a renewal
+carries forward as the new period's `used`, with `paid` reset to zero, and
+that a close forgives.
 
-It is labelled as a demo control and it charges honestly — seven views is seven
-views, the reader's `used` moves by 0.07 DEMO, and the resulting transfer is a
-real transfer. It is not a simulation. It is the same instruction the site
-would send if the reader had actually read seven articles, which is exactly why
-it belongs in a demonstration of the API: `page_views` is in the instruction
-because batching is expected, and this is what batching looks like.
-
-It also makes visible the property the sol-pay README states plainly — the
-limit is trust, not pacing. A site can draw straight to the limit whenever it
-likes, and here is a button that does it. Better a reader meets that fact in a
-demo where the money is fake.
+It is labelled as a demo control and it charges honestly. Seven views is
+seven views. The fund moves, and the transfer is real. It is the same
+instruction the site would send had the reader read seven articles, which is
+why it belongs in a demonstration of the API: the item count is in the
+instruction because batching is expected. It also shows what the sol-pay
+README says plainly, that the limit is trust, not pacing. A site can draw
+straight to the limit whenever it likes, and here is a button that does it.
 
 ### 7.5 What the demo does not decide
 
-`wasm-client/SPEC.md` §4.4 warns that a contract is not a viewer type and that
-keying access off "has a contract" eventually charges a subscriber. The demo
-has no subscriptions, so it cannot demonstrate the coexistence — but the
-decision point is still in the code, as a single function that answers "should
-this request be metered at all", returning true for every article here. It
-exists so an integrator can see where their entitlement check goes.
+`wasm-client/SPEC.md` §4.4 warns that keying access off "has a meter"
+eventually charges a subscriber. The demo has no subscriptions, so it cannot
+demonstrate the coexistence. The decision point is still in the code, as a
+single function that answers "should this request be metered at all",
+returning true for every article here. It exists so an integrator can see
+where their entitlement check goes.
 
 ## 8. When the chain says no
 
 ### 8.1 Attribution
 
 A failed transaction gives a numeric code, and the number alone does not say
-whose it is: `LimitReached` is 6003 from the metering program, `InsufficientFunds`
-is 1 from SPL Token. The server extracts the raising program and the code from
-the transaction logs and hands both to `error::cause`, which returns
-`Program(PayError)`, `Token(TokenError)`, or `Unknown { program, code }`.
+whose it is: `LimitReached` is 6003 from the metering program,
+`InsufficientFunds` is 1 from SPL Token. The server finds the raising program
+in the transaction logs and hands it and the code to `Cause::of`, which
+returns a program error, a token error, or an unknown with the program and the
+code.
 
-Log handling is the part the sol-pay README asks integrators to think about:
-transaction logs and account lists carry the payer's wallet address, and the
-program's events carry `used`, `paid` and `transferred` as decodable base64.
-None of it is secret and all of it is on chain — but copying it into an
-application log or an error tracker moves a reader's spending history into
-systems that were never scoped to hold it.
+**The raiser is the first program to report failure.** The runtime writes a
+`Program … failed` line for every frame the error passes through, innermost
+first, each carrying the same code. A failure inside a cross-program
+invocation (CPI) therefore names the callee first and the caller after.
+Until 2026-10-01 the site took the last line, which named the caller.
+`bin/fund-trials wrong` found it on devnet, and `tests/Chain/FailureTest.php`
+holds the repair, including the case that matters most: a short fund inside
+the settle's transfer.
 
-So the demo's log handling has one rule, and the code enforces it in one place:
-**the parser returns a `Cause` and a signature, and drops everything else
-before it returns.** Raw logs never reach a log line, a metric, or a response
-body. The inspector shows the decoded `Cause` and a link to the explorer, where
-the person who owns the wallet can read their own logs.
+Log handling is the part the sol-pay README asks integrators to think about.
+**What a transaction names depends on which one it is.** A charge,
+`meter_and_settle`, lists the site, the authority, the fund, the meter, the
+fund's token account, the treasury, the mint and the token program. It does
+not list the reader's wallet. The setup transaction does, because the wallet
+signs it and pays for it. So does a close, because `close_meter` returns the
+meter's rent to the wallet, which it names. And no transaction is far from the
+wallet: a fund's address is derived from it, and the fund records it, one
+account read away. The program's events carry the meter's `used`, `paid` and
+`transferred`. None of it is secret, and all of it is on chain. But copying it
+into an application log or an error tracker moves a reader's spending history
+into systems that were never scoped to hold it. So the demo's log handling has one
+rule, enforced in one place: **the parser returns a cause and a signature, and
+drops everything else before it returns.** Raw logs never reach a log line, a
+metric or a response body. The inspector shows the decoded cause and a link to
+the explorer, where the reader can read their own logs.
 
 ### 8.2 The branches
 
-Anchor numbers `#[error_code]` variants from 6000 in declaration order, which
-fixes these:
+The 0.2.0 program's errors, and SPL Token's, as this site meets them:
 
 | code | cause | raised by | what the reader sees |
 | --- | --- | --- | --- |
-| 6003 | `LimitReached` | `meter_and_settle` | `manage_meter`: usage wrapup, renew or close |
-| 6004 | `DelegateNotSet` | `open_contract`, `renew_contract` | the approve did not land, or landed after; the pair in `core::tx` is what prevents it |
-| 6005 | `DelegateMismatch` | `open_contract`, `renew_contract` | the wallet's token account is delegated elsewhere (§8.3) |
-| 6006 | `DelegateAllowanceTooLow` | `open_contract`, `renew_contract` | the approved amount does not cover the limit asked for |
-| 6007 | `LimitBelowUsage` | `renew_contract` | the renewal screen's own `limit_floor` check should have caught this; if it appears, the screen is wrong |
-| 1 (SPL) | `InsufficientFunds` | the `transfer_checked` cross-program invocation (CPI) inside `meter_and_settle` | ambiguous — see below |
-| 4 (SPL) | `OwnerMismatch` | the same CPI | the signer is not an authority on the account: the `delegate` field is empty, or it names another site's contract (§8.3) |
-| — | `Unknown` | anywhere | the program address and the code, and a link. No guess. |
+| 6003 | `LimitReached` | `meter_and_settle` | `manage_meter`: usage so far, renew or close the meter |
+| 6007 | `Expired` | `meter_and_settle` | `manage_meter`: the meter's time is up; renew (an expired meter may be renewed) or close the meter |
+| 1 (SPL) | `InsufficientFunds` | the transfer inside `meter_and_settle` | the fund is short: its balance and the amount due, and a scan to add to the fund (§6.4) |
+| 6000 | `LimitBelowMinimum` | `open_meter`, `renew_meter` | never, when the panel enforces `limit_floor`; if it appears, the panel is wrong |
+| 6004 | `LimitBelowUsage` | `renew_meter` | the same |
+| 6008 | `ExpiryInPast` | `open_meter`, `renew_meter` | the same, for the expiry |
+| 6006 | `MintMismatch` | `open_meter`, `renew_meter` | never through this site, because the fund's address is derived from this site's mint |
+| 6009 | `Unauthorized` | `close_meter` | the key on this device is not the meter's: another device renewed it. The session ends (§5.3) |
+| 6010, 6011 | `FundNotEmpty`, `FundHasMeters` | `close_fund` | never: closing a fund is the reader's business, through a wallet (§11) |
+| 1 (SPL) | `InsufficientFunds` | the deposit, at setup | never, because the server refuses to compose it (§6.3) |
+| — | unknown | anywhere | the program address and the code, and a link. No guess. |
 
-The `raised by` column matters more than it looks. The program checks the
-delegate in `open_contract` and `renew_contract` and **not** in
-`meter_and_settle` — metering leans on the delegation the token program
-enforces during the transfer. So a reader who revokes their approval between
-opening and reading does not get 6004; they get SPL Token's error from inside
-the CPI.
+**`InsufficientFunds` is no longer ambiguous.** Under the delegate design SPL
+Token returned it both for a short balance and for a short allowance, and the
+two needed opposite answers. The fund design has no allowance, so the code
+means one thing: the fund holds less than the unpaid total. The answer is
+money, and the screen says how much.
 
-**Corrected 2026-09-23: that error is not the ambiguous one.** This section
-previously sent the revoke case into the paragraph below, and SPL does not put
-it there. `InsufficientFunds` is what the token program returns when the signer
-*is* the delegate and `delegated_amount` is short. A signer that is not the
-delegate — because the field is empty, or because it names another site's
-contract — is not an authority on the account at all, and the answer is
-`OwnerMismatch`, code 4. The client library says so where it enumerates the
-codes this flow can provoke: code 4 "includes the case where the delegate was
-cleared", because SPL drops the delegate once its allowance reaches zero. So a
-revoked reader gets 4 and nothing about it is ambiguous. The correction is read
-off the library and SPL's own behaviour rather than off a devnet run; a run
-would confirm it directly and none has been done.
+The settle and its increment are one instruction. A refused settle leaves
+`used` and `paid` unchanged, so a failed charge is never a silent one.
 
-`InsufficientFunds` is ambiguous by construction: SPL Token appears to return
-it both for a short balance and for a short allowance, and the two need
-opposite responses. The demo answers it the way `wasm-client/SPEC.md` §6.4
-prescribes — read the
-payer's token account, call `diagnose(account, unpaid)`, and act on the
-`Shortfall`:
+### 8.3 What happened to "one delegate per token account"
 
-- `balance_short > 0` — the wallet is short. On this demo, offer the faucet. A
-  real site says "top up".
-- `allowance_short > 0` — the approval no longer covers the limit. Offer
-  renewal, which re-approves.
-- both — show both, in that order, because a re-approval the balance cannot
-  cover fixes nothing.
-
-`OwnerMismatch` needs a read too, and a different one. The shortfall cannot
-answer it: `diagnose` reports `delegate_present` as "some delegate is set",
-which is true of another site's delegate as well as of this site's. The demo
-compares the account's `delegate` with this site's contract PDA and says which
-of the two happened — the field is empty, so the reader revoked it or SPL
-cleared it, or it names somebody else, so another approval replaced it. Renewal
-re-approves either way, and in the second case it takes the permission back
-from whichever site holds it.
-
-`Shortfall` is a struct and not a verdict for exactly this reason, and the demo
-is the site making the choice the library refused to make for it.
-
-### 8.3 One delegate per token account, and what multi-site metering requires
-
-An SPL token account has exactly one delegate, and `approve` replaces it rather
-than adding to it. Two sites therefore cannot both be delegated on the same
-token account: the second `approve` silently repoints the delegate, and the
-first site's next settle fails inside the token program as `OwnerMismatch`,
-code 4 (corrected 2026-09-23; this said `DelegateMismatch`, which is the
-metering program's 6005 and is raised only by `open_contract` and
-`renew_contract`, neither of which runs in a settle).
-
-**It belongs in §8 because of the shape of that failure.** Nothing rejects the
-second `approve` — it succeeds — and the damage surfaces later, on the *first*
-site, in a transaction the reader did not initiate and an error they cannot
-read.
-
-**This is not a property of the demo's mint.** It is SPL Token's account layout
-— one `delegate`, one `delegated_amount` — identical for USDC, and identical
-again under Token-2022. So the question it raises is about the design rather
-than about this demo, and it is the first question a serious evaluator asks:
-*what would it take for one wallet to hold metering contracts with several
-sites at once, in one currency?*
-
-That is worth answering as a list of requirements rather than as a defence.
-There are five. Three are already met by the program as it stands, the fourth
-is one column in a database, and the fifth — the only real one — is not on
-chain at all.
-
-#### What multi-site metering requires
-
-**1. The program must accept a token account that is not the canonical one.**
-**Met.** `payer_token_account` is constrained in both `OpenContract` and
-`MeterAndSettle` by exactly two things:
-
-```rust
-constraint = payer_token_account.owner == payer.key(),
-constraint = payer_token_account.mint  == site.mint,
-```
-
-Ownership and mint, and nothing else. In particular there is no constraint
-requiring the **associated token account (ATA)** — the single canonical account
-that everything derives for a given owner and mint. Any token account the payer
-owns for the site's mint is acceptable.
-
-**2. The wallet must be able to hold more than one token account per mint.**
-**Met, and it is ordinary.** The SPL token program has always allowed it; the
-ATA is merely the account everyone agrees to use by default. One token account
-per site gives one delegate per site, and a reader can hold as many concurrent
-contracts as they have token accounts.
-
-**3. Each site's reach must stay bounded by what the reader agreed to with
-*that* site.** **Met**, and this is the requirement that makes the arrangement
-safe rather than merely possible. The delegate on each account is that site's
-contract **program derived address (PDA)** — an address derived from the site
-and the payer, which only the program can sign for — and the amount it may draw
-is that site's own `Contract.limit`. Holding three contracts does not let any
-one of them reach past its own limit, and the reader's total exposure is the
-sum of limits they agreed to one at a time.
-
-**4. The site must record which token account this reader uses.** **Not met,
-and small.** `wasm-client/SPEC.md` §4.1 says the payment core needs exactly one
-input, the payer's wallet address. That holds only while everyone uses the ATA.
-A site supporting auxiliary accounts stores the account alongside the address,
-because `meter_and_settle` takes it as an account and the `Contract` does not
-record it. One column and one lookup: an integrator obligation worth naming
-rather than an obstacle.
-
-**5. A wallet has to help the reader make and manage those accounts.** **Not
-met, and this is the whole of what is missing.** Wallets show the ATA.
-Auxiliary token accounts for the same mint are second-class in nearly every
-interface: no ordinary path creates one, funding it is a transfer the reader
-has to understand, each costs about 0.002 SOL in rent (recoverable when it is
-closed), and balance is per account rather than per wallet — so the reader
-budgets per site, in a place their wallet will not show them.
-
-**So the summary is a narrow one, and it is not a refusal.** The constraint is
-per token *account*, not per wallet. The program already supports concurrent
-metering across sites and already bounds each site's reach correctly while
-doing it. What stands in the way is an interface question — creating, funding
-and displaying a second token account for a mint — and that is a gap someone
-can close in a wallet, with no program change and no new account type. Anyone
-evaluating sol-pay should hear it in that order, because "one site at a time"
-is the wrong conclusion and it is the easy one to reach.
-
-#### Two designs that would remove requirement 5 entirely
-
-Neither is this demo's to choose. They are recorded so the next person to meet
-the question does not start from scratch.
-
-- **A per-payer delegate PDA.** If the delegate were seeded `[b"delegate",
-  payer]` rather than being the per-site contract PDA, one approval on the
-  reader's ATA would cover every site on that deployment and no second token
-  account would be needed at all. Requirement 3 is what it costs: the allowance
-  becomes a shared pool, so a site that draws hard leaves less for the others,
-  and the reader's total exposure is the allowance rather than the sum of the
-  limits they agreed to one at a time.
-- **Per-site escrow**, which `wasm-client/README.md` already names: the reader
-  tops up an account the site draws from. It removes the delegate question
-  entirely and gives up the property the whole design is built on — that the
-  money stays in the reader's wallet until it is spent.
-
-#### What the demo does
-
-**Rewritten 2026-09-23. The previous version described this as preflight, and
-it is not.** It said the demo declines to ask for an approval "that will fail
-as `DelegateMismatch` after the reader has paid a fee". That approval does not
-fail. `approve` precedes `open_contract` in the same transaction, so the
-approve overwrites the delegate and the open's own delegate check then finds
-this site's contract and passes. The transaction succeeds, the reader pays a
-fee for something that worked, and the damage lands on the other site. There is
-nothing here to preflight, because nothing the reader is about to sign is going
-to be refused.
-
-So what the demo owes the reader is not a refusal but a disclosure, and what it
-owes the other site is not to revoke a permission on its behalf. Three checks,
-all of them the same comparison: is the `delegate` field this site's contract
-PDA? The library cannot answer that, because `diagnose` reports
-`delegate_present` as "some delegate is set" — true of another site's delegate
-as much as of this one's — so the comparison belongs to the site, and in this
-demo it is one method on the reader's decoded account state.
-
-1. **Before asking for an approval.** The payer's token account is already
-   decoded on the `set_meter` screen for the balance display, so the field is
-   in hand. When it names something other than this site's contract, the screen
-   says so before the wallet dialog opens, names the address the approval is
-   about to replace, and says that the other site will not find out until it
-   next tries to collect.
-2. **Before building a close.** SPL `revoke` clears whatever delegate is set
-   rather than a particular one, so a close that always revoked would take
-   another site's permission with it. When the field is not this site's
-   contract, the demo sends `close_contract` alone. The server answers the
-   question from the account it has just read, in `/meter/close/prepare`, and
-   the browser builds the pair or the single instruction from that answer. The
-   receipt reads the field back afterwards, where a surviving delegate is an
-   alarm when it is this site's and the expected outcome when it is not.
-3. **When a settle is refused.** §8.2's `OwnerMismatch` paragraph: the screens
-   say whether the field is empty or names somebody else, because those are not
-   the same news to a reader.
-
-The demo still uses the ATA, so within it a reader has one contract, which is
-all one site needs. Requirement 5's absence is what makes these three checks
-necessary: a reader who cannot easily hold a second token account is a reader
-whose one account the sites take turns overwriting.
-
-What the demo does **not** do is walk the reader through the alternatives. An
-earlier version of this section had the screen explain the choice — close the
-other contract, or use a different token account — and it does not. It states
-the consequence and lets the reader decide, because the second of those
-alternatives is requirement 5's gap and no wallet makes it ordinary.
+Nothing is left of it, and one paragraph says why. Under the delegate design
+every site wrote its permission into the same field of the reader's token
+account, and SPL Token's `approve` replaced whatever was there. A reader
+metered by two sites in one token silently broke the first. Under the fund
+design each site's permission is its own meter, at an address derived from the
+site and the fund, and the money is in an account the metering program
+controls. Nothing one site's reader signs can overwrite another site's meter.
 
 ## 9. The inspector
 
 A panel, present on every screen, collapsed by default and one click from any
-page. It is the artifact that turns a demo into a reference, and its job is
-§2's claim 7 — *every number on the screen came from an account, not from the
-server's memory*.
+page. Its job is §2's claim 7: *every number on the screen came from an
+account, not from the server's memory.*
 
-Four things to show. **Amended 2026-09-08:** the panel renders them as up to
-seven headings, because the first two split by provenance rather than by topic
-and the split is the point. **Amended 2026-09-12:** there are up to eight, and
-they run in the order below rather than the order they were once written in —
-*The values, in full*, *Preflight, for this request*, *The last
-transaction* (only on a request that made one), *You, on chain*, *Treasury*,
-*Configuration drift* (only when config and chain disagree), *Site account,
-decoded*, *Deployment*. Both amendments are argued further down. The four
-things below are what the panel owes a reader; the headings are how it pays.
+**Reduced for the redesign, decided 2026-10-01.** The panel is rebuilt after
+the reader's path works. Until then it keeps the principles below and shows
+only what still holds. The sections it keeps, in order from what changes to
+what does not: *The values, in full*; *Preflight, for this request*; *The last
+transaction*, on a request that made one; *You, on chain*, which is the meter
+and the fund; *Treasury*; *Site account, decoded*; *Deployment*.
+*Configuration drift* appears only when the chain and `config/site.php`
+disagree, placed beside the account it disagrees with.
 
-**Addresses, under short aliases.** Base58 is unreadable and, worse,
-*comparable-looking*: two addresses sharing four leading characters read as the
-same address to a human eye scanning a panel. So every address the demo shows
-gets a short alias, displayed beside the real thing here and used alone
-everywhere else on the site.
+### 9.1 Short names
 
-An alias is a role prefix plus a nonsense syllable:
+Base58 is unreadable and, worse, comparable-looking: two addresses that share
+four leading characters read as one address to an eye scanning a panel. So
+every address the demo shows gets a short name: a role prefix plus a
+syllable derived from a hash of the address. The same address always draws
+the same name, for every reader and after a redeploy, which makes a name
+something two people can say to each other on a call.
 
-| prefix | what it names |
-| --- | --- |
-| `PID` | the metering program id |
-| `SPDA` | the site PDA |
-| `CPDA` | the contract PDA |
-| `MINT` | the DEMO mint |
-| `TRSY` | the site treasury token account |
-| `PAYR` | the reader's wallet |
-| `PATA` | the reader's token account |
-| `TKPG` | the token program |
-| `AUTH` | the site authority (added 2026-09-08) |
-| `ACCT` | an address this panel cannot place (added 2026-09-12) |
-| `DATA` | an instruction's Borsh bytes (added 2026-09-12) |
-
-giving `PIDalpha`, `SPDApep`, `CPDAcat`, `PAYRfig`.
-
-`AUTH` was missing until 2026-09-08, and its absence is the argument for this
-table made twice over: the authority is the site account's `authority`, the
-treasury token account's `owner` and the signer on every metering call, so it
-is the one address a reader meets in three sections at once — and it was the
-one with no short name in any of them.
-
-**The syllable is derived from the address, not assigned in order.** Index a
-fixed word list by a byte of the address's hash, so the same address always
-draws the same alias — for every reader, in every session, and after a redeploy.
-An alias that is stable is a thing two people can say to each other on a call
-while looking at their own screens; an alias that is positional is a lie the
-first time the panel reorders.
-
-Two rules that keep this a convenience rather than a hazard. The full base58 is
-always one click away and always what gets copied — a copy button never yields
-an alias. And the aliases are this site's invention, not a standard, which the
-panel says once, so nobody leaves thinking `CPDAcat` means anything to a wallet
-or an explorer.
-
-**Amended 2026-09-12: the short names are defined once, at the top, and used
-alone below.** What this section already asked of the *site* — the alias alone,
-the base58 one click away — now holds inside the panel as well. Its first
-section is **The values, in full**: one row per long value, the short
-name, the value with the explorer link on it and the copy button after it, and
-its provenance on the line beneath. Every other section writes the short name,
-linked to its row.
-
-**Amended 2026-09-14: the heading is *The values, in full*, and the row says
-what its value is before it says where it came from.** *What the short names
-mean* described an expansion, and the table had stopped being one: it states
-what each value **is**. *The address table* was declined over a single row —
-the instruction's bytes are not an address. Each row's line is now `<meaning>:
-<derivation>`, meaning first, because a reader looking up `CPDAcat` wants to
-know what it is before wanting to know how it was computed. An unplaced address
-says what it is rather than carrying a blank line where every other row has a
-sentence.
-
-**Amended 2026-09-14: the panel's explanatory notes are gone, and one line and
-a link stand where they were.** Every section had carried a `note`; all of them
-were deleted, with the template branch and the CSS rule that styled them, and
-the panel body fell from 3,243px to 2,569px. The surviving sentence is this
-section's own obligation — that the short names are this site's invention —
-said once, with a link to the piece that explains the panel at length. It lives
-in the sections partial rather than the outer template, because a deferred page
-renders only the partial and a preamble in the outer one is a preamble most
-readers never see. The two alarm states kept a sentence each, as the row's own
-claim rather than as a note: background work can wait for an article, a failed
-read cannot.
-
-**Amended 2026-09-17: the serve-first rows** (§7.3). A charging request now
-answers before the chain has confirmed, so the panel gained the lines that says
-so: that the article was served *before* the charge was known to have landed,
-the instruction carry that keeps the bytes on screen when the follow-up brings
-the outcome, the absorbed charge's claim — *failed, so nothing moved*, because
-a failed transaction emits no event and "the event says which" would be a
-citation of nothing — and a `test fault` row, which names the injected fault
-when one is set so that a screen produced by `NEWSPRINT_CHARGE_FAULT` cannot be
-mistaken for one the chain produced.
-
-Counted before the change, on a charging view with a payer and a landed
-transaction: **21 address occurrences of 9 distinct addresses** — the
-authority, the treasury and the contract three times each — and eight of them
-in one account list, where the reader's question is *which accounts, in what
-order* and a 44-character string answers it badly.
-
-**The argument that decided it is not tidiness.** The provenance this section
-asks for beside every address was silently missing from the section with the
-most addresses in it: a row's third cell held either the check it mirrors or
-the derivation, the mirrored check won, and so every account row in *The last
-transaction* carried `signer, writable` and no derivation at all, with nothing
-on the page saying so. Gathered into a table, each address states its
-provenance exactly once, always. The seeds, which are written with the aliases,
-now name rows in the same table rather than rows in whatever other section
-happened to show that address.
-
-The two new prefixes are the cost of the rule. An address with no role in the
-map used to be rendered bare, deliberately — a name invented on the spot would
-have looked exactly like the stable kind. With the base58 gathered into a
-table, a bare value is the one thing on the page that cannot be looked up, so
-it gets a name; `ACCT` claims nothing about the account, where a role prefix on
-an unplaced address would be a guess wearing a fact's clothes. `DATA` is the
-same argument for the one value in the panel that is not an address and is just
-as unreadable.
-
-The copy rule above survives and is stronger for it: **one copy button per
-address rather than one per sighting**, beside the address itself, which is the
-surest way to keep a copy button from ever yielding an alias. The one short
-name not linked to its row is the one in the decoded event line, which arrives
-from its endpoint as text and is written with `textContent` — linking a word of
-it would mean composing markup on the server and trusting it in the browser.
-
-**Amended 2026-09-12: the sections run from what changes to what does not.**
-After the table: *Preflight*, *The last transaction*, *You, on chain*,
-*Treasury*, *Site account, decoded*, *Deployment*. The panel had been built
-outwards from the deployment, which is the order the system is *assembled* in
-and the reverse of the order anybody reads it in — a reader opening the panel
-twice is looking for what moved, and the deployment never moves. Two things sit
-outside that gradient. The table stays on top, because it is the key to
-everything below whether or not it changed. And *Configuration drift* is not a
-readout: it appears only when the chain and `config/site.php` disagree, so by
-rate of change it belongs at the bottom, and it is placed instead with the
-account it disagrees with, where a reader can check the claim.
-
-**Amended 2026-09-12: one width, the article's.** This panel was the article's
-34rem collapsed and 52rem open, with a rule that widened on opening so the join
-did not read as a mistake. Two sections were the whole reason for the extra
-18rem — the table of short names and the preflight — and both were wide because
-a *sentence* sat in a third column. Put the sentence under the value it
-describes and they need 505px and 310px against the article's 544px; every
-other section already needed less than 300. At the same viewport the panel grew
-**seventeen pixels** in height, because the wide layout had been spending that
-space on those claims wrapping inside a third of the width. So there is one
-measure again and the rule that covered the join is deleted rather than
-maintained. `signer, writable` stays beside its value: two words read as a
-suffix, where a sentence reads as a caption. Which form a section uses is
-declared by the section, not measured from the text, so a reworded claim cannot
-change the panel's anatomy.
-
-Each address also carries a link to the devnet explorer and, in the table, the
-derivation that produced it.
-
-**Amended 2026-09-09: that is not one uniform thing, and the wording here used
-to say it was.** Tracing the nine addresses the panel can show gives three
-kinds, and the difference is worth more than the uniformity was:
-
-| kind | addresses | what the panel says |
+| prefix | what it names | provenance |
 | --- | --- | --- |
-| derived by *this* program | `SPDA`, `CPDA` | the seeds and the bump — `["contract", SPDA, PAYR] + bump, by PID…` |
-| derived by the **associated-token program** | `TRSY`, `PATA` | the same shape, naming a deriving program this site does not own |
-| never derived | `MINT`, `AUTH`, `PAYR`, `PID`, `TKPG` | where it came from instead — a keypair first-run setup generated, the reader's own wallet, a deployed program, a fixed Solana constant |
+| `PID` | the metering program | a deployed program |
+| `SPDA` | the site account | derived by this program: `["site", AUTH]` |
+| `FPDA` | the reader's fund | derived by this program: `["fund", RDR, MINT, index]` |
+| `FATA` | the fund's token account | derived by the associated-token program |
+| `MPDA` | this site's meter on that fund | derived by this program: `["meter", SPDA, FPDA]` |
+| `BKEY` | this browser's key | generated in this browser (§5.1) |
+| `RDR` | the reader's wallet, as the fund names it | the reader's own |
+| `MINT` | the DEMO mint | a keypair first-run setup generated |
+| `TRSY` | the site's treasury | derived by the associated-token program |
+| `AUTH` | the site authority | a keypair first-run setup generated |
+| `TKPG` | the token program | a fixed Solana address |
+| `ACCT` | an address the panel cannot place | — |
+| `DATA` | an instruction's bytes | — |
 
-The treasury belongs in the second row rather than the third, and that is the
-easy one to get wrong: it looks like something first-run setup simply created.
-It is the site authority's associated token account for the mint, so it *is*
-derived from seeds — `Provisioner` computes the address before anything is
-created at it.
+The panel's first section, *The values, in full*, defines each name once: the
+short name, the full value with its explorer link and a copy button, and on
+the line beneath, what the value is and then how it was derived. Every other
+section writes the short name alone, linked to its row. A copy button never
+yields a short name, and the panel says once that the names are this site's
+invention, not anything a wallet or an explorer knows.
 
-Rendering all four derived addresses alike would have been the tidier panel and
-a false one — it would let a reader believe this program computed `PATA` and
-`TRSY`. Silence on the other five would have read as *we did not bother* rather
-than *there is nothing to derive*, which is the more useful fact and the true
-one. The seeds are written with the aliases above rather than with base58, so a
-reader can match every seed to the row that names it.
+Rendering every address alike would be tidier and false. Three kinds are
+told apart: derived by this program, derived by the associated-token program,
+and never derived. The middle kind is the one that is easy to get wrong:
+neither the treasury nor the fund's token account was simply created, and both
+have seeds.
 
-**Decoded accounts.** `Site` and `Contract` field by field, in the order and
-sizes of `wasm-client/SPEC.md` §6.2, with amounts shown both as base units and
-through `from_base_units`. Plus the payer's `TokenAccount`: amount, delegate,
-delegated amount. The point of showing both unit forms is that the six-decimal
-scaling error the library's §6.2 warns about — turning 50 into 50,000,000 — is
-invisible until you see the two numbers side by side.
+### 9.2 What the panel shows
 
-**Preflight, for this request.** `charge(1)`, `can_meter`, `will_settle`,
-`views_remaining`, `limit_floor`, `required_allowance` — each with its value and
-the on-chain check it mirrors. When the current screen is `manage_meter`, the
-reader can see that `can_meter` returned `LimitReached` and why.
+**Decoded accounts.** `Site`, `Fund` and `Meter` field by field, with amounts
+both in base units and in DEMO. Seeing the two side by side is what makes the
+six-decimal scaling error `wasm-client/SPEC.md` warns about visible. The
+fund's balance is its token account's, decoded beside it.
 
-**The last transaction.** Signature and explorer link, the instructions as the
-builders produced them — program, accounts in order with signer and writable
-flags, data as hex — and the decoded `Metered`, `Renewed` or `Closed` event.
+**Preflight, for this request.** The charge, `can_meter`, `will_settle`,
+`items_remaining` and `limit_floor`, each with its value and the on-chain
+check it mirrors.
 
-Showing the instruction bytes beside the transaction is what makes the demo
-useful to someone who is about to write their own. It is also a live check on
-the library's claim that its output drops straight into a transaction message.
+**The last transaction.** "Last" means this request's: §10.4 leaves no record
+of a reader's earlier transactions for the panel to reach back to. On a page
+that made none, the section is absent. For a charge or a close, which the
+server builds, the panel shows the instructions as the builders produced them:
+program, accounts in order with signer and writable flags, and data as hex.
+The setup transaction is built in the wallet's request, not the page's, and
+the wallet submits it, so the server never learns its signature. The panel
+says so rather than reconstructing it.
 
-What this section is not, decided 2026-09-08 when it was built and added to
-since. (This said "three things" and the list has outgrown the number twice;
-the number is gone rather than maintained.)
-
-**"Last" means this request's, and §10.4 is why.** This site keeps no record of
-a reader's metering calls, so there is no earlier transaction for the panel to
-reach back to. On a page that made none, the section is absent rather than
-empty.
-
-**The browser's transactions show less, and say so.** `approve_and_open`,
-`renew_contract` and `close_and_revoke` are compiled in the reader's browser,
-so the server never holds those instruction objects: their signature and their
-decoded event appear, their bytes do not, and a line names who built them.
-Decoding the landed transaction so all four looked alike was declined — it
-would put *as they landed* under a heading that promises *as the builders
-produced them*, and the sentence above is the whole reason the bytes are worth
-showing.
-
-**A confirmation that arrives later keeps the instructions on screen**
-(2026-09-17). The charging POST now answers before the chain has confirmed
-(§7.3), and the page's follow-up answers with a fresh panel. The follow-up
-never held the instructions, so its last-transaction section carries a line
-saying they were built by the request that sent the charge, marked with the
-signature. The rows the sending request rendered carry the same mark, and the
-browser moves them into that line's place when they are still on the page.
-They are the same evidence from the same request; nothing is rebuilt, stored
-or read back. After a reload, the line is what remains, and it is true.
-
-**The event is read when the panel is opened, not when the transaction is
-made.** Decoding it needs `getTransaction`, a fourth call against §12.4's
-budget of about three per metered view, and this panel is collapsed by default
-— so it is a small endpoint the panel asks once on first open. Without
-JavaScript the row says the event has not been read, which is true.
-
-**The panel itself is read when it is opened, on any page that read nothing
-else.** Added 2026-09-09, and added because it was measured rather than
-reasoned. `$shell` renders this panel on every page, so every page —
-`/privacy` included — blocked on one `getMultipleAccounts` to fill a panel this
-section says is collapsed by default. That call *was* the page load: `/privacy`
-went from **0.899 s to 0.002 s**, the cost of a static file, when it stopped
-making it. Our own render measured under 6 ms and was never the problem.
-
-The rule is not *defer the panel*; it is **defer the read nobody else needed**.
-Where a request has already read the chain for its own reasons — the article's
-POST, where §7's middleware must read it to decide metering — the panel renders
-with the answer and costs nothing extra, because the read was required work
-either way.
-
-That distinction is what keeps *The last transaction* possible at all. It needs
-a `MeterResult` which exists only on the request that produced it (§10.4 leaves
-no history for a second request to find), so it could never survive a deferred
-fetch — and under this rule it never has to, because the pages that have one
-are exactly the pages that render inline.
-
-**The seven-view advance kept that promise only in principle until 2026-09-11.**
-Its POST built a transaction and then redirected, and the page that followed was
-a second request: it found the reader's grant, carried no signature, and
-rendered no last-transaction section at all. Nine advances in one capture, nine
-pages with nothing to show for the transaction each had just sent. Three
-repairs were refused elsewhere in this section and in §10.4 — rebuild the
-instructions, read them back with `getTransaction`, carry them in the URL — and
-the fourth is simply not to leave the request: the POST answers with the
-article and this panel, rendered by the request that built the instructions,
-and the browser puts them where the old ones were (§7.1 does the same for the
-page view). Nothing is stored and nothing is rebuilt for display. Without
-JavaScript the redirect still happens and that reader still gets the outcome
-and the signature, which is what everybody got before.
-
-Without JavaScript the deferred panel is an ordinary link to a page that
-renders the same sections server-side. Nothing in this section depends on a
-script to remain reachable.
+**The event is read when the panel is opened**, with one `getTransaction`,
+because the panel is collapsed by default. **And the panel's own read is
+deferred on any page that read nothing else**: on 2026-09-09, `/privacy` went
+from 0.899 s to 0.002 s when it stopped reading the chain for a closed panel.
+The rule is not *defer the panel*. It is **defer the read nobody else
+needed**. Where the request already read the chain for its own reasons, the
+panel renders from that read at no cost.
 
 ## 10. Content
 
 ### 10.1 The articles
 
 Roughly twelve pieces, markdown in the repository, each with front matter for
-title, slug, lede and reading time. No external CMS, no fetch at request time,
-no images beyond what the text needs.
+title, slug, lede, reading time and dates. No external CMS, no fetch at
+request time, no images beyond what the text needs.
 
-**Amended 2026-09-12: the front matter carries dates, and the title is written
-once.**
+**Who they are for**: an implementer, somebody metering their own content and
+deciding whether to do what this site does. The test for a subject is whether
+that person would be worse off not knowing it. The material is the development
+sessions of sol-pay and of this site, edited into episodes: each piece is
+about one decision, keeps the objection that changed the outcome, and drops
+the rest. `notes/writing.md` carries the voice and the prose rules.
 
-`created` is required of every piece — the day it was written. `revised` is
-optional and belongs only on a change a reader would notice. A **draft shows
-neither**: it has not been published, and a creation date standing where a
-publication date belongs answers a question nobody asked. The badge is what a
-draft has to say. The dates stay in the front matter meanwhile, so publishing a
-piece is one word rather than an archaeology exercise.
+**Front matter.** `created` is required, the day a piece was written.
+`revised` is optional and belongs only on a change a reader would notice. A
+draft shows neither date. The title lives in the front matter and is rendered
+by the template; `bin/build-content` refuses a body carrying an `<h1>`, so the
+title cannot be written twice.
 
-The **title lives in the front matter and is rendered by the template**. It
-used to live in both places — the front matter *and* an `#` heading at the top
-of the body — so every paid article displayed it twice, and the two were one
-edit away from disagreeing. `bin/build-content` now refuses a body that carries
-an `<h1>`, which makes the disagreement unrepresentable rather than merely
-absent. The privacy page takes its heading from the same source, which it did
-not before.
+**The dates are the writer's claim, and git is the witness**, decided
+2026-09-12. Only a person can tell a revision from a touch-up, so the dates
+are not derived from history. `bin/content-dates` reads the commit that added
+each file and the last that changed it, and fails when a published piece has
+moved past the date it claims. A commit that changes nothing a reader sees
+says so in a `Reader-Visible: no` trailer. CI runs it with `--require-git`
+and full history, so a green result always checked something.
 
-**The dates are the writer's claim; git is only the witness.** Deriving them
-from `git log` was considered and declined, and the argument is one commit old:
-on 2026-09-12 a single commit removed that repeated heading from all nine
-content files, and a derived `revised` would have told every reader that every
-article on the site changed that morning. Only a person can tell a revision
-from a touch-up. Two smaller costs pointed the same way — `actions/checkout`
-clones one commit deep, and a reader who downloads the ZIP has no `.git` at all
-while §12.0 promises them `composer install && bin/build-content`.
+**Scrub before publishing.** Sessions carry local paths, usernames, key
+material, half-formed opinions about third parties, and dead ends that read
+as commitments. Every piece is read once with that list in hand before it
+becomes content.
 
-This is the same distinction `bin/build-content` already draws about
-`reading_time`: *a number the writer sets is a promise to the reader; a number
-counted from the text is an estimate, and they should not be confused.* A date
-is a promise of exactly that kind.
+**What the redesign makes wrong, and what happens to each piece**, decided
+2026-10-01:
 
-So `bin/content-dates` is the witness rather than the author. It reads the
-commit that added each file and the last one that changed it, and fails when a
-**published** piece has moved past the date it claims. Drafts are exempt from
-that check and from nothing else — a creation date later than the file's first
-commit is wrong whatever the status, because it is a claim about a file rather
-than to a reader. A commit that changes nothing a reader sees says so, in a
-`Reader-Visible: no` trailer, and drops out of the reckoning; a sentence
-written on purpose was chosen over a warning, because a warning that fires on
-typo fixes is one everybody learns to scroll past. No history is not a failure
-— a ZIP or a shallow clone exits 0 with a note — unless `--require-git` is
-passed, which CI does, with `fetch-depth: 0`. A green result that checked
-nothing is the failure that pair exists to prevent.
-
-Twelve rather than eight so that a reader who works through the publication
-reaches the ten-view settle by reading, and meets §7.4's control as an
-accelerant rather than as the only way to see a transfer happen.
-
-**The material is the development sessions themselves**, edited — sol-pay's and
-this demonstrator's both. An earlier draft of this section said sol-pay's only,
-which was the plan written before there was a demonstrator to draw on. In
-practice the pieces have come from both sides, and several of the sharpest are
-from building the site rather than the library.
-
-**What decides whether a session becomes a piece is not which repository it came
-from; it is whether an implementor needs it.** The test is whether someone
-setting out to meter their own content would be worse off not knowing it. That
-admits why `approve` must come first, why the library ships no sign-in, why
-`limit_floor` is one function rather than two, why `Shortfall` is a struct and
-not a verdict — and equally why a busy timeout has to be set before the
-statement that takes a lock, or why a page that spends a round trip on a panel
-nobody opened is a defect and not a preference. The conclusions are already in
-`wasm-client/SPEC.md` and in this document, in three terse sentences each; the
-sessions are where the reasoning lives, including the positions that were
-argued and abandoned.
-
-**The AI-collaboration angle stays where the second constraint below puts it**
-— exhibited, never argued. A piece *about* the tooling is a different
-publication and belongs elsewhere; one that makes it the subject has stopped
-being about metering.
-
-Three editorial constraints, because the difference between this being good and
-being unreadable is entirely in the editing:
-
-**Episodes, not transcripts.** A raw session is long, doubles back, and spends
-most of its length on things that did not survive. Each piece is written *from*
-a session, keeps the objection that changed the outcome, and drops the rest. If
-a piece cannot state in its lede which decision it is about, it is not a piece
-yet.
-
-**Show the process, do not argue for it.** The claim worth making — that the
-artifact is better for having been argued out with an AI than it would have
-been alone — is made by exhibiting a decision that visibly improved under
-challenge, and is destroyed by asserting it. The strongest pieces will be the
-ones where the first proposal was wrong, and say so.
-
-**Scrub before publishing.** Sessions carry local filesystem paths, absolute
-usernames, key material, half-formed opinions about third parties, and dead
-ends that read as commitments. Every piece is read once with that list in hand
-before it becomes content, and that pass is a checklist item rather than a
-habit.
-
-There is a pleasing circularity in metering this particular material: the
-reader is paying a cent to read why the thing charging them the cent works the
-way it does. It is also a fair test of the proposition, since the content has
-to be worth a cent to someone, and nobody has to take the demo's word for it.
+- **Deleted:** `OneDelegate.md`, "The approval that quietly replaces another";
+  `TheDelegate.md`, "The permission nobody shows you"; and `ThreePhantoms.md`,
+  "Three wallets, one name, and a refusal that wasn't true". Each is about a
+  mechanism the fund design removed.
+- **Kept and made current:** `NoSignInPage.md`, "The ID of what's paying". Its
+  subject, pseudonymous metering with no sign-in page, is still this site's.
+- **Rewritten after the inspector is rebuilt:** `ReadingTheInspector.md`.
+- **Revised to be current:** `TwoOrderings.md`, `TheLogs.md`,
+  `WhatTheLimitPromises.md` and `FirstEverOnChain.md`, which mention contracts
+  or approvals in passing.
+- **Revised:** `privacy.md`, to follow §10.2 and §10.4.
 
 ### 10.2 The privacy page
 
 The site carries a page at the URL a privacy policy would occupy. It is not a
 privacy policy. It is the complete list of what the site holds, followed by the
-argument that the list is short because of how the reader is paying.
-
-Public, reachable without signing in, and linked from the footer of every page.
-
-**Amended 2026-09-14: it is served at `/a/privacy`, and `/privacy` is a
-permanent redirect to it.** The promise is the URL a reader can type and the
-footer can link, and `GET /a/{slug}` already serves an unmetered piece whole —
-so a second renderer for one page was a copy of the article path that could
-drift from it. A 301 keeps the address; the piece is rendered by the same code
-as everything else. The site's own links and the content still point at
-`/privacy`, which is the address worth keeping stable.
+argument that the list is short because of how the reader pays. It is served
+at `/a/privacy`, with `/privacy` a permanent redirect to it, and it is linked
+from the footer of every page.
 
 **The argument, in three moves.**
 
-1. *Here is everything.* Not a summary of categories, not "we may collect" —
-   the actual stores, enumerated, each one traceable to a line in the code. The
-   list fits on a screen. That it fits is the entire point.
+1. *Here is everything.* Not categories, not "we may collect": the stores,
+   enumerated, each traceable to a line in the code (§10.4). The list fits on
+   a screen, and that it fits is the point.
 2. *The list is short because the payment rail carries no identity.* An
-   ad-funded publisher builds an identity graph because it has no way to charge
-   a reader a cent; the reader pays with attention and with data because there
-   was no other currency available. Metering supplies the other currency. The
-   trade-off is explicit and it is not free: the reader pays money instead.
+   ad-funded publisher builds an identity graph because it has no way to
+   charge a reader a cent. Metering supplies the other currency. The trade is
+   explicit and not free: the reader pays money instead.
 3. *The wallet is not a name.* The site does not know who the reader is, does
-   not ask, and holds nothing that would answer the question.
+   not ask, and under the fund design does not even keep the wallet's
+   address. It keeps a meter's and a fund's, and the fund's names the wallet
+   to anyone who reads it (below).
 
 **Move three has a caveat, and the caveat is what makes the page credible.**
-
 A wallet address is pseudonymous, not anonymous. Addresses are linked to
-people every day — by identity checks (KYC) at an exchange on- or off-ramp, by
-address reuse across services, by chain analysis, by timing. None of that is
-something the site does, and the page says so.
+people every day, by identity checks at an exchange, by reuse, by chain
+analysis, by timing. And this site is not a neutral bystander. **A meter is a
+public, permanent record that a fund paid this site, and the site caused it
+to exist.** A meter names its fund. A fund's address is derived from the
+reader's wallet, the mint and an index, and the fund names the wallet too. So
+anyone holding a wallet address can find its funds, and from them every
+site's meter that draws on them, with their limits, usage and payments in the
+clear. The delegate design had the same exposure through its contracts. The
+fund design moves it; it does not remove it. The page states it as a cost to
+weigh, beside the benefit.
 
-But the site is not a neutral bystander either, and this is the part the brief
-did not have. `wasm-client/SPEC.md` §4.3: contracts are readable by anyone, so
-given this site and a wallet address, the limit, used and paid figures are on
-chain in the clear. **The contract account is a public, permanent record that
-this address paid this site, and the site is what caused it to exist.** It is
-inherent in putting a spend meter on a public ledger and no client library can
-change it — but "we did nothing to expose you" is not accurate, and the library
-spec asks integrators to tell readers plainly rather than reassure them.
+**Two more things the page discloses** under the fund design:
 
-So the page states it as a cost to weigh, in the same breath as the benefit.
-A page that admits the one real exposure is believed about the rest; a page
-that claims anonymity is not, and deserves not to be.
+- **the faucet form** receives an address the reader typed, and the faucet
+  ledger keeps it (§10.4);
+- **the wallet talks to this site directly** when it fetches the setup
+  transaction (§6.3), so the site sees the network address of the device the
+  wallet runs on, as any web server sees its visitors. It is not logged
+  against the wallet.
 
-**What the page must not claim.**
-
-- That a site running this in production needs no privacy policy. It processes
-  a pseudonymous identifier, an IP address, and a reading history, and whether
-  that triggers an obligation is a question for its own counsel in its own
-  jurisdiction. The page's claim is about *this* site, and even here it is
-  "there is nothing to disclose that is not disclosed", not "no law applies".
-- That the wallet is anonymous. Pseudonymous, and the difference is the page.
-- That the reader cannot be correlated. The site cannot promise that about
-  systems it does not run.
-- Any legal conclusion at all. The page argues from what the code does.
-
-**Every claim on it is testable.** The enumerated stores are the ones the
-implementation has; the third-party claim is §10.3; the "we do not keep
-transaction logs" claim is the single-place rule in §8.1. A claim on this page
-that the code does not support is a defect of the same class as a wrong
-instruction encoding, and reviewing the page against the code belongs in the
-release checklist rather than in someone's memory.
-
-A draft is at `content/privacy.md`.
+**What the page must not claim**: that a production site needs no privacy
+policy; that the wallet is anonymous; that the reader cannot be correlated by
+systems the site does not run; any legal conclusion at all. The page argues
+from what the code does. Every claim on it is testable, and reviewing the page
+against the code is a release checklist item.
 
 ### 10.3 No third-party requests
 
-A build constraint rather than a preference, because §10.2 makes a claim about
-it that has to be true: **the site loads nothing from a domain it does not
-control.** No analytics, no tag manager, no CDN-hosted fonts or scripts, no
-embedded media. Fonts, styles and scripts are served from the site's own
-origin.
+**The site loads nothing from a domain it does not control.** No analytics,
+no tag manager, no CDN-hosted fonts or scripts, no embedded media. Fonts,
+styles and scripts are served from the site's own origin. A font from a CDN
+sends every reader's IP address and referring page to the CDN on every page
+load, which would make §10.2's central claim false without anybody noticing.
 
-Hosted fonts are the specific trap. A font pulled from a third-party CDN sends
-every reader's IP address and referring page to that CDN on every page load,
-which would make the privacy page's central claim false in a way nobody would
-notice while writing it.
+Under the fund design the page loads no Solana library at all (§12.2), so the
+rule is easier to keep than it was. Three consequences remain:
 
-**The RPC endpoint is the same problem wearing different clothes, and it lands
-on the §12.4 decision.** If the browser talks to an RPC provider — to send the
-payer's transaction, or to keep the inspector live — then the reader's IP
-address reaches that provider, correlated with a wallet address, and the site
-has introduced a third party to the transaction after promising it had not.
-Two consequences:
+- **The inspector reads through the server**, never from the browser. A
+  browser that called an RPC provider would hand it the reader's IP address
+  beside the reader's meter.
+- **The Solana Pay icon and label are served from this site**, because the
+  wallet fetches them as part of the transaction request.
+- **The wallet's own RPC is outside the site's control** and is disclosed
+  rather than solved. A wallet submits through whatever endpoint its owner
+  configured. That is the reader's relationship with their wallet vendor.
 
-- The **inspector reads through the server**, not from the browser (§14 lists
-  live-versus-per-request as open; this decides part of it — if live polling
-  ever happens, it polls the site, and the site polls the chain).
-- The **wallet's own RPC is outside the site's control and is disclosed rather
-  than solved.** A wallet extension broadcasts through whatever endpoint its
-  owner configured. That is the reader's relationship with their wallet vendor,
-  the site cannot change it, and pretending otherwise would be the same error
-  as the fonts.
-
-Verification is mechanical: load every screen with devtools recording, and
-assert that no request leaves the origin. Worth a test rather than an
-inspection.
+Verification is mechanical: load every screen with the network panel
+recording, and assert that no request leaves the origin.
 
 ### 10.4 Erasure: what goes away, when, and what cannot
 
-Decided 2026-09-02. **Closing the contract purges the site's record of the
-reader.** The premise is the reader's, and it is right: closing a contract is
-the reader saying the relationship is over. A site that keeps their reading
+**Closing the meter purges the site's record of the reader**, decided
+2026-09-02. Closing is the reader saying the relationship is over, and a site that keeps their reading
 afterwards has not understood what it was told.
 
-But this section is more than that one rule, because §7.1 introduced something
-the rest of the design was built to avoid. To stop charging twice for one
-article, the site records which articles a wallet has paid for. That is a
-reading history. It is small and it is short-lived, and it is still the exact
-category of data this project exists to argue against holding.
-
-The right response is not to be defensive about it. It is to say what it is,
-bound it, and let the bound be checked.
+But §7.1 introduced something the rest of the design avoids. To stop charging
+twice for one article, the site records which articles a meter has paid for.
+That is a reading history: small, short-lived, and still the category of data
+this project argues against holding. The response is to say what it is, bound
+it, and let the bound be checked.
 
 | store | contents | goes away |
 | --- | --- | --- |
-| session | wallet address | forgetting the wallet, contract close, or within five minutes of session end |
-| view grants | wallet, article, expiry, the charge's signature and what became of it | within 35 minutes: 30 of grant, then a sweep — or at once, on close |
-| payer lock row | wallet | with the wallet's last session and grant — or at once, on close |
-| pending close | wallet, the close's signature | on the erasure it waits for; when the close can no longer land; or with the wallet's last session and grant |
-| faucet ledger | wallet, time | never — see below |
-| request logs | IP, path, time | short rotation, never keyed to a wallet |
-
-**Closing also forgets the paying wallet.** The session existed to tie a wallet
-to a browser so it could be charged. With nothing left to charge, it has no
-purpose, and leaving it in place while claiming to have forgotten them would be
-a contradiction sitting in a cookie.
-
-The reverse does not hold, and §5's wording exists to keep the two apart:
-forgetting the wallet on its own is not erasure. It drops the cookie and the
-session row — the browser end of the §5 mapping, and nothing else. Grants
-survive their thirty minutes, the faucet ledger is untouched, and the contract
-and its delegate stay exactly as they were. It is offered because a shared
-machine, a second wallet or a change of mind before authorizing should not
-require a transaction, and it is labelled so that no reader mistakes it for
-one.
+| session | the meter's and its fund's addresses, the proven key | at the close, or within five minutes of the session's end |
+| pending setup | the session, the key, the panel's answers, and the wallet's address once the wallet has asked | at *continue*, or after ten minutes |
+| nonces | the nonce and when it was issued | at its first use, or after five minutes |
+| view grants | the meter, the article, the expiry, the charge's signature and what became of it | within thirty-five minutes: thirty of grant, then a sweep; at once at the close |
+| meter lock row | the meter's address | with the meter's last session and grant, or at the close |
+| pending close | the meter's address, the close's signature | when the close lands and the erasure runs; or when it can no longer land |
+| faucet ledger | an address, and when it was granted | never: see 3 below |
+| request logs | IP address, path, time | a short rotation, never keyed to a meter or a wallet |
 
 Five qualifications. The first four are why the rule is not as strong as it
-sounds; the fifth is what keeps it honest.
+sounds. The fifth keeps it honest.
 
-**1. Expiry does the work. Closing is a courtesy.** Most readers will never
-close anything — they will simply leave. If erasure happened only on an
-explicit close, then the readers who most look gone would be exactly the ones
-whose data persisted longest, and the promise would be structured to be kept
-for the minority who ask and quietly broken for everyone else. So the claim
-rests on the thirty-minute expiry, which applies to everybody and needs no
-action. Closing accelerates something that was already going to happen.
+**1. Expiry does the work; closing is a courtesy.** Most readers will not
+close their meter. They will walk away (§5.5). If erasure happened only at the
+close, the readers
+who most look gone would be the ones whose data persisted longest. So the
+claim rests on the expiry, which applies to everybody. Expiry hides a row and
+only a `DELETE` removes it, decided 2026-09-16. The metering path sweeps inside
+the meter lock on every charge, and `bin/sweep`, run every five minutes,
+covers the hours when nobody buys anything. `GET /health` reports how long the
+oldest expired row has waited, and `overdue` when the wait passes the
+interval, so a forgotten crontab line shows there.
 
-Decided 2026-09-16: **expiry hides a row, and only a `DELETE` removes it.**
-Until that day nothing called the sweep. Every lapsed grant stayed in the
-table until its reader closed the meter, so the claim this qualification rests
-on was false for exactly the readers it was written for. Two sweeps now carry
-it. The metering path sweeps inside the payer lock on every charge
-(`Meter::forArticle`), which needs no setup and is covered by a test.
-`bin/sweep`, run every five minutes (`sweep_every_s`), covers the hours when
-nobody buys anything. The bound a reader is told is the sum: thirty minutes of
-grant plus at most five of waiting, thirty-five in all.
+**2. A close that lands late is still followed by the erasure**, decided
+2026-09-17. The request that sends the close writes a pending-close row: the
+meter and the close's signature, both public in the close transaction itself.
+Every request that resolves a meter asks first whether such a row exists.
+With none, that costs one indexed read and no chain call. With one, a fresh
+read of the meter decides: gone means erase now; still there after
+`close_settle_s` means the close failed and the row is dropped.
 
-The schedule lives outside the application, where no test can see it. So
-`GET /health` reports how long the oldest expired grant or session has waited,
-and `overdue` when that wait exceeds the interval. A deployment that forgot
-the crontab line shows it there, rather than in a promise that quietly stops
-being true.
+**3. Closing the meter costs the reader an article, and they are told before they
+click.** Purging live grants means an article they paid for stops being
+served. The cost is one item price, stated on the close confirmation.
 
-Decided 2026-09-17: **a close that lands late is still followed by the
-erasure.** `POST /meter/close/done` asks whether the close landed (§7.3's schedule)
-and then reads the contract account. Until that day, a close that landed
-after the server stopped asking was never followed by a `DELETE`: the reader reloaded into "no contract", and
-nothing could tell that meter from one never opened. Now the request that
-finds the account still there writes a *pending close* row, the wallet and
-the close's signature, both already public in the close transaction. Every
-request that resolves a wallet (`$wallet`, and sign-in before it creates a
-session) asks `CloseFinisher` first. With no row, that costs one indexed read
-and no chain call. With a row, a fresh read of the contract decides: gone
-means erase now; still there after `close_settle_s` (three minutes, past any
-blockhash's life) means the close failed and the row is dropped; no answer
-means wait. The row is listed on the privacy page, because the page lists
-what the site holds, not only what is secret.
+**4. The faucet ledger survives, because it duplicates a public fact.** If
+closing purged it, close and re-grant would be a loop, and the demo
+would be a token dispenser. The faucet's transfer is an on-chain transaction
+naming the address forever, so the row adds no exposure the chain does not
+already carry. That reasoning has to be published to count, and the privacy
+page publishes it.
 
-**2. It costs the reader an article, and they are told before they click.**
-Purging live grants means an article they have paid for stops being served. The
-exposure is bounded at one page price, which the site absorbs elsewhere anyway
-(§7.3), and it is stated on the close confirmation rather than discovered.
+**5. The chain keeps what the chain was given.** Opening a meter put a public
+record on chain, and every `Metered` event since. Closing it neither creates
+that exposure nor erases it. It adds one last event, `Closed`, with the
+amount forgiven. The close confirmation says what closing does — the meter is
+gone, the site's record is purged, the chain keeps what it had and gains one
+line — and leaves the permanence where §10.2 put it, in front of the reader at
+the moment they decide to open a meter.
 
-This **replaces** the earlier answer to the grant-live-after-close case. With
-purge-on-close there is almost nothing left to resolve: the reader who closes
-in one tab and refreshes in another finds no session and no grant, and lands on
-`set_meter` with the message that the site has honoured their decision to stop.
-Serving the paid article on after a purge would have been a thirty-minute
-asterisk on a promise that is otherwise simply true, and a promise with an
-asterisk is worth less than the article.
+**Aggregates are allowed, under three conditions.** How many times a page was
+bought is a fact about the page, not about anybody. The line is not "no
+numbers":
 
-**3. The faucet ledger survives, and the reason it is allowed to is specific.**
-If closing purged it, close-and-refaucet would be a loop and the demo would be
-a token dispenser. The exception is defensible because **the record duplicates
-a public fact**: the faucet's mint is an on-chain transaction naming that token
-account forever, so the site's row adds no exposure the ledger does not already
-carry, and could in principle be replaced by a chain query instead of a store.
-That reasoning is the sort of thing that has to be published to count. An
-undisclosed exception to an erasure promise is not an exception, it is the
-promise being false.
+- **Counts, not joins.** A per-article purchase total is about the article.
+  "Readers of this also read that" is a preference profile wearing aggregate
+  clothing.
+- **The count must not need the row.** Increment, then let the grant expire.
+  If deleting a reader's data would change what the site can still compute,
+  the data was never aggregate.
+- **Mind the public ledger.** A per-article counter that moves in real time,
+  beside a public ledger of timestamped `Metered` events, is a correlation
+  channel on a low-traffic article. Internal counts are fine. Published counts
+  are coarse in time, withheld below a threshold, or both.
 
-**4. The ledger is the thing nobody can delete, and closing adds to it rather
-than starting it.** `close_contract` emits `Closed { contract, forgiven }`, so
-the reader's instruction to be forgotten is itself recorded, publicly and
-permanently, by the act of giving it.
-
-**Be exact about what that does and does not mean**, because an earlier draft of
-this point overstated it and presented the close event as the sharp edge. It is
-not. The indelible record was made when the reader **opened** the contract:
-`approve_and_open` is on chain, and every `Metered` event since has been too.
-That is §10.2's caveat, already stated there — the contract account is a public,
-permanent record that this address paid this site. Closing neither creates that
-exposure nor erases it. What it does is add the last entry, which is the
-reader's own final act saying the relationship is over.
-
-So this is not a cost of leaving, and the close confirmation should not read as
-though it were. The screen says what closing does — the delegate is revoked, the
-site's record is purged, the chain keeps what it already had and gains one more
-line — and leaves the ledger's permanence where §10.2 put it, in front of the
-reader at the point where they decide to *open* a contract.
-
-**5. Aggregates are allowed. Three conditions make them aggregates.** How many
-times a page was bought is a fact about the page, not about anybody, and a
-publisher who cannot know what gets read is being denied something ordinary for
-no one's benefit. An earlier draft of this section forbade all of it, which was
-wrong. The line is not "no numbers"; it is these three:
-
-- **Counts, not joins.** A per-article purchase total is a fact about the
-  article. "Readers of this also read that" is a preference profile wearing
-  aggregate clothing, and it is precisely the machinery this project exists to
-  do without. The distinction is whether the statistic is about the content or
-  about a person reconstructed across articles.
-- **The count must not need the row.** Increment, then let the grant expire or
-  be purged on close. If deleting a reader's data would change what the site
-  can still compute, the data was never aggregate — it was a profile with a
-  total on top.
-- **Mind the public ledger.** This one is specific to a chain and is easy to
-  miss. A per-article counter that moves in real time, sitting beside a public
-  ledger of timestamped `Metered` events, is a correlation channel: on a
-  low-traffic article, one settle in a window plus one increment in the same
-  window joins a wallet to a title, and nothing in either source had to be
-  careless for that to work. Internal counts are fine. Published counts should
-  be coarse in time, or withheld below a threshold, or both.
-
-**What the grant store is, precisely** — the distinction worth making rather
-than blurring, because the privacy page's whole argument depends on it. A grant
-answers one question: *has this wallet already paid for this article?* It is a
-receipt. It is never joined across articles to describe what a reader likes, it
-never leaves the server, it feeds nothing, and it expires. The tracking this
-project argues against is not the keeping of a receipt; it is the construction
-of a preference profile from receipts, and the two are separated by exactly the
-rule in point 5.
-
-**Testable, and tested.** Close a contract, then assert from outside that the
-session is gone, no grant remains for that wallet, and a request for a
-previously granted article routes to `set_meter`. An erasure claim that nothing
-checks is an erasure claim that will be wrong within two releases.
+**Testable, and tested.** Close the meter, then assert from outside that the session
+is gone, no grant remains for that meter, and a request for a previously
+granted article routes to `set_meter`. An erasure claim that nothing checks
+will be wrong within two releases.
 
 ## 11. Non-goals
 
-Stated so they are not mistaken for oversights:
+Stated so that they are not mistaken for oversights:
 
-- **Production hardening.** No HA, no monitoring, no backups. The session store
-  may be memory. Key *custody* is a non-goal for the demo's own deployment but
-  not for its documentation: §15 owes integrators a written answer.
-- **Mainnet, or any real money.** Claim-checking the design against real value
-  is a different exercise with different obligations.
-- **Multiple sites, or Token-2022.** One deployment, one site, one SPL Token
-  mint. `Program::new` and `with_token_program` exist and are worth showing in
-  the inspector as the defaults they are, but the demo exercises one path.
+- **Production hardening.** No high availability, no monitoring beyond the
+  canary and `GET /health`, no backups. Key custody is a non-goal for the
+  demo's own deployment and not for its documentation: §15 owes integrators a
+  written answer.
+- **Mainnet, or any real money.**
+- **The faucet as a pattern.** It is a fountain for the demo (§4.3). No real
+  site gives coin away from a form, and none should copy it.
+- **Managing funds.** Withdrawing from a fund, closing it, or listing a
+  reader's funds is the management page that `wasm-client/SPEC.md` §4.10 sets
+  aside, or a wallet that knows the program. This site opens and draws on
+  funds. It never moves money out of one except by settling.
+- **Multiple sites, or Token-2022.** One site per instance, one SPL Token
+  mint.
 - **Subscriptions.** §7.5 leaves the hook and nothing more.
-- **The encrypted wallet deep-link protocol.** Mobile itself is in scope
-  (§6.3); the raw `ul/v1` protocol is not.
-- **Gift links.** The library removed the slug that would have made these
-  possible and explained why (§4.2). Not reintroduced here.
-- **Anything the library refused to ship.** No sign-in message construction, no
-  second error enum, no RPC wrapper worth publishing. Where the demo writes
-  something the library declined to, it is the site's own and is marked as
-  such.
+- **Push in place of *continue*.** A websocket relay that told the page when
+  the meter landed is compatible with the design and declined for now
+  (`wasm-client/SPEC.md` §4.10).
+- **Anything the library refused to ship.** No RPC wrapper worth publishing,
+  no second error enum. Where the demo writes something the library declined
+  to, it is the site's own and is marked so.
 
 ## 12. Platform
 
-Revised 2026-09-03, and closed 2026-09-04. The deployment shape settled most of
-what this section used to be open about; §12.1 settled the rest, and §12.5 was
-revised in the same pass as a consequence of it. Nothing here is open.
-
-### 12.0 The shape, decided
-
-**Each interested person runs their own copy, against devnet, as a local
-process.** Nobody operates a shared instance.
-
-That single choice resolves a cluster of problems the earlier draft treated as
-independent. There is no RPC provider to choose, because one reader against the
-public endpoint is nowhere near a rate limit. There is no operator faucet to
-keep solvent, no shared signing key, no uptime obligation, and no abuse
-surface, because there is nothing shared to abuse.
-
-**Devnet specifically, not testnet.** Testnet is where validator releases are
-exercised and it is reset aggressively; devnet is the cluster intended for
-application development and is what every wallet lists as a network. A demo on
-testnet loses its program and every contract to the next reset.
-
-**Local process, remote chain.** Two alternatives were considered and rejected,
-and the reasons are recorded so they are not rediscovered:
-
-*A deployed public instance* reaches people who will not clone a repository,
-which is worth something — but §1 names integrators as the audience, and an
-integrator will clone. It costs an operated faucet, a live key, and a demo that
-is broken in public whenever it is broken, which is worse than no demo.
-
-*A local validator* is more attractive than it turns out to be. It would make
-§13's walkthroughs deterministic and automatable, which is a real prize. It
-does not work with wallets. No wallet supports an arbitrary custom RPC —
-Phantom announced it in 2022 and never shipped it, and Backpack, which does
-support custom RPC, publishes a page explaining that localhost specifically
-cannot work because the URL is resolved by its backend. Worse,
-`signAndSendTransaction` submits through the *wallet's* RPC, so on a local
-validator a transaction silently lands on devnet; there is a Phantom issue
-where transactions appeared to succeed with the local validator stopped. A
-reference integration that modelled that pattern would be teaching a trap. And
-mobile is impossible outright: MWA 2.0 defines no localnet chain, the
-specification says the wallet chooses the RPC, and a LAN address is not a
-secure context so MWA's own session setup cannot run.
-
-**Nobody but the program's publisher builds the program.** `pay-on-chain` is
-deployed to devnet once; `wasm-client/SPEC.md` §4.5 already establishes that one
-deployment serves many sites, because the `Site` PDA is seeded by authority. So
-a person running this demo creates their own mint, treasury and site against
-that deployment. They need no Anchor, no Solana CLI, no validator, no wasm
-target, and cents of devnet SOL for rent.
-
-**Which is why there is no container.** An earlier draft reached for Docker to
-pin the Anchor and Solana toolchains. Nothing here builds a program any more,
-so the prerequisite is one language runtime and one package from a registry.
-`npm run dev` or `php -S`, not `docker compose up`.
-
-**And first-run setup is a page, not a command.** Creating the mint, the treasury account and the `Site`
-would ordinarily mean a CLI, a generated keypair and an airdrop command — three
-chances to fail before anything has been demonstrated.
-
-None of it needs a CLI. Every step is available over plain JSON-RPC, including
-`requestAirdrop` on devnet. So the first run of the server opens a setup screen:
-it generates the site authority keypair server-side, airdrops it, creates the
-DEMO mint, creates the treasury token account, calls `initialize_site` with the
-parameters in §4.2, and writes the configuration file. The operator starts a
-process, opens a page, and clicks once. They never handle a keypair and never
-open a terminal after the start command.
-
-It also earns its place as documentation. `initialize_site` is part of the
-library's published surface and has no worked example anywhere.
-
-**A page rather than a command costs one thing, and the cost is paid in the
-route.** Every other POST this site answers is guarded by the session cookie:
-§5's `SameSite=Lax` is not sent by a browser on a cross-site POST, so a forged
-request arrives anonymous with no reader to charge. §7.1 makes that argument
-where it matters most — *a cross-site page cannot spend a reader's money by
-posting a form here* — and `SessionCookieTest` pins the attribute the argument
-rests on. Setup runs before anybody has signed in. It carries no session, so a
-guard that works by withholding a cookie has nothing to withhold.
-
-The route therefore asks the question directly. `Sec-Fetch-Site` answers it
-wherever the browser sends that header, and a comparison of `Origin` against
-the request's own origin answers it otherwise. A POST from somebody else's page
-is refused before a provisioner is built, so it never opens an RPC connection.
-Neither header present means the request came from no browser at all — `curl`,
-or a command-line check — rather than from the page this refuses.
-
-**What the guard is worth, stated plainly.** On the shape this section decided,
-where each person runs their own copy as a local process, a forged POST
-provisions a site the operator was about to provision anyway and spends cents
-of devnet SOL. Nothing reaches whoever sent it. The reason to refuse it is the
-paragraph above: this screen is the only worked example of `initialize_site`
-anywhere, and an unauthenticated state-changing POST is not a thing to be an
-example of.
-
-### 12.1 Server language, decided: PHP
-
-**Decided 2026-09-04: PHP, with Slim 4 as the framework.** The front end is
-JavaScript either way (§12.2); this was only ever about what runs the server
-half.
-
-Both routes cleared their one unproven thing before the choice was made, so it
-came down to reach against speed — a judgement, as this section anticipated.
-The reasoning below is kept as the record of how the decision was reached, with
-the two "unproven thing" bullets rewritten to say how each was settled rather
-than deleted.
-
-#### Rust is out, and it is out on purpose rather than on merit
-
-It was the strongest option on every axis but one. The crate is published for
-exactly this, `cargo run` is one command, and the amount of new protocol code
-is zero — the only stack where that is true.
-
-And it would be the worst example in the repository. §1's second purpose is to
-be the reference integration an adopter reads to find out what they have to
-write. Written in a language essentially nobody in this population runs a web
-server in — no publisher surveyed uses one, and W3Techs does not track Rust as
-a server-side language at all — the lowest-risk build becomes the least useful
-demonstration. Choosing it would be optimising the thing that is not the point.
-
-#### The two that remain
-
-**Node.**
-
-- `npm install && npm run dev`. One language across the whole repository, one
-  dependency graph, and the runtime most likely already installed.
-- It is where the large publishers' entitlement logic actually runs — the FT,
-  Arc XP, the Guardian's rendering tier, Substack.
-- **The one unproven thing, settled 2026-09-04 — and it turned out not to be
-  a thing.** The npm package is `wasm-pack --target web` output, so the
-  assumption was that a Node server needed a `nodejs` or `bundler` target
-  sol-pay does not publish. It does not. Nothing in the wasm layer is
-  browser-specific — no `web-sys`, no `js-sys`, no fetch — so the `--target
-  web` bundle runs unchanged under Node, with exactly one difference: the
-  zero-argument `init()` resolves the `.wasm` against `import.meta.url` and
-  fetches it, and Node's fetch does not do `file:` URLs, so a Node caller
-  passes the bytes instead. `bin/test-node` and the `node conformance`
-  workflow check it against the same vectors the PHP port is checked against;
-  `wasm-client/SPEC.md` §3.1 records the measurement. No new build target and
-  no second package were needed.
-
-**PHP.**
-
-- `php -S localhost:8000 -t public`. Bundled with PHP since 5.4 — no package
-  manager, no framework, no install step beyond having PHP, which every macOS
-  and Linux machine has. It is the shortest path from clone to running page of
-  any option here.
-- It is where the reach is: 70.2% of server-side languages, WordPress at 40.7%
-  of all sites. And it makes a WordPress plugin a port rather than a rewrite.
-- **What it costs:** the entire server half has to be written. PDA derivation,
-  the Anchor discriminator (`sha256("global:meter_and_settle")[..8]`), account
-  decoding with `unpack`, preflight arithmetic, transaction assembly, ed25519
-  signing through `ext-sodium` (bundled since 7.2), JSON-RPC over curl. Several
-  hundred lines, most of it dull. Since this was written, sol-pay's
-  `php-client` covers the first four, and now assembly too — `SolPay\Tx`'s
-  `compile` and `wire`, built 2026-09-04 and checked byte-for-byte against
-  `solana-message` and `solana-transaction` on three cases. What remains to
-  this repository is signing and RPC. **Assembly was the one item on that list
-  that was not demonstrator-specific** — every PHP adopter faces it — so it
-  went into the library instead of here; `php-client/README.md`'s
-  "Transaction assembly" section carries the argument and the vectors-first
-  order it was built in. What this repository still owes is the last step of
-  that order: no signature in those vectors is real and no blockhash was ever
-  current, so the first settling request on devnet is the first time that
-  encoder meets a validator.
-- **The one unproven thing, settled 2026-09-03 — and it was worse than
-  stated, then fixed.** PDA derivation needs an off-curve check, and PHP's
-  `sodium_crypto_core_ed25519_is_valid_point` also enforces prime-order
-  subgroup membership — *stricter* than Solana's decompression-only
-  `is_on_curve`. The spike found two things. The strict function is not
-  exposed at all on the PHP builds tested, so there is no shortcut to take;
-  and had there been, it disagreed with `is_on_curve` on 44.5% of samples,
-  giving a different bump and a silently wrong address on 46% of derivations.
-  The field arithmetic was written instead: ~250 lines, no `ext-gmp`, no
-  `ext-bcmath`, no Composer package, 4 ms per derivation. It now ships in
-  sol-pay as `php-client`'s `SolPay\Core`, checked against vectors generated
-  from the published crate by `bin/test-php` and the `php conformance`
-  workflow on PHP 8.1 and 8.5.
-- **One caveat that will bite the test suite rather than the code.** `php -S`
-  is single-process by default, so it satisfies §7.2's per-payer serialization
-  for free — and therefore *masks the defect §7.2 exists to prevent*. The
-  two-browsers-one-wallet test would pass there and fail under PHP-FPM. If PHP
-  wins, that test runs with `PHP_CLI_SERVER_WORKERS` set, or against a real
-  server API (SAPI, PHP's name for the interface between the interpreter and
-  whatever is serving requests), or it is testing nothing.
-- **And one that would bite the code rather than the test suite** (written
-  2026-09-11, after `RequestRead` landed). The front controller memoises in a
-  `static` inside a closure — `$store` for the SQLite handle, `$reads` for this
-  request's one chain read — and that is a *per-request* cache only because the
-  file is executed again for every request. Under `php -S` and under PHP-FPM it
-  is. Under a worker SAPI that boots once and then serves many requests —
-  Swoole, RoadRunner, FrankenPHP in worker mode — it is not, and the two are
-  not equally bad: a shared store handle is wrong about a lifetime, while
-  `RequestRead` holds **a reader's** accounts, so the same staleness becomes a
-  reader being shown another reader's contract. §12.0 asks for one runtime and
-  `php -S`, so nothing here needs a worker SAPI; it is written down because a
-  port to one is exactly the change that looks like configuration. The rule
-  underneath, which §12.5's multi-instance caveat is the storage half of: a
-  value memoised against nothing is safe only while "the process" and "the
-  request" are the same thing.
-
-#### How it was decided
-
-Both spikes were run and both passed, which is the outcome this section said
-would leave a judgement rather than a finding.
-
-- **Node**, 2026-09-04: no build target needed at all, so the route's cost fell
-  to zero rather than to one change in the sol-pay repository.
-- **PHP**, 2026-09-03: the derivation reproduces, at the cost of ~250 lines
-  that never change, and those lines now live in sol-pay rather than here.
-
-So it came down to reach, and reach is what §1 says this repository is for. A
-Node demonstrator would be the better-engineered artifact and the worse
-example: it demonstrates the tier that already has a paywall to replace, in a
-runtime whose adopters have the least trouble adopting. PHP demonstrates the
-70% — and makes a WordPress plugin a port rather than a rewrite.
-
-#### The framework: Slim 4
-
-`php -S localhost:8000 -t public` survives, and Composer was already a
-prerequisite because `php-client` is a Composer package — published on
-Packagist as `wbreeze/sol-pay-client` on 2026-09-05, so it installs with a
-plain `composer require` rather than a repository entry. The framework
-therefore costs no setup step. Eight small dependencies, no build.
-
-**The reason is the shape, not the size.** The metering decision of §7 is a
-PSR-15 middleware, which is the most portable form this code could take: a
-Laravel middleware, a Symfony kernel subscriber and a WordPress
-`template_redirect` hook are the same twenty lines with a different signature.
-`SolPay\Core` is already framework-agnostic, so the middleware is a thin
-adapter over it plus the one obligation `wasm-client/SPEC.md` §4.1 names —
-mapping viewer to wallet address. Templates are plain PHP rather than Twig,
-which keeps §10.3's rule — the page loads nothing from a domain this site does
-not control — trivially satisfied.
-
-**A lightweight CMS was considered and rejected.** The one job it would do —
-markdown to HTML with a page tree — §12.7 already assigns to build time, for
-twelve files. Against it: page and template caching is hostile to per-request
-metering, so either the cache serves an unpaid reader or the CMS runs with its
-main feature off; and a gate buried in a CMS event handler means learning that
-CMS's request lifecycle before you can see where `meter_and_settle` is called,
-which is the opposite of §1's second purpose. Kirby needs a paid licence in
-production, Statamic is Laravel plus a CMS, and WordPress needs an install
-wizard and a database, breaking §12.0's one-runtime clone-and-run.
-
-### 12.2 Front end and rendering
-
-**Decided 2026-09-02: conventional JavaScript, importing the npm package.**
-
-The earlier draft of this section was ambiguous and invited a question worth
-answering in the document, because anyone reading it will have the same one:
-*can't WASM and JS coexist, and doesn't the client ship JS wrappers?*
-
-Yes, and yes. That is precisely what the npm package is. `wasm-pack --target
-web` emits the `.wasm` plus JavaScript glue plus generated `.d.ts`, and
-`wasm-client/README.md`'s own example is a JS program importing it:
-
-```js
-import init, { PayOnChain } from './pkg/sol_pay_client.js';
-await init();
-const pay = new PayOnChain();
-```
-
-There was never a WASM-versus-JS choice on the browser side. The real question
-— which the section stated badly — is whether the *front end itself* is written
-in Rust compiled to WASM (Leptos, Yew), which is what the sol-pay README gestures
-at with "in WebAssembly rather than JavaScript". That is a much bigger
-commitment, it buys the demo nothing an integrator would reuse, and §6.3 settles
-it anyway: Mobile Wallet Adapter, the wallet adapters, and the in-app browser
-providers are all JavaScript, so a JavaScript layer exists no matter what. Going
-with convention means one layer instead of two with a boundary between them.
-
-**Decided 2026-09-05: server-rendered, with ES modules only where the wallet
-is involved.** No client framework.
-
-Two decisions already made take the work a framework would do away from the
-browser. §12.4 puts RPC on the server, so the page needs no RPC client — which
-is most of what a modern Solana SDK is for. §7 requires the metered body to be
-delivered by the server after a successful meter and never fetched afterwards,
-so the article route cannot be a client-side render whatever else is true.
-(Since 2026-09-11 the metering request is a POST whose answer — the body,
-rendered by the server that metered it — a small script swaps into the page;
-§7.1 says why. That is still the server delivering the body in the response to
-the charge. What the browser never does is fetch the body on its own later.) What
-is left for JavaScript is the wallet: discover it, sign in, and sign three
-transactions. That is a script on two screens, not an application.
-
-### What the browser loads, and from where
-
-§10.3 forbids loading anything from a domain this site does not control, and
-§12.0 promises one language runtime. Both hold, because neither dependency
-needs a build step:
-
-- **sol-pay's npm package** is `wasm-pack --target web` output — plain ESM plus
-  a `.wasm` file. `pkg/sol_pay_client.js` imports directly from a
-  `<script type="module">` and `init()` fetches the wasm beside it. Copied into
-  `public/vendor/`.
-- **`@solana/kit`** publishes `dist/index.production.min.js`: a self-contained
-  IIFE, ~221 KB minified, no bare specifiers, exposing `globalThis.solanaWeb3`.
-  One `<script src>` from this origin. Checked 2026-09-05 — the ESM build
-  (`index.browser.mjs`, 23 KB) is only an aggregator over fifteen sibling
-  `@solana/*` packages, so vendoring *that* would mean an import map over the
-  whole graph. The bundle avoids it.
-
-**Both are committed**, which is a deliberate exception to the rule that
-generated output stays out of the repository (§12.7 puts the rendered content
-under `var/`). The reasoning differs: rendered content is this repository's own
-output and rebuilding it costs one command, while these are third-party
-artifacts whose absence would put npm, a lockfile and a bundler between a clone
-and a running page. A vendored file is also the only form §10.3 permits, since
-the alternative is a CDN.
-
-**A cheaper bundle is available later and is not worth chasing now.** This site
-uses kit for one thing — compiling a transaction message — and 221 KB is most
-of an SDK. Trimming it means vendoring the two or three `@solana/*` packages
-that actually matter and writing the import map the aggregator would have
-needed, which is a size optimisation on a demo, not a correctness question.
-
-### 12.3 Wallet integration
-
-*Constraints.* Must support the Wallet Standard `signIn` feature, which §5
-requires with no fallback. Must sign a two-instruction transaction in order.
-
-**Decided 2026-09-05: Wallet Standard directly, and `@solana/kit` for one
-job.** `@solana/wallet-adapter` is not used.
-
-*Why not wallet-adapter.* Solana's own frontend documentation now says plainly
-that "web3.js v1 and wallet-adapter are legacy" and that new work should prefer
-`@solana/kit` with Wallet Standard discovery. Choosing it in 2026 would be
-choosing the older of two supported paths, and §6.3's Android requirements
-impose their own version floors on it.
-
-*Why no wallet library at all for discovery.* Wallet Standard discovery is two
-`window` events: the page dispatches `wallet-standard:app-ready` carrying a
-`register` function and listens for `wallet-standard:register-wallet`, whose
-detail is a callback the page invokes with that API. `@wallet-standard/app` is
-a wrapper over those two lines. Once a wallet has registered, `connect`,
-`signIn`, `signMessage` and `signAndSendTransaction` are functions it supplied.
-Reaching them costs no dependency.
-
-*What kit is actually for.* Exactly one thing: `signAndSendTransaction` takes
-**serialized transaction bytes**, and sol-pay ships no message compilation in
-any language on purpose (`wasm-client/SPEC.md` §7 — `core::tx` pairs
-instructions in the order the program requires, which is ordering and not wire
-format). Something has to compile the message, and in the browser that is kit.
-
-*The alternative that was rejected, and why it is tempting.* This server now
-compiles messages in PHP, devnet-proven, and `Tx::wire` accepts placeholder
-signatures — so the server could hand the browser finished bytes and the page
-would need no npm at all. It is rejected on two grounds. `php-client`
-deliberately omits the payer-signed instructions (`open_contract`,
-`renew_contract`, `close_contract`, `approve_checked`, `revoke`) because a
-wallet adapter signs them in the browser regardless of what the server runs, so
-this route reopens a settled decision in the library and grows it. And the
-demonstrator would then never exercise the npm package, which is half of §3's
-two consumers and half of what an integrator comes here to read. Reusing code
-because it exists is not a reason to move a boundary the library drew
-deliberately.
-
-### 12.4 RPC, decided
-
-The public devnet endpoint, `https://api.devnet.solana.com`, called from the
-server.
-
-§12.0 makes this easy. Solana documents the public endpoints' limits — 100
-requests per 10 seconds per IP, 40 for any single method, 40 concurrent
-connections — and states plainly that they are "not intended for production
-applications". A shared public demo would have run into that on the day it was
-linked anywhere. One person reading their own copy — six calls on the page view
-that charges, one or two on every other page — is not close.
-
-**Amended 2026-09-09, from measurement.** That figure was always stated for the
-*metered* page view, and until this date it understated the total everywhere
-else: §9's inspector renders on every page and read the site account to do so,
-so a page that meters nothing — `/privacy`, the home page — spent one call as
-well. It no longer does. §9 now defers that read to a reader who opens the
-panel, and `/privacy` fell from 0.899 s to 0.002 s as a result.
-
-**Amended again 2026-09-10, from three HARs taken with `NEWSPRINT_RPC_TIMING=1`
-and read off `X-Rpc-Calls`.** "Roughly three per metered page view" was wrong in
-both directions, and it had never been counted. The page view that *charges* is
-six. Every other metered page is one.
-
-| page | calls |
-| --- | --- |
-| `/privacy` | 0 |
-| the home page; an article before identifying; an article a live grant covers | 1 |
-| `manage_meter`; the `set_meter` and faucet screens | 1 |
-| `POST /meter/prepare`, `/meter/opened`, `/meter/close/prepare`, `/meter/close/done` | 2 |
-| `POST /faucet` | 3 |
-| the seven-view advance (§7.4) | 5, and 1 on the page it redirects to |
-| a charge the chain refuses (§8.2) | 5 |
-| **an article that charges** | **4** since 2026-09-17; 6 before |
-| its follow-up, `POST /a/{slug}/confirm` | 3 |
-| an article a live grant covers, while its charge is still pending | 2 |
-
-**Amended 2026-09-17.** §7.3 now serves the article before the charge
-confirms, so items 5 and 6 below left the request the reader waits on. They are
-the follow-up's first and third calls; its second is `getTransaction`, for the
-settle the strip reports. The totals rose by one and the wait fell by two.
-What follows is the six as they were counted, kept because the reasons for
-each still hold wherever it now happens.
-
-The six are worth naming, because four are irreducible and two are prices this
-specification has already agreed to pay:
-
-1. `getMultipleAccounts` — the `Site`, the treasury, the mint, the `Contract`
-   and the payer's token account. **Five accounts, one round trip**, which is
-   what the list below has always asked for and what the code did not do until
-   2026-09-10. It took two calls, and not because anything was waiting: both of
-   the payer's addresses are derived from the wallet and from what setup
-   recorded, so neither ever depended on a value the site *account* returned.
-2. `getMultipleAccounts` again — the contract and the token account, read
-   **inside the payer lock**. §7.2 requires it: a request that queued behind
-   another must decide from what that one left rather than from what it saw
-   before waiting. This is the price of §7.2.
-3. `getLatestBlockhash` — absent from the list below until this amendment, and
-   a transaction cannot be compiled without one. "Exactly three" was never
-   three.
-4. `sendTransaction`.
-5. `getSignatureStatuses` — **usually once, and it has looped once.** Across
-   four captures and 41 confirmations, one needed a second request: a
-   seven-view advance on 2026-09-10 whose first status came back unconfirmed
-   after 536 ms, and whose second, one `confirm_poll_ms` later, confirmed. The
-   loop is real and has run; it is counted as one call here because forty of
-   forty-one needed only one. (Since 2026-09-17 the loop is up to six asks,
-   two seconds apart; see §7.3.)
-6. `getMultipleAccounts` a third time, *after* the send — because the charge
-   moved `used`, `paid` and the carried residue, and §2's claim 7 is that the
-   numbers on the screen came from an account rather than from the server's
-   memory. This is the price of claim 7, and it is bought deliberately.
-
-**None of the six is the inspector's**, which is worth saying because the
-opposite is the natural guess. §9's panel is rendered on a charging view from
-the read this request already made and the `MeterResult` it already produced, so
-it costs nothing; its own call, `getTransaction`, is deliberately off this path
-and fires only when a reader opens the panel on a page that did not charge. A
-production deployment that shipped no inspector at all would still make six
-calls here. The one it could drop is item 6 — and that is claim 7's price, not
-the panel's: dropping it means either showing the reader figures from before the
-charge, or computing the new ones in the server's memory, which is the practice
-§2's claim 7 exists to refuse.
-
-The reason all of this matters more than the count suggests is the endpoint's
-own behaviour, described below: latency here varies by an order of magnitude
-hour to hour. A call a page does not need is not felt as one call of overhead —
-it is felt as the site being broken on a bad morning.
-
-**And the count is the only lever there is.** A round trip to the public devnet
-endpoint measured a median of 1223 ms on the morning of 2026-09-10, about 500 ms
-the previous evening, and moved from 1288 ms to 614 ms inside two minutes of one
-capture. This site's own code is 5 to 140 ms per request, so 97% of a charging
-view is waiting. Merging the two reads of item 1 took the first visit of a
-seeded reader from twenty calls to sixteen, and from 30.1 s to 21.4 s, at
-unchanged endpoint latency. Nothing was rendered faster; four questions were
-asked in one breath instead of two.
-
-A deployment that outgrows this has a provider tier as an unremarkable
-configuration change: the endpoint is a config value, not an architectural one.
-
-#### What an RPC endpoint is, in one page
-
-Nothing on Solana is readable or writable directly. A validator maintains the
-ledger, and every program that wants to *ask* something — what is in this
-account, has this transaction landed — or to *submit* something talks to a node
-running the JSON-RPC service. That node is "an RPC endpoint". It is not part of
-consensus and it holds no authority; it is a read-and-relay service in front of
-the cluster.
-
-This design needs four of the endpoint's methods on the serving path, and asks
-one of them three times on the page view that charges:
-
-- `getMultipleAccounts` — fetch the `Site`, the treasury, the mint, the
-  `Contract` and the payer's token account in one round trip, which is the read
-  at the top of every request that has a reader. On a charging view it is asked
-  twice more: once under §7.2's payer lock, and once after the charge, for §2's
-  claim 7.
-- `getLatestBlockhash` — a transaction is compiled against one, fetched
-  immediately before the handoff to the wallet (§6.3).
-- `sendTransaction` — hand the signed `meter_and_settle` to the cluster.
-- `getSignatureStatuses` — asked up to six times, two seconds apart, which is the wait in §7.3.
-
-There is a fifth, and it is deliberately not on that path: §9's inspector reads
-a landed transaction's event with `getTransaction`, once, and only when a reader
-opens the panel.
-
-**Public versus dedicated.** Solana operates public endpoints —
-`https://api.devnet.solana.com` for devnet — and documents both their limits
-and the fact that they are "not intended for production applications": 100
-requests per 10 seconds per IP, 40 for any single RPC method, 40 concurrent
-connections, and the note that the limits can change without notice. A demo
-being clicked through by one person is comfortably inside that. A demo being
-clicked through by forty people who just read a link is not, and the failure
-looks like the site being broken rather than like a rate limit. Providers
-(Helius, QuickNode, Triton and others) sell dedicated endpoints with free tiers
-that are ample here; that is the whole of the trade.
-
-**Why this is a privacy decision as well as an operational one**, per §10.3: an
-RPC endpoint sees the IP address of whoever calls it and the accounts they ask
-about. If the *browser* calls it, the provider learns a reader's IP alongside
-their wallet address. If the *server* calls it, the provider sees one server
-asking about many accounts and learns nothing about any individual reader. Same
-data, entirely different exposure, and it is decided by which side makes the
-call.
-
-Further reading: the [JSON RPC API reference](https://solana.com/docs/rpc), and
-["Clusters and Public RPC Endpoints"](https://solana.com/docs/references/clusters)
-for endpoints and the current limits.
-
-### 12.5 Session, grant and lock store, decided: SQLite
-
-Revised 2026-09-04. This section previously said "in memory, in the one
-process", and §12.1 invalidated it: **PHP is share-nothing per request.**
-Nothing held in memory survives from one request to the next under `php -S`, so
-an in-process store is not available to this design at all, whatever its
-merits under Node.
-
-SQLite, through `pdo_sqlite` — bundled and enabled by default, so it adds no
-prerequisite. Session (§5), view grants (§7.1), per-payer serialization (§7.2)
-and the faucet's one-grant-per-wallet record (§4.3) are all small and all
-short-lived, and one file holds all four.
-
-The replacement is arguably the better demonstration, which is worth saying so
-the revision does not read as a concession:
-
-- **The lock is the store.** §7.2's per-payer serialization is a transaction on
-  the row rather than a mutex beside it, so the thing being serialized and the
-  thing doing the serializing cannot drift apart.
-- **The grant window is a row expiry**, which is what §7.1 describes in prose,
-  and a sweep that deletes the row once the window has passed (§10.4
-  qualification 1).
-- **§10.4's erasure becomes a `DELETE` that can be shown**, rather than a
-  process detail asserted. A reader who closes their contract can watch the row
-  go. Under the in-memory design the claim was true but invisible, and §9's
-  inspector exists precisely because this project prefers the visible version.
-
-Two things this still does not excuse. §7.2's constraint stands for anyone
-running more than one instance: one SQLite file is one machine's answer, and
-**a multi-instance deployment needs a lock that spans instances**. And the
-single-process dev server still hides the race rather than solving it — see
-§12.1's caveat on `PHP_CLI_SERVER_WORKERS`.
-
-### 12.6 Hosting, decided mostly by not needing any
-
-The documented path is running it yourself: a process on your own machine,
-talking to devnet, reached at `http://localhost`. `http://localhost` is a
-secure context, so nothing about the wallet integration suffers for the absence
-of TLS.
-
-Two footnotes. **Serverless is the trap** — it is what "easy to deploy" usually
-means in 2026, and it is the one shape that breaks §12.5, turning a transaction
-on a local file into a distributed-lock problem in exchange for scaling this
-will never need. And **anyone wanting a shareable link, or wanting to exercise §6.3's
-mobile path, puts the same process behind HTTPS** on any small host; mobile
-needs a secure context that is not loopback, so it is the one thing running
-locally cannot demonstrate.
-
-### 12.7 Content pipeline, decided
-
-Roughly twelve markdown files with front matter, rendered at build time (§10.1).
-No CMS, no fetch at request time. Listed only so it is not rediscovered as a
-question.
+### 12.0 The shape
+
+**Each interested person can run their own copy against devnet, as a local
+process**, decided 2026-09-03. There is no RPC provider to choose, because
+one reader against the public endpoint is nowhere near a rate limit. There is
+no shared signing key. Locally, the development wallet stands in for the phone
+(§12.6). **The hosted instance is the one exception**, run with its own site
+and keys, for trying real wallets and for a link to share (§12.6).
+
+**Devnet, not testnet.** Devnet is the cluster for application development and
+the one wallets list. Testnet is reset aggressively.
+
+**Nobody but the program's publisher builds the program.** sol-pay's metering
+program is deployed to devnet once, and one deployment serves many sites,
+because the site account is derived from the site's authority. A person
+running this demo creates their own mint, treasury and site against that
+deployment. They need no Anchor, no Solana command-line tools, no validator
+and no WebAssembly target. Which is why there is no container: the
+prerequisite is PHP and Composer.
+
+**First-run setup is a page, not a command.** Every step is available over
+JSON-RPC, including `requestAirdrop` on devnet. So the first run opens a setup
+screen. It generates the site authority and the faucet key server-side,
+airdrops to the authority, moves a reserve to the faucet key, creates the DEMO
+mint and the treasury, calls `initialize_site` with §4.2's parameters, and
+records the addresses. The operator starts a process, opens a page and clicks
+once. It also earns its place as documentation, since `initialize_site` has
+no other worked example.
+
+**A page rather than a command costs one guard.** Every other POST here is
+guarded by the session cookie, which a browser withholds on a cross-site POST.
+Setup runs before any session exists. So the setup route checks
+`Sec-Fetch-Site`, or `Origin` against the request's own origin, and refuses a
+POST from another site's page before it opens an RPC connection.
+
+### 12.1 Server language: PHP
+
+**Decided 2026-09-04: PHP, with Slim 4.** The reason is reach. §1's second
+purpose is to be the reference integration an adopter reads, and PHP is where
+the adopters are: some 70% of server-side languages, and WordPress, so that a
+plugin is a port rather than a rewrite. Rust was the lowest-risk build and
+would have been the least useful example. Node was the better-engineered
+artifact and demonstrated the tier that already has paywalls.
+
+What PHP cost has gone upstream: PDA derivation, account decoding, preflight,
+transaction assembly and the key proof are all in sol-pay's PHP client
+library, checked against the Rust crate's own vectors. What remains here is
+signing (`Keypair`, through `ext-sodium`) and RPC over curl.
+
+Slim, because the metering decision of §7 is then a PSR-15 middleware, the
+most portable form the code could take: a Laravel middleware, a Symfony
+subscriber and a WordPress hook are the same lines with a different
+signature. Templates are plain PHP.
+
+**Two caveats that will bite a port.** `php -S` is single-process by default,
+so it satisfies §7.2's lock for free and hides the race the lock prevents;
+tests that care run with `PHP_CLI_SERVER_WORKERS` or under PHP-FPM. And the
+front controller memoises per request in a `static` inside a closure, which is
+per-request only because PHP re-executes the file each time. Under a worker
+SAPI that boots once and serves many requests, the same cache would show one
+reader another reader's meter.
+
+### 12.2 Front end
+
+**Server-rendered, with one small ES module**, decided 2026-09-05 and narrowed
+2026-10-01. No client framework, and **no vendored Solana JavaScript**.
+
+The page's script has three jobs: make and keep the browser key (WebCrypto,
+IndexedDB), sign what the server hands it (a proof's bytes, a close's message),
+and post the charging form (§7.1). WebCrypto does the signing, and the server
+compiles every message the key signs with `SolPay\Tx`. So the page needs
+neither sol-pay's npm package nor `@solana/kit`, and `public/vendor/` goes,
+along with `bin/vendor-assets`. Decided 2026-10-01: a dependency the page does
+not need is a dependency that cannot break it.
+
+The cost is stated so that it is weighed: this site stops exercising the npm
+package. `wasm-client/SPEC.md` describes the browser key as signing "through
+the npm package", and under the delegate design the browser was half of the
+library's two consumers. The demonstrator now shows the server half only, and
+shows that the browser half is optional for a site whose server speaks PHP.
+
+**The setup QR code is rendered on the server as inline SVG**, by a Composer
+library, so that the page loads no QR script and makes no request for an
+image. Decided 2026-10-01: reliable, and it goes inline.
+
+### 12.3 The transaction request
+
+Replaces the delegate design's wallet integration (Wallet Standard,
+`signIn`, and `signAndSendTransaction` from the page), all of which are gone.
+
+Two routes, per the Solana Pay specification:
+
+- `GET /pay/{id}` answers `{"label": "Newsprint", "icon": "<this site>/…"}`.
+- `POST /pay/{id}` takes `{"account": "<base58>"}` and answers
+  `{"transaction": "<base64>", "message": "<one line>"}`. The transaction is
+  unsigned, with the account as fee payer and a blockhash fetched at that
+  moment, which retires the delegate design's problem of a blockhash going
+  stale during an app switch.
+
+The `{id}` is the pending setup's (§6.3): 128 random bits, valid ten minutes,
+so a link cannot be guessed and dies on its own. The route is public, since
+the wallet carries no cookie. It changes nothing on chain and nothing in the
+site's stores beyond recording the account on that one pending setup.
+
+The transaction-request link must be an absolute HTTPS URL. So the site
+needs its public base URL as configuration, and only the hosted instance has
+one (§12.6).
+
+### 12.4 RPC
+
+The public devnet endpoint, `https://api.devnet.solana.com`, **called from the
+server**. That is a privacy decision as much as an operational one (§10.3): an
+endpoint sees the IP address of whoever calls it and the accounts they ask
+about. Called from the server, it sees one server asking about many accounts
+and learns nothing about any one reader.
+
+The public endpoints are rate limited and "not intended for production
+applications". One person reading their own copy is far inside the limits. A
+provider tier is a configuration change if the hosted instance ever needs one.
+
+**The count of calls is the only lever there is.** On 2026-09-10 a round trip
+to the public endpoint had a median of 1,223 ms in the morning and about
+500 ms in the evening, and this site's own code was 5 to 140 ms per request.
+Nearly all of a charging view is waiting, and a call a page does not need is
+felt as the site being broken on a bad morning. The per-page counts under the
+delegate design are at `Progress_1.1.1`. They are measured again, with
+`NEWSPRINT_RPC_TIMING=1`, once the fund design's path runs. On 2026-09-30 the
+fund design's own reads cost about half a second each from the author's
+machine.
+
+### 12.5 Session, grant, nonce and lock store: SQLite
+
+**Decided 2026-09-04: SQLite, through `pdo_sqlite`.** PHP is share-nothing per
+request, so an in-process store is not available. Sessions, pending setups,
+nonces, view grants, meter locks, pending closes and the faucet ledger are all
+small, all but one short-lived, and one file holds them all.
+
+- **The lock is the store.** §7.2's serialization is a transaction on the
+  meter's row, so the thing serialized and the thing serializing cannot
+  drift apart.
+- **Each window is a row expiry**, removed by a sweep (§10.4).
+- **Erasure is a `DELETE` that can be shown.**
+
+`Database::open()` sets `PRAGMA busy_timeout` before anything that can take
+a lock. SQLite's default timeout is zero, and on 2026-09-12 a request opening
+the database while another held the write lock died with `database is locked`
+before it reached the queue.
+
+One SQLite file is one machine's answer. A deployment with more than one
+instance needs a store that spans them, for the lock and for the nonces.
+
+### 12.6 Hosting, and the development wallet
+
+**Locally: `http://localhost`, with the development wallet.** Decided
+2026-10-01. Everything but the wallet's own fetch, display and signature works
+on localhost: the key, the proof, metering, renewal, closing the meter. The development
+wallet stands in for the wallet.
+
+- It is a keypair in `var/dev-wallet.json`, funded from the faucet form like
+  any address.
+- On `set_meter` the panel offers *sign with the development wallet* beside
+  the link. The page posts to the same `POST /pay/{id}` with the development
+  wallet's account. The server composes the identical transaction, then signs
+  it with the development wallet and submits it. *Continue* follows as for a
+  phone.
+- It is off unless configured on, and refused unless the request comes from a
+  loopback address and the RPC endpoint is devnet's. It is labelled on screen
+  as the development stand-in it is, and §9's deployment section shows it
+  when it is on.
+
+It does not bypass anything that protects a reader. The key and the proof are
+untouched, and the transaction is the one a wallet would get. What it replaces
+is the phone.
+
+**Hosted: a small virtual machine**, decided 2026-09-30. Deferred, not
+declined: it waits until a real wallet has to be tried (§13.4).
+
+- **A Lightsail instance**, or any small VM with a persistent disk, running
+  PHP-FPM so that §7.2's lock is exercised by real concurrency, and
+  `bin/sweep` from cron.
+- **TLS from an AWS-managed certificate**, validated by DNS in Route 53 and
+  renewed automatically, decided 2026-10-01 for reliability. An AWS-managed
+  certificate cannot be installed on the instance itself, so it ends TLS at a
+  Lightsail load balancer in front of the instance. The load balancer costs
+  more than the instance does; §14 holds the cheaper alternatives.
+- **A deploy is a push**, then one script that pulls, installs and reloads, in
+  about a minute.
+
+Tunnels that route public traffic into a personal machine were considered and
+declined.
+
+**Serverless is the trap**, still. Lambda gives each concurrent instance its
+own copy of the SQLite file, so a nonce could be accepted twice and the meter
+lock stops serializing. Amplify runs no PHP and puts anything dynamic on
+Lambda. A container service without persistent volumes loses `var/` and the
+store on every redeploy.
+
+### 12.7 Content pipeline
+
+Roughly twelve markdown files with front matter, rendered at build time by
+`bin/build-content` into `var/`. No CMS, no fetch at request time.
 
 ## 13. Acceptance
 
-Two walkthroughs. The first is the demonstration; the second exists because one
-of the two failure branches `diagnose` distinguishes cannot be reached any other
-way, and an unreachable branch is an untested one.
+Four walkthroughs. The first is the demonstration. The second exists because
+the settle refused for want of money cannot be reached any other way, and an
+unreachable branch is an untested one. The third is the second device, and
+the fourth is a real wallet, which waits for the hosted instance.
 
 ### 13.1 First visit
 
-The demo is done when a person who has never seen it can do all of this from a
-link, in one sitting, with no instructions beyond what the site tells them:
+The demo is done when a person who has never seen it can do all of this from
+a link, in one sitting, with no instructions beyond what the site tells them:
 
-1. Open an article, meet the meter beside the lede, connect a wallet from it,
-   and see their address in the inspector under an alias they can read.
-2. Be offered the faucet in the same panel, read what it is about to do,
-   confirm it, and see 0.05 SOL and 0.60 DEMO arrive.
-3. Choose a limit at or above the floor of 0.50, and sign once.
-4. Read that article and nine more without a single further wallet interaction.
+1. Open an article and meet the meter beside the lede.
+2. Follow the panel to the faucet, paste a wallet address, read what is about
+   to happen and that this is the demo's fountain, and see SOL and 0.60 DEMO
+   arrive.
+3. Back in the panel, choose a limit at or above 0.50, an expiry, a deposit of
+   0.50 and fund 0, and scan once. Press *continue*.
+4. Read that article and nine more with no further wallet interaction.
 5. Watch the tenth view settle, and open the transfer on the explorer.
 6. Advance the meter with the seven-view control, and see the settle fire on
    some clicks and not others.
 7. Be blocked on the eighth click at 0.49 against a limit of 0.50, and land on
    `manage_meter` rather than an error.
-8. Renew at 0.50, and see `used` carry 0.07 forward while `paid` resets to zero.
-9. Close and revoke, and confirm on the token account — in the inspector, and
-   on an explorer — that no delegate remains.
+8. Renew at 0.50 with a second scan, and see `used` carry 0.07 forward while
+   `paid` resets to zero.
+9. Close the meter, and confirm in the inspector and on an explorer that the meter is
+   gone and the fund remains.
 10. At every step, open the inspector and find the account field that explains
     what they just saw.
 
-Step 10 is the acceptance test for the second purpose in §1. Steps 1–9 are the
+Step 10 is the acceptance test for §1's second purpose. Steps 1 to 9 are the
 first.
 
-### 13.2 Second visit, on a depleted balance
+### 13.2 A depleted fund
 
-Continue from step 8 instead of closing. The reader has renewed at a limit of
-0.50 holding a balance of 0.18, which the chain permits: `approve_checked`
-verifies no balance, and the program's delegate check compares the allowance
-against the limit and never against the money. **The reader has authorized more
-than they own, and nothing anywhere objected.** That is the state this
-walkthrough exists to produce.
+Continue from step 7 instead of renewing at once. The fund holds 0.08. The
+reader renews at a limit of 0.50 and deposits the 0.10 DEMO left in the
+wallet, so the fund holds 0.18 against a limit of 0.50. The program permits
+this, and should: the limit is what the site may take, and the balance is what
+it can.
 
-| click | `used` | `paid` | settle | balance after |
+| click | `used` | `paid` | settle | fund after |
 | --- | --- | --- | --- | --- |
 | — | 0.07 | 0.00 | — | 0.18 |
 | 1 | 0.14 | 0.14 | 0.14 | 0.04 |
 | 2 | 0.21 | 0.14 | none | 0.04 |
 | 3 | — | — | **0.14 attempted against 0.04** | 0.04 |
 
-The third click fails inside the `transfer_checked` CPI, and the pass
-conditions are these:
+The third click is refused by the endpoint's simulation, from inside the
+settle's transfer. The pass conditions:
 
-- The reader is **not** told to re-authorize. `diagnose` reports
-  `balance_short` of 0.10 and `allowance_short` of zero — the approval is fine,
-  the money is not — and the screen says the one true thing.
-- `used` and `paid` are **unchanged** at 0.21 and 0.14. Increment and transfer
-  are one instruction, so a failed settle is not a silent charge.
-- The article is not delivered and no grant is recorded.
-- The faucet **refuses**, because it is one grant per wallet, and the screen
-  says so rather than offering a button that will not work.
-- `close_and_revoke` still works, forgiving the 0.07 residue.
+- The screen says the fund is short, by how much, and offers to add to it. It
+  names SPL Token's `InsufficientFunds` as the cause, attributed to the token
+  program (§8.1).
+- `used` and `paid` are unchanged at 0.21 and 0.14.
+- The article is not delivered, and no grant is recorded.
+- The faucet refuses the same address a second grant, and says so.
+- Closing the meter still works, forgiving the 0.07 unpaid.
 
-A demo where the faucet is generous never reaches this table. That is why §4.3
-is stingy.
+A generous faucet never reaches this table. That is why §4.3 is stingy.
 
-## 14. Questions this document leaves open
+### 13.3 A second device
 
-The design questions raised in the first draft are closed. The site is
-**Newsprint** (§1, renamed from Penny Press on 2026-09-05, with the naming
-argument kept as a working note); the faucet is one step inside the meter
-panel (§4.3, amended 2026-09-07);
-`manage_meter` is reachable at any time (§6); mobile is in scope (§6.3); the
-inspector reads on the request that needs it — inline where something already
-read the chain, on first open where nothing did (§9, amended 2026-09-09) — and
-addresses carry aliases and their provenance (§9); the front end is
-conventional JavaScript, server-rendered (§12.2); identifying happens in the
-meter panel rather than on a screen of its own (§5 and §6, amended 2026-09-07);
-and closing a contract erases the site's record of the reader (§10.4), which
-subsumes the grant-after-close case.
+From a session on one device, open the same site on another device with no
+key. Choose the same fund and scan. The transaction renews the meter to the
+new device's key. Then:
 
-**§12 is now closed as well**, and it took two passes rather than one. The
-server language went to PHP with Slim 4 on reach (§12.1), and §12.5 was revised
-in the same pass from an in-memory store to SQLite, because PHP is
-share-nothing per request and the original could not survive the language
-choice. §12.2 and §12.3 were closed later, on 2026-09-05: server-rendered pages
-with ES modules only at the wallet, Wallet Standard directly rather than
-`@solana/wallet-adapter`, and `@solana/kit` vendored as a single self-contained
-file for the one job the browser cannot avoid — compiling a transaction
-message.
+- the new device reads with no further wallet interaction;
+- the first device's next charge finds the meter naming another key, ends its
+  session, and offers `set_meter`;
+- the inspector on each device shows the same meter with the second key.
 
-Closing those two answered a question **this document never asked**, which is
-worth recording as a lesson about the shape of §12: §12.0 promised one language
-runtime, §12.2 wanted an npm package in the browser, and §10.3 forbade loading
-it from a CDN. Nothing in §12 required anyone to notice that those three
-constraints have to be satisfied *together*, and they nearly cost a bundler and
-a second toolchain. They are compatible only because both dependencies ship a
-form that needs no build step, which was a fact to check rather than a thing to
-assume.
+### 13.4 A real wallet
 
-What is genuinely still open: nothing on this list. The site authority key was
-the last of them, and §15 now answers it as far as a specification can. That
-section states the bound on what the key authorizes, what a deployment should
-not copy from this one, and what changing the key costs. Where to hold the key
-is left to the integrator on purpose, with the factors written down.
+**Deferred, not declined: gated on the hosted instance (§12.6).** Everything
+above can run on localhost with the development wallet. This walkthrough
+cannot, because a wallet on a phone fetches the transaction itself, over
+HTTPS. On the hosted instance, with a wallet app set to devnet:
 
-§5, though, closed with a **risk rather than a resolution**, and it should be
-read as such: requiring `signIn` with no fallback narrows the demo to wallets
-that offer the feature, and the only primary source found says that is
-Phantom's extension, with its mobile support described as coming rather than
-shipped. The desktop half has since been settled by measurement (§5,
-2026-09-07); whether §6.3's Android and iOS paths can sign in at all is still
-unknown until someone tries it on a device. That is a test, not a decision,
-which is why it is not a §14 question — but it is the one that could send §5
-back here.
+- scanning the setup link fetches, shows and signs the setup transaction, and
+  the meter appears on *continue*;
+- a transaction request the server refuses (§6.3) reaches the reader as a
+  sentence, in the wallet or on the page;
+- *add to the fund* and *close a meter with your wallet* work the same way.
 
-That is the whole list. The grant lifetime was on it and is now settled at
-thirty minutes for the reasons in §7.1; the platform choice was on it and is
-settled at §12.1; the front end was on it and is settled at §12.2 and §12.3.
+Until this has passed, §6.3's account of what a wallet does is the Solana Pay
+specification's, not an observation.
+
+## 14. Open questions, and proposals awaiting the author
+
+Where this document had to choose something nobody had decided, it chose, and
+the choice is listed here until the author ratifies or replaces it. Choices
+already ratified carry their date where they are made.
+
+**Proposed, not yet ratified:**
+
+1. **The SOL grant of 0.01** (§4.3), down from 0.05.
+2. **The four expiries and the default** (§6.3): an hour, a day, a week and
+   thirty days, defaulting to a day.
+3. **Closing a meter with the wallet** (§5.5): a scan that closes an
+   abandoned meter, signed by the reader, offered on the panel when there is
+   no session.
+4. **Where TLS ends on the hosted instance** (§12.6). An AWS-managed
+   certificate needs a Lightsail load balancer, at $18 a month against the
+   instance's $5 (prices of 2026-10-01). Two cheaper routes keep Route 53 in
+   charge of validation:
+   - Caddy on the instance, with a Let's Encrypt certificate renewed through a
+     DNS challenge answered in Route 53. Free, and automatic once the
+     instance has permission to edit the zone.
+   - An exportable public certificate from AWS Certificate Manager, at $15 a
+     domain a year, installed on the instance. Renewal is automatic, but the
+     renewed certificate has to be reinstalled each time.
+5. **Which Composer library renders the QR code** (§12.2).
+
+**Open:**
+
+6. **What a real wallet does** (§13.4), until the hosted instance exists.
 
 ## 15. The site authority key
 
-**Decided 2026-09-24, by scoping rather than by choosing.** This document does
-not say where an integrator should keep the site authority key. Custody depends
-on the deployment, and a specification that named one arrangement would be
-copied without the reasoning that produced it. What this section does state is
-everything an integrator needs before making that choice: the bound on what the
-key authorizes, what may be held by a different key, what this demonstrator does
-that a deployment should not copy, what changing the key costs, and the factors
-that bear on the decision.
-
-Every claim below was read from the program's own source and from this
-repository's `Provisioner`, on 2026-09-24, rather than recalled.
+**Decided 2026-09-24, by scoping rather than by choosing; revised for the fund
+design 2026-10-01.** This document does not say where an integrator should keep
+the site authority key. Custody depends on the deployment, and a specification
+that named one arrangement would be copied without its reasoning. What this
+section states is everything an integrator needs before choosing: what the key
+authorizes, what may be held by other keys, what this demonstrator does that a
+deployment should not copy, what changing the key costs, and the factors that
+bear on the choice.
 
 ### 15.1 What the key authorizes
 
 After setup, `meter_and_settle` is the only instruction the site authority
-signs. The program binds it with `has_one = authority` on the `Site` account.
+signs. The program binds it with `has_one = authority` on the site account.
+It may also pay fees for transactions it does not authorize, such as the
+browser key's `close_meter`.
 
-**The key does not sign the transfer.** The delegate on the reader's token
-account is the contract PDA, and the program signs as that PDA with the
-contract's own seeds inside the cross-program invocation. The authority's
-signature authorizes the *call*; the program authorizes the *movement*.
+**The key does not sign the transfer.** The money is in the reader's fund,
+and the program signs the transfer with the fund's own seeds inside the
+cross-program invocation. The authority's signature authorizes the *call*;
+the program authorizes the *movement*.
 
-**The destination is fixed at initialization.** `meter_and_settle` constrains
-the treasury with `address = site.treasury`, recorded when the site was
-initialized. A compromised key cannot redirect a settlement to an account of the
-attacker's choosing.
+**The destination is fixed at initialization.** `meter_and_settle` requires the
+treasury recorded in the site account. A compromised key cannot redirect a
+settlement.
 
-**Each call is bounded twice**, by the contract's limit and by the reader's
-`delegated_amount`, whichever binds first. Neither is a number the authority
-sets after the fact: the reader agreed to both.
+**Each call is bounded three ways**, by the meter's limit, by its expiry and by
+the fund's balance. The reader set all three, and the authority sets none of
+them afterwards.
 
-So the bound on a compromise is **every open contract of this site, drawn to its
-limit, into the treasury**. It is not the treasury's balance, and it is not any
-wallet on the chain. The key cannot reach a wallet that has never opened a
-contract with this site. It cannot open, renew or close a contract, because the
-reader signs all three. It cannot change the site's parameters, because the
-program has no instruction that changes them — `initialize_site` runs once
-against a PDA seeded by the authority, and nothing updates that account
-afterwards.
+So the bound on a compromise is **every open meter at this site, drawn up to
+its limit before its expiry, out of the funds behind those meters, into this
+site's treasury.** It is not the treasury's balance, and it is not any wallet
+on the chain. The key cannot reach a fund that has no meter at this site. It
+cannot open or renew a meter, because the reader's wallet signs both. It
+cannot close one: only the reader or the meter's key may. It cannot withdraw
+from a fund or close one, and it cannot change the site's parameters, because
+the program has no instruction that changes them.
 
-That bound is smaller than most integrators will assume, and the difference
-matters: custody proportionate to "the treasury can be emptied" is the wrong
-size for this risk in one direction, and custody proportionate to "it only
-meters" is the wrong size in the other.
-
-Anything the key can do beyond the above follows from the accounts a deployment
-hands it rather than from the program. That is §15.2.
+One property is new with the fund design. A fund serves many sites, so a
+compromised key at this site competes with every other site for the same
+balance. It still cannot take more than this site's meters allow, but what it
+takes is no longer only this site's business.
 
 ### 15.2 Separation
 
 **The treasury may be any token account of the mint.** `initialize_site`
-constrains it only with `treasury.mint == mint`; `meter_and_settle` then
-requires the exact address recorded. Nothing requires the treasury to belong to
-the authority. A deployment may point it at an account owned by a key that never
-goes online, so that the online key draws payments and a cold key spends them.
+requires only that its mint is the site's, and `meter_and_settle` then
+requires that exact address. A deployment may point it at an account owned by
+a key that never goes online, so that the online key draws payments and a cold
+key spends them. **This demonstrator does not**: setup makes the treasury the
+authority's own associated token account, so one key draws the payments and
+owns where they land. That is right for a demonstrator set up from one screen
+with one funded key. It is not a property to inherit, and it is the most
+valuable separation available to a deployment.
 
-**This demonstrator does not do that.** `Provisioner` derives the treasury as
-the authority's own associated token account for the mint, so one key both draws
-the payments and owns where they land. That is deliberate for a demonstrator set
-up from one screen with one funded key. It is not a property to inherit, and it
-is the single most valuable separation available to a deployment.
-
-**What the demonstrator does separate**: the mint authority is the faucet key
-rather than the site authority, and the mint carries no freeze authority. A
-deployment metering a token it does not issue holds no mint authority at all,
-which retires the question rather than answering it.
+**What the demonstrator does separate**: the mint authority is the faucet key,
+the mint has no freeze authority, and the hosted instance has its own keys
+(§4.4). A deployment metering a token it does not issue holds no mint
+authority at all.
 
 Roles worth holding apart, each independently:
 
-- the owner of the treasury, per the first paragraph above;
-- the fee payer. A transaction may carry a fee-paying signer beside the
-  authority; this demonstrator uses the authority for both, so its key must hold
-  SOL and be online for that reason as well as for signing;
-- per-environment keys, so that a compromise in staging is not a compromise in
+- the owner of the treasury, as above;
+- the fee payer. Both `meter_and_settle` and the key-signed `close_meter`
+  accept any fee-paying signer. This demonstrator uses the authority for both,
+  so its key must hold SOL and be online for that reason too;
+- one key per environment, so that a compromise in staging is not one in
   production.
 
-**One separation the program forecloses.** The `Site` PDA is seeded by the
-authority address, and `meter_and_settle` requires `has_one = authority`. The
-key that ran `initialize_site` is therefore the key that meters, permanently. A
-setup key held offline and a metering key held online are not available as two
-keys. This is the same constraint that makes §15.4 a migration.
+**One separation the program forecloses.** The site account is derived from
+the authority's address. The key that ran `initialize_site` is therefore the
+key that meters, permanently. This is also why §15.4 is a migration.
 
 ### 15.3 What not to copy from this demonstrator
 
-Stated plainly, because §1 makes this repository the reference integration and a
-reference is copied.
+§1 makes this repository the reference integration, and a reference is copied.
+So, plainly: the authority key is **generated inside a web request** by the
+setup screen and written to `var/authority.json` in the Solana command-line
+tools' format. The web process reads that file on every charge. The key pays
+every fee and owns the treasury. All of it sits on one machine, unencrypted,
+with its safety resting on file permissions and on the fact that it holds
+devnet play money. Every one of those choices is right for a demonstrator and
+wrong for a deployment holding a real revenue stream.
 
-The authority key is **generated inside a web request** by the setup screen, and
-written to `var/authority.json` in the Solana CLI's format. The same web process
-reads that file on every metered page view. The key **pays every fee**. It
-**owns the treasury** (§15.2). All of it sits on one machine, unencrypted, with
-its safety resting on the file's permissions and on the fact that it holds
-devnet play money.
+**The part worth copying is the shape.** `Newsprint\Chain\Keypair` is the only
+place in this repository that signs anything. The secret is wiped with
+`sodium_memzero` after use, and a read after the wipe is a refusal rather than
+a silently empty signature. Confining signing to one class is what would make
+a different custody arrangement a change to one file.
 
-§4.4 says as much, and §12.0 makes it deliberate: one language runtime, no
-toolchain, clone and run. Every one of those choices is right for a demonstrator
-and wrong for a deployment holding a real revenue stream.
+### 15.4 Rotation is a migration, and a lighter one than before
 
-**The one part worth copying** is the shape rather than the storage.
-`Newsprint\Chain\Keypair` is the only place in this repository that signs
-anything. The secret is wiped with `sodium_memzero` after use, and the wiped
-state is named rather than left representable, so a read after a wipe is a
-refusal instead of a silently empty signature. Confining signing to one class is
-what would make a different custody arrangement a change in one file.
+The site account is derived as `["site", authority]`, a meter as
+`["meter", site, fund]`, and **no instruction transfers or replaces the site
+authority**. A new authority is therefore a new site address, and a new site
+address means new meter addresses for every reader.
 
-### 15.4 Rotation is a migration
+What follows, in order:
 
-Confirmed against the program: the `Site` PDA is seeded `["site", authority]`,
-a contract is seeded `["contract", site, payer]`, and **no instruction transfers
-or replaces the site authority**.
-
-A new authority is therefore a new site address, and a new site address is a new
-contract address for every reader. What follows, in order:
-
-1. The existing contracts survive, owned by the old site. Only the old key can
+1. The existing meters survive, attached to the old site. Only the old key can
    settle them.
-2. Every reader's `approve` names the old contract PDA as delegate. The new site
-   cannot draw against it. Each reader must open a contract with the new site
-   and approve again.
-3. §8.3's delegate check compares the token account's delegate with *this*
-   site's contract PDA, so after a rotation every existing reader reads as
-   delegated elsewhere — to the site's own former self.
-4. Usage accrued and unsettled on the old contracts can be collected only by the
-   old key, or forgiven by the reader closing the old contract.
-5. Pricing does not carry. The new site is initialized fresh.
+2. **The readers' funds survive untouched**, because a fund's address depends
+   on the reader, the mint and an index, and not on any site. Each reader needs
+   one scan to open a meter at the new site, drawing on the same fund. Under
+   the delegate design each reader had to approve again; here the money never
+   moves.
+3. Usage accrued and unsettled on an old meter can be collected only by the
+   old key, or forgiven when the reader or the old meter's key closes it.
+4. Pricing does not carry. The new site is initialized fresh.
 
-So rotation is a migration with reader-visible steps, not an operational key
-swap. A deployment that expects to rotate should design that migration before it
-needs one. A deployment that cannot migrate should treat the key as permanent,
-and choose custody on that basis.
+So rotation is still a migration with a step for every reader. A deployment
+that expects to rotate should design that step before it needs it. A
+deployment that cannot should treat the key as permanent and choose custody on
+that basis.
 
-**A lost key is the same event without the old key's cooperation.** The site can
-never settle again. Readers recover by closing their contracts, which forgives
-the residue and revokes the delegate. That is the demonstrator's expected way to
-die, and §4.4 accepts it; a deployment accepting it should say so on purpose.
+**A lost key is the same event without the old key's cooperation.** The site
+can never settle again. Readers close their old meters, which forgives the
+residue and returns the rent, and their funds are unaffected. That is the
+demonstrator's expected way to die, and §4.4 accepts it.
 
 ### 15.5 Factors in the decision, without a recommendation
 
-The arrangements available are familiar — an environment variable, a file, a KMS
-or HSM with the signing call remote, a separate signing service the request path
-talks to. This document ranks none of them. These are the factors that decide
-between them for a given deployment:
+The arrangements available are familiar: an environment variable, a file, a
+key management service or hardware module with the signing call remote, a
+separate signing service. This document ranks none of them. The factors that
+decide between them for a given deployment:
 
 - **Who can read the key at rest, against who can use it without reading it.**
-  This is the axis that separates a file or an environment variable from a KMS,
-  an HSM or a signing service, and it is usually the first one that matters.
+  This separates a file or an environment variable from the rest, and it is
+  usually the first factor that matters.
 - **What a compromise of the web-facing process yields.** §15.1 bounds the
-  damage under every arrangement; the arrangements differ in whether the
-  attacker also walks away with the key itself.
-- **Latency on the request path.** §7.2 puts metering inside page delivery. A
-  charging view is six RPC calls, our own code is 5–140 ms of it, and 97% of the
-  page is waiting on the endpoint. A remote signing call adds one round trip to
-  a path already spending several. Whether that is acceptable is a deployment's
-  judgement, not this document's.
+  damage under every arrangement. They differ in whether an attacker also
+  leaves with the key.
+- **Latency on the request path.** Metering sits inside page delivery (§7),
+  and nearly all of a charging view is already waiting on the RPC endpoint
+  (§12.4). A remote signer adds a round trip to a path already spending
+  several.
 - **A new way to be unavailable.** A remote signer can fail while the chain is
-  healthy. §8 describes what a refused charge does to the page; a custody choice
-  that can be down on its own makes that path reachable with nothing wrong on
-  chain.
-- **Fee payment.** The authority must sign, and something must hold SOL. Whether
-  those are the same key is a choice (§15.2), and it changes what has to be
+  healthy, which makes §8's refused-charge screen reachable with nothing wrong
+  on chain.
+- **Fee payment.** The authority must sign, and something must hold SOL.
+  Whether those are one key is a choice (§15.2), and it changes what has to be
   online.
-- **Recovery and succession**, given §15.4. Who else can act if the holder is
-  unavailable, and what the plan is if the key is lost, are questions with no
-  on-chain answer.
-- **How many environments exist**, and whether any of them share a key.
-- **The value actually at risk**, which is §15.1's sum of open contracts' limits
-  — plus the treasury balance, if and only if the deployment copies §15.2's
-  arrangement rather than separating the treasury.
+- **Recovery and succession**, given §15.4: who else can act if the holder is
+  unavailable, and what happens if the key is lost.
+- **How many environments exist**, and whether any share a key.
+- **The value actually at risk**: §15.1's sum over open meters, plus the
+  treasury's balance if and only if the deployment copies this demonstrator's
+  treasury arrangement.
 - **Obligations this document does not cover.** Contractual or regulatory
-  custody requirements outrank everything above, and they vary by jurisdiction
-  and by counterparty.
+  custody requirements outrank everything above.

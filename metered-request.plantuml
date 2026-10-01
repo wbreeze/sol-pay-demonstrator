@@ -10,7 +10,7 @@ skinparam sequence {
   ParticipantBackgroundColor #FFFFFF
 }
 
-actor "viewer" as V
+actor "reader" as V
 participant "site server" as S
 participant "RPC" as R
 participant "pay_on_chain" as P #pink
@@ -21,16 +21,18 @@ participant "SPL Token" as T #pink
 V -> S : GET /a/{slug}
 activate S
 
-S -> S : session cookie -> paying wallet?
+S -> S : session cookie -> meter and fund?
 
-break no wallet stored
+break no session
   S -> R : getMultipleAccounts(site, treasury, mint)
   R --> S : account data
-  S -[#00A0A0]-> V : lede + meter panel
+  S -[#00A0A0]-> V : lede + meter panel (set_meter)
   note right of V
     Identifying happens here, on the
-    article. There is no sign-in page;
-    see SPEC section 5.
+    article: a key proof if this browser
+    holds a key and a meter, or the setup
+    scan if it does not. There is no
+    sign-in page; see SPEC section 5.
   end note
 end
 
@@ -40,7 +42,7 @@ break live view grant for this article
     R --> S : status
     S -> S : write what became of the charge onto the grant
   end
-  S -> R : getMultipleAccounts(site, treasury, mint, contract, payer token account)
+  S -> R : getMultipleAccounts(site, treasury, mint, meter, fund token account)
   R --> S : account data
   S -[#00A0A0]-> V : metered_page (no charge)
 end
@@ -58,22 +60,28 @@ deactivate S
 V -> S : POST /a/{slug} (the shell's script at once; without one, a button)
 activate S
 
-S -> S : derive site PDA, contract PDA, payer token account
-S -> R : getMultipleAccounts(site, treasury, mint, contract, payer token account)
+S -> S : session -> meter, fund, key; derive the fund's token account
+S -> R : getMultipleAccounts(site, treasury, mint, meter, fund token account)
 R --> S : account data
-S -> S : decode Site, Contract, TokenAccount
+S -> S : decode Site, Meter, TokenAccount
 
-break no contract account
+break no meter account (closed elsewhere)
+  S -> S : end the session
   S -[#00A0A0]-> V : set_meter
 end
 
-group payer lock -- BEGIN IMMEDIATE on the payer's row (SPEC section 7.2)
+break the meter names another key (renewed from another device)
+  S -> S : end the session
+  S -[#00A0A0]-> V : set_meter
+end
+
+group meter lock -- BEGIN IMMEDIATE on the meter's row (SPEC section 7.2)
 
   break grant is live (a repeated POST)
     S -[#00A0A0]-> V : metered_page (no charge)
   end
 
-  S -> R : getMultipleAccounts(contract, payer token account)
+  S -> R : getMultipleAccounts(meter, fund token account)
   R --> S : account data
   note right of S
     Read again, inside the lock. A request
@@ -82,8 +90,8 @@ group payer lock -- BEGIN IMMEDIATE on the payer's row (SPEC section 7.2)
     saw before it waited.
   end note
 
-  S -> S : preflight can_meter(contract, site, 1)
-  break blocked: LimitReached
+  S -> S : preflight can_meter(meter, site, 1, now)
+  break blocked: Expired or LimitReached
     S -[#00A0A0]-> V : manage_meter
   end
 
@@ -96,8 +104,8 @@ group payer lock -- BEGIN IMMEDIATE on the payer's row (SPEC section 7.2)
   R -> R : simulate against current state
   break the simulation fails
     R --> S : error, nothing sent
-    S -> S : cause(raising program, code); discard logs
-    S -[#00A0A0]-> V : re-authorize, top up, or manage_meter
+    S -> S : cause(first raising program, code); discard logs
+    S -[#00A0A0]-> V : manage_meter, or "the fund is short": add to the fund
   end
   R --> S : signature
   S -> S : record view grant, charge pending; count the purchase
@@ -112,12 +120,13 @@ note right of V
 end note
 deactivate S
 
-R -> P : meter_and_settle(page_views = 1)
+R -> P : meter_and_settle(items = 1)
   activate P
-  P -> P : used += page_price
+  P -> P : require now <= expiry
+  P -> P : used += item_price
   P -> P : require used <= limit
-  alt unpaid >= collection_threshold
-    P -> T : transfer_checked(unpaid, decimals)
+  alt used - paid >= collection_threshold
+    P -> T : transfer_checked(fund token account -> treasury), signed by the fund's seeds
     T --> P : ok
     P -> P : paid = used
   end
@@ -141,14 +150,14 @@ opt confirmed
   S -> R : getTransaction
   R --> S : Metered event (did it settle?)
 end
-S -> R : getMultipleAccounts(site, treasury, mint, contract, payer token account)
+S -> R : getMultipleAccounts(site, treasury, mint, meter, fund token account)
 R --> S : account data
 note right of S
   The charge moved used, paid and the
-  residue, so the page reads them again.
-  Claim 7 in SPEC section 2: every number
-  on the screen came from an account, not
-  from the server's memory.
+  fund's balance, so the page reads them
+  again. Claim 7 in SPEC section 2: every
+  number on the screen came from an
+  account, not from the server's memory.
 end note
 
 S -[#00A0A0]-> V : metered_page + inspector (swapped in; the instruction rows are kept)
@@ -160,9 +169,10 @@ Colour follows state-machine.plantuml in the sol-pay repository.
   teal ..... a screen this site builds
 Every break is a screen, not an error page.
 A GET never meters: the charge is the POST (SPEC section 7.1).
-The site authority signs meter_and_settle. The payer is not present.
+The site authority signs meter_and_settle. The reader and the wallet are not present.
+The session was bound by a key proof (SPEC section 5.3); each charge re-reads
+the meter, so a renewal from another device ends this session at its next read.
 The article is served before the charge confirms; see SPEC section 7.3.
-Four RPC calls on a charging view and three on its follow-up; SPEC section 12.4.
 endlegend
 
 @enduml

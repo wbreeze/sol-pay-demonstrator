@@ -73,21 +73,27 @@ final class Failure
     }
 
     /**
-     * The last program to report a failure is the one that raised it, which
-     * is what makes a CPI attributable at all.
+     * The first program to report a failure is the one that raised it.
+     *
+     * The runtime writes a `failed` line for every frame the error passes
+     * through on its way out, innermost first, and each carries the
+     * innermost code. So a failure inside a cross-program invocation reads
+     * as the callee's line followed by the caller's. Taking the last line
+     * named the caller, and on 2026-10-01 that reported the System
+     * program's "account already in use" as code 0 from the metering
+     * program (`tests/Chain/FailureTest.php`).
      *
      * @param list<mixed> $logs
      */
     private static function raisingProgram(array $logs): ?string
     {
-        $raisedBy = null;
         foreach ($logs as $line) {
             if (is_string($line) && preg_match('/^Program (\S+) failed/', $line, $m) === 1) {
-                $raisedBy = $m[1];
+                return $m[1];
             }
         }
 
-        return $raisedBy;
+        return null;
     }
 
     /**

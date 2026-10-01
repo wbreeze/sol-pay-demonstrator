@@ -1,0 +1,815 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Minimal trials of the fund design on devnet, run before SPEC.md §6 is
+ * rewritten around it.
+ *
+ * sol-pay 0.2.0 replaced the delegate design with a fund, a meter per site
+ * per fund, and a browser key the meter names (`wasm-client/SPEC.md`
+ * §4.7–§4.9). Newsprint has not followed yet. Before its specification says
+ * how a reader picks or opens a fund, these trials find out what the chain
+ * does with the choices a reader can make. Each subcommand does one thing and
+ * prints what it did.
+ *
+ *   bin/fund-trials site            the Site account, decoded by the 0.2.0 client library
+ *   bin/fund-trials reader          a trial reader: a wallet in var/, given SOL and DEMO by the faucet key
+ *   bin/fund-trials first [N]       a brand-new reader's whole first visit in one transaction: faucet and setup together
+ *   bin/fund-trials open [N]        the setup transaction for fund N, composed as the server would compose it
+ *   bin/fund-trials wrong [N]       open_fund on an index already in use, sent anyway
+ *   bin/fund-trials renew [N]       renew fund N's meter to a new browser key, then prove with old and new
+ *   bin/fund-trials proof [N]       a key proof against fund N's meter, with the current key
+ *   bin/fund-trials meter [N] [K]   meter_and_settle for K items (default 1) against fund N's meter
+ *   bin/fund-trials close [N]       sign out: close_meter signed by the key, the fee paid by the authority
+ *   bin/fund-trials empty [N]       withdraw everything from fund N and close it
+ *   bin/fund-trials scan [WALLET]   derive all 256 funds of a wallet in DEMO and fetch them
+ *
+ * N is the fund index and defaults to 0. `open` takes three options, each
+ * in base units or seconds:
+ *
+ *   --deposit=<base units>   default: the site's minimum limit, or what the
+ *                            reader holds if that is less. A deposit larger
+ *                            than the holding is refused before anything is
+ *                            sent.
+ *   --limit=<base units>     default: the smallest the program accepts.
+ *   --expiry=<seconds>       from now; default an hour.
+ *
+ * Every amount is in base units, as in `config/site.php`.
+ *
+ * What it keeps, all under `var/` and so never committed: the trial reader's
+ * keypair, `var/trial-reader.json`, and one browser key per fund,
+ * `var/trial-key-N.json`. A renewal moves the old key to
+ * `var/trial-key-N-old.json` so that the old key's proof can be tried.
+ *
+ * **It spends devnet SOL and DEMO**, the faucet key's and the authority's, in
+ * the small amounts SPEC.md §4.3 already budgets. It needs
+ * `wbreeze/sol-pay-client` 0.2.0 installed and a provisioned site
+ * (`var/site.json`). Devnet is unreachable from the environments Claude works
+ * in, so it is the author's to run.
+ */
+
+use Newsprint\Chain\AssociatedToken;
+use Newsprint\Chain\Keypair;
+use Newsprint\Chain\Outcome;
+use Newsprint\Chain\Rpc;
+use Newsprint\Chain\SubmitStatus;
+use Newsprint\Chain\Submitter;
+use Newsprint\Chain\SystemProgram;
+use Newsprint\Chain\TokenProgram;
+use Newsprint\Support\Causes;
+use Newsprint\Support\Config;
+use SolPay\Core\Fund;
+use SolPay\Core\Instruction;
+use SolPay\Core\Ix;
+use SolPay\Core\Meter;
+use SolPay\Core\Pda;
+use SolPay\Core\Preflight;
+use SolPay\Core\Program;
+use SolPay\Core\Proof;
+use SolPay\Core\Site;
+use SolPay\Core\TokenAccount;
+use SolPay\Core\Tx;
+
+require __DIR__.'/../vendor/autoload.php';
+
+/**
+ * The trials share one reading of the deployment: the configuration, the
+ * addresses first-run setup recorded, and the Site account as the chain holds
+ * it now.
+ */
+final class FundTrials
+{
+    private const LAMPORTS_PER_SOL = 1_000_000_000;
+
+    private readonly Program $program;
+
+    /** @var array<string, string> */
+    private readonly array $addresses;
+
+    private ?Site $site = null;
+
+    public function __construct(
+        private readonly Config $config,
+        private readonly Rpc $rpc,
+        private readonly Submitter $submitter,
+    ) {
+        $this->program = $config->program();
+        $this->addresses = $config->provisioned();
+    }
+
+    /** Trial 1: the Site account kept its layout across the upgrade, so 0.2.0 should decode it. */
+    public function site(): int
+    {
+        $site = $this->siteAccount();
+        $params = $this->config->siteParams();
+
+        self::line('site', $this->addresses['site']);
+        self::line('authority', $site->authority);
+        self::line('mint', $site->mint);
+        self::line('treasury', $site->treasury);
+        self::line('item price', self::demo($site->itemPrice).'   config: '.self::demo((int) $params['page_price']));
+        self::line('threshold', self::demo($site->collectionThreshold).'   config: '.self::demo((int) $params['collection_threshold']));
+        self::line('min limit', self::demo($site->minLimit).'   config: '.self::demo((int) $params['min_limit']));
+
+        $agrees = $site->authority === $this->addresses['authority']
+            && $site->mint === $this->addresses['mint']
+            && $site->treasury === $this->addresses['treasury']
+            && $site->itemPrice === (int) $params['page_price']
+            && $site->collectionThreshold === (int) $params['collection_threshold']
+            && $site->minLimit === (int) $params['min_limit'];
+
+        echo "\n".($agrees
+            ? "AGREES      the chain and var/site.json and config/site.php say the same thing\n"
+            : "DIFFERS     the chain disagrees with this checkout; read the lines above\n");
+
+        return $agrees ? 0 : 1;
+    }
+
+    /**
+     * The trial reader's wallet, funded the way the faucet funds a reader:
+     * SOL and DEMO in one transaction signed by the faucet key. Unlike the
+     * faucet, it keeps no ledger, so it may be run again when the reader runs
+     * short.
+     */
+    public function reader(): int
+    {
+        $reader = $this->readerKey();
+        $faucet = Keypair::load($this->config->keypairPath('faucet'));
+        $amounts = $this->config->faucet();
+        $mint = $this->addresses['mint'];
+        $tokenAccount = AssociatedToken::address($reader->address, $mint, $this->program->tokenProgram);
+
+        self::line('reader', $reader->address);
+        self::line('token acct', $tokenAccount);
+        $this->printReaderBalances($reader->address);
+
+        echo "\nsending     ".self::sol((int) $amounts['sol_lamports']).' and '.self::demo((int) $amounts['demo_base_units'])." from the faucet key\n";
+        $outcome = $this->submitter->send([
+            SystemProgram::transfer($faucet->address, $reader->address, (int) $amounts['sol_lamports']),
+            AssociatedToken::createIdempotent($faucet->address, $reader->address, $mint, $this->program->tokenProgram),
+            TokenProgram::mintTo($mint, $tokenAccount, $faucet->address, (int) $amounts['demo_base_units'], $this->program->tokenProgram),
+        ], $faucet);
+        self::outcome($outcome);
+
+        if ($outcome->ok()) {
+            $this->printReaderBalances($reader->address);
+        }
+
+        return $outcome->ok() ? 0 : 1;
+    }
+
+    /**
+     * A candidate for SPEC.md §4.3: the faucet folded into the setup
+     * transaction, so that a first visit is one wallet gesture and not two.
+     *
+     * Under the fund design the page never learns the reader's wallet. The
+     * server meets it once, when the wallet posts its account to the
+     * transaction request, and that is the only moment a faucet grant could
+     * be addressed. So the grant rides in the same transaction: the faucet key
+     * pays the fee and signs first, sends SOL, creates the reader's token
+     * account and mints DEMO to it. The reader's instructions follow, paying
+     * their rent from the SOL that arrived earlier in the same transaction.
+     *
+     * Each run makes a brand-new reader with no SOL at all, kept in
+     * `var/trial-first-reader.json`, because an empty wallet is the case this
+     * exists for. A wallet has to accept a transaction whose fee payer is not
+     * the reader, and that is trial 8's question; this one asks only whether
+     * the chain does.
+     */
+    public function first(int $index): int
+    {
+        $reader = Keypair::generate();
+        $reader->save($this->config->keypairPath('trial-first-reader'));
+        $faucet = Keypair::load($this->config->keypairPath('faucet'));
+        $key = Keypair::generate();
+        $key->save($this->config->keypairPath('trial-first-key'));
+
+        $site = $this->siteAccount();
+        $amounts = $this->config->faucet();
+        $decimals = (int) $this->config->siteParams()['decimals'];
+        $mint = $this->addresses['mint'];
+        $tokenProgram = $this->program->tokenProgram;
+        $source = AssociatedToken::address($reader->address, $mint, $tokenProgram);
+        $fundAddress = Pda::fundAddress($reader->address, $mint, $index, $this->program->id)['address'];
+        $deposit = $site->minLimit;
+
+        self::line('reader', $reader->address.' (new, holding nothing)');
+        self::line('key', $key->address);
+
+        $instructions = [
+            SystemProgram::transfer($faucet->address, $reader->address, (int) $amounts['sol_lamports']),
+            AssociatedToken::createIdempotent($faucet->address, $reader->address, $mint, $tokenProgram),
+            TokenProgram::mintTo($mint, $source, $faucet->address, (int) $amounts['demo_base_units'], $tokenProgram),
+            ...Ix::openFundAndDeposit($this->program, $reader->address, $mint, $index, $source, $deposit, $decimals),
+            Ix::openMeter($this->program, $this->addresses['site'], $reader->address, $fundAddress, $key->address, $site->minLimit, time() + 3_600),
+        ];
+
+        // The size that matters is the wire size with both signatures, and a
+        // legacy transaction may not exceed 1,232 bytes.
+        $message = Tx::compile($instructions, $faucet->address, $this->rpc->latestBlockhash()['blockhash']);
+        self::line('composed', 'SOL, token account, DEMO, then open_fund, deposit '.self::demo($deposit).', open_meter');
+        self::line('size', sprintf('%d bytes on the wire, of 1232', strlen($message) + 1 + 2 * 64));
+
+        $faucetBefore = $this->rpc->balance($faucet->address);
+        echo "sending     fee paid by the faucet key; signed by the faucet key and the reader\n";
+        $outcome = $this->submitter->send($instructions, $faucet, [$reader]);
+        self::outcome($outcome);
+
+        if ($outcome->ok()) {
+            self::line('faucet', self::signedSol($this->rpc->balance($faucet->address) - $faucetBefore).' (the grant, the token account and the fee)');
+            $this->printReaderBalances($reader->address);
+            echo "\n";
+            [, $meter] = $this->readFundAndMeter($reader->address, $index);
+            $nonce = random_bytes(32);
+            $accepted = $meter !== null && Proof::verifyKey($meter->key, $nonce, $key->sign($nonce));
+            self::line('proof', $accepted ? 'ACCEPTED by the new key' : 'REFUSED');
+        }
+
+        return $outcome->ok() ? 0 : 1;
+    }
+
+    /**
+     * Trials 2 and 3: the one setup transaction a reader's wallet would sign,
+     * composed the way the server will compose it when the wallet posts its
+     * account. The fund and the meter are read first, in one call, and the
+     * instructions follow from what is there:
+     *
+     * - no fund at this index: `open_fund`, then the deposit;
+     * - a fund: the deposit alone, or nothing if the deposit is zero;
+     * - no meter for this site and fund: `open_meter`;
+     * - a meter: `renew_meter`, naming the same key.
+     *
+     * Here the trial reader signs in place of a wallet. The rent it pays is
+     * measured from its balance before and after, so the faucet's SOL grant
+     * can be checked against what a first visit costs.
+     *
+     * @param array<string, string> $options
+     */
+    public function open(int $index, array $options): int
+    {
+        $key = Keypair::loadOrCreate($this->keyPath($index));
+
+        return $this->setUp($this->readerKey(), $index, $key, $options, 'open');
+    }
+
+    /**
+     * Trial 3, the wrong composition: `open_fund` on an index already in
+     * use. The server must never send this, so the trial records what the
+     * reader would see if it did.
+     */
+    public function wrong(int $index): int
+    {
+        $reader = $this->readerKey();
+        [$fund] = $this->readFundAndMeter($reader->address, $index);
+        if ($fund === null) {
+            echo "fund {$index} does not exist yet; run `open {$index}` first, or this trial proves nothing\n";
+
+            return 1;
+        }
+
+        echo "sending     open_fund({$index}) for a fund that already exists\n";
+        $outcome = $this->submitter->send(
+            [Ix::openFund($this->program, $reader->address, $this->addresses['mint'], $index)],
+            $reader,
+        );
+        self::outcome($outcome);
+
+        // The success of this trial is the failure of the transaction.
+        return $outcome->ok() ? 1 : 0;
+    }
+
+    /**
+     * Trial 4: the second-device path. A new key is generated, the meter is
+     * renewed to name it, and then both keys sign a fresh nonce. The meter as
+     * fetched afterwards should accept the new key's proof and refuse the old.
+     *
+     * @param array<string, string> $options
+     */
+    public function renew(int $index, array $options): int
+    {
+        $reader = $this->readerKey();
+        $path = $this->keyPath($index);
+        if (!is_file($path)) {
+            echo "no key for fund {$index}; run `open {$index}` first\n";
+
+            return 1;
+        }
+
+        $oldPath = $this->config->keypairPath("trial-key-{$index}-old");
+        rename($path, $oldPath);
+        $old = Keypair::load($oldPath);
+        $new = Keypair::generate();
+        $new->save($path);
+        self::line('old key', $old->address);
+        self::line('new key', $new->address);
+
+        $options += ['deposit' => '0'];
+        $status = $this->setUp($reader, $index, $new, $options, 'renew');
+        if ($status !== 0) {
+            return $status;
+        }
+
+        echo "\n";
+        $oldAccepted = $this->prove($index, $old);
+        $newAccepted = $this->prove($index, $new);
+
+        return (!$oldAccepted && $newAccepted) ? 0 : 1;
+    }
+
+    /** A key proof with the current key, against the meter as the chain holds it now. */
+    public function proof(int $index): int
+    {
+        $path = $this->keyPath($index);
+        if (!is_file($path)) {
+            echo "no key for fund {$index}; run `open {$index}` first\n";
+
+            return 1;
+        }
+
+        return $this->prove($index, Keypair::load($path)) ? 0 : 1;
+    }
+
+    /**
+     * One `meter_and_settle`, signed by the site authority with the reader
+     * absent. It confirms the settling path works against a fund, and shows
+     * the fund's balance move when the unpaid total reaches the threshold.
+     */
+    public function meter(int $index, int $items): int
+    {
+        $reader = $this->readerKey();
+        $site = $this->siteAccount();
+        $authority = Keypair::load($this->config->keypairPath('authority'));
+        [$fund, $meter, $fundAddress] = $this->readFundAndMeter($reader->address, $index);
+        if ($fund === null || $meter === null) {
+            echo "fund {$index} has no meter at this site; run `open {$index}` first\n";
+
+            return 1;
+        }
+
+        $this->printMeter($meter, $fundAddress);
+        $blocked = Preflight::canMeter($meter, $site, $items, time());
+        self::line('can meter', $blocked === null ? 'yes' : (string) $blocked);
+        self::line('settles', Preflight::willSettle($meter, $site, $items) ? 'yes' : 'no');
+
+        echo "\nsending     meter_and_settle for {$items} item(s), signed by the authority\n";
+        $outcome = $this->submitter->send([
+            Ix::meterAndSettle(
+                $this->program,
+                $this->addresses['site'],
+                $authority->address,
+                $fundAddress,
+                $site->treasury,
+                $site->mint,
+                $items,
+            ),
+        ], $authority);
+        self::outcome($outcome);
+
+        [, $after] = $this->readFundAndMeter($reader->address, $index);
+        if ($after !== null) {
+            echo "\n";
+            $this->printMeter($after, $fundAddress);
+        }
+
+        return $outcome->ok() ? 0 : 1;
+    }
+
+    /**
+     * Sign-out. The browser key signs `close_meter` and holds no SOL, so the
+     * site authority pays the fee. The meter's rent returns to the reader.
+     * Both balances are printed on either side, so the fee the site pays per
+     * sign-out is measured rather than assumed.
+     */
+    public function close(int $index): int
+    {
+        $reader = $this->readerKey();
+        $authority = Keypair::load($this->config->keypairPath('authority'));
+        $path = $this->keyPath($index);
+        if (!is_file($path)) {
+            echo "no key for fund {$index}; run `open {$index}` first\n";
+
+            return 1;
+        }
+        $key = Keypair::load($path);
+        [, $meter, $fundAddress] = $this->readFundAndMeter($reader->address, $index);
+        if ($meter === null) {
+            echo "fund {$index} has no meter at this site\n";
+
+            return 1;
+        }
+
+        $readerBefore = $this->rpc->balance($reader->address);
+        $authorityBefore = $this->rpc->balance($authority->address);
+
+        echo "sending     close_meter signed by the key {$key->address}; the authority pays the fee\n";
+        $outcome = $this->submitter->send(
+            [Ix::closeMeter($this->program, $key->address, $reader->address, $this->addresses['site'], $fundAddress)],
+            $authority,
+            [$key],
+        );
+        self::outcome($outcome);
+
+        if ($outcome->ok()) {
+            self::line('forgiven', self::demo($meter->unpaid()).' unpaid at the close');
+            self::line('reader', self::signedSol($this->rpc->balance($reader->address) - $readerBefore).' (the meter\'s rent, returned)');
+            self::line('authority', self::signedSol($this->rpc->balance($authority->address) - $authorityBefore).' (the fee for a sign-out)');
+        }
+
+        return $outcome->ok() ? 0 : 1;
+    }
+
+    /**
+     * Withdraw the whole balance to the reader's own token account, then
+     * close the fund, in one transaction. With a meter still open the program
+     * should refuse with `FundHasMeters`, and that refusal is worth seeing too.
+     */
+    public function empty(int $index): int
+    {
+        $reader = $this->readerKey();
+        $mint = $this->addresses['mint'];
+        [$fund, , $fundAddress] = $this->readFundAndMeter($reader->address, $index);
+        if ($fund === null) {
+            echo "fund {$index} does not exist\n";
+
+            return 1;
+        }
+
+        $balance = $this->fundBalance($fundAddress);
+        $destination = AssociatedToken::address($reader->address, $mint, $this->program->tokenProgram);
+        self::line('fund', "{$fundAddress}, index {$fund->index}, {$fund->meters} meter(s) open, holding ".self::demo($balance));
+
+        $instructions = [];
+        if ($balance > 0) {
+            $instructions[] = Ix::withdraw($this->program, $reader->address, $mint, $index, $destination, $balance);
+        }
+        $instructions[] = Ix::closeFund($this->program, $reader->address, $mint, $index);
+
+        $solBefore = $this->rpc->balance($reader->address);
+        echo "sending     ".($balance > 0 ? 'withdraw, then close_fund' : 'close_fund')."\n";
+        $outcome = $this->submitter->send($instructions, $reader);
+        self::outcome($outcome);
+
+        if ($outcome->ok()) {
+            self::line('reader', self::signedSol($this->rpc->balance($reader->address) - $solBefore).' (rent back, less the fee)');
+            $this->printReaderBalances($reader->address);
+        }
+
+        return $outcome->ok() ? 0 : 1;
+    }
+
+    /**
+     * Trial 7: what it costs to list a reader's funds without
+     * `getProgramAccounts`. `wasm-client/SPEC.md` §4.7 chose a one-byte index
+     * so that all 256 addresses can be derived and fetched in three calls.
+     * The derivation is timed too, because it runs in PHP here and PHP's
+     * off-curve check is hand-written.
+     */
+    public function scan(?string $wallet): int
+    {
+        $wallet ??= $this->readerKey()->address;
+        $mint = $this->addresses['mint'];
+
+        $started = hrtime(true);
+        $addresses = [];
+        for ($index = 0; $index < 256; $index++) {
+            $addresses[] = Pda::fundAddress($wallet, $mint, $index, $this->program->id)['address'];
+        }
+        $derivedMs = (hrtime(true) - $started) / 1e6;
+
+        self::line('wallet', $wallet);
+        self::line('derived', sprintf('256 fund addresses in %.0F ms', $derivedMs));
+
+        $found = [];
+        foreach (array_chunk($addresses, 100, true) as $chunk) {
+            $started = hrtime(true);
+            $accounts = $this->rpc->multipleAccounts(array_values($chunk));
+            $callMs = (hrtime(true) - $started) / 1e6;
+            self::line('fetched', sprintf('%d accounts in %.0F ms', count($chunk), $callMs));
+
+            foreach (array_values($chunk) as $offset => $address) {
+                if ($accounts[$offset] !== null) {
+                    $found[] = [$address, Fund::decode($accounts[$offset]['data'])];
+                }
+            }
+        }
+
+        echo "\n";
+        if ($found === []) {
+            echo "no funds in DEMO for this wallet\n";
+        }
+        foreach ($found as [$address, $fund]) {
+            self::line("fund {$fund->index}", "{$address}, {$fund->meters} meter(s) open, holding ".self::demo($this->fundBalance($address)));
+        }
+
+        return 0;
+    }
+
+    /**
+     * Compose, print and send the setup transaction. Shared by `open`, which
+     * keeps the fund's current key, and `renew`, which names a new one.
+     *
+     * @param array<string, string> $options
+     */
+    private function setUp(Keypair $reader, int $index, Keypair $key, array $options, string $verb): int
+    {
+        $site = $this->siteAccount();
+        $mint = $this->addresses['mint'];
+        $decimals = (int) $this->config->siteParams()['decimals'];
+
+        [$fund, $meter, $fundAddress, $meterAddress] = $this->readFundAndMeter($reader->address, $index);
+
+        $source = AssociatedToken::address($reader->address, $mint, $this->program->tokenProgram);
+        $holding = $this->tokenBalance($source);
+
+        // The rule devnet taught on 2026-09-30, twice: the server knows the
+        // wallet when it composes, so it reads the wallet's balance and never
+        // composes a deposit the wallet cannot cover. Without `--deposit`
+        // the trial deposits the site's minimum limit, or what the reader
+        // holds if that is less.
+        $deposit = isset($options['deposit']) ? (int) $options['deposit'] : min($site->minLimit, $holding);
+        if ($deposit > $holding) {
+            echo 'refused     a deposit of '.self::demo($deposit).' from a wallet holding '.self::demo($holding)
+                .": the server does not compose this\n";
+
+            return 1;
+        }
+        $limit = isset($options['limit']) ? (int) $options['limit'] : Preflight::limitFloor($site, $meter);
+        $expiry = time() + (isset($options['expiry']) ? (int) $options['expiry'] : 3_600);
+
+        self::line('reader', $reader->address);
+        self::line('fund', "{$fundAddress} (index {$index}): ".($fund === null ? 'absent' : "present, {$fund->meters} meter(s) open"));
+        self::line('meter', "{$meterAddress}: ".($meter === null ? 'absent' : 'present, key '.$meter->key));
+        self::line('key', $key->address);
+
+        /** @var list<Instruction> $instructions */
+        $instructions = [];
+        $plan = [];
+        if ($fund === null) {
+            if ($deposit > 0) {
+                array_push($instructions, ...Ix::openFundAndDeposit($this->program, $reader->address, $mint, $index, $source, $deposit, $decimals));
+                $plan[] = 'open_fund';
+                $plan[] = 'deposit '.self::demo($deposit);
+            } else {
+                $instructions[] = Ix::openFund($this->program, $reader->address, $mint, $index);
+                $plan[] = 'open_fund';
+            }
+        } elseif ($deposit > 0) {
+            $instructions[] = Ix::deposit($this->program, $source, $reader->address, $fundAddress, $mint, $deposit, $decimals);
+            $plan[] = 'deposit '.self::demo($deposit);
+        }
+
+        if ($meter === null) {
+            $instructions[] = Ix::openMeter($this->program, $this->addresses['site'], $reader->address, $fundAddress, $key->address, $limit, $expiry);
+            $plan[] = 'open_meter';
+        } else {
+            $instructions[] = Ix::renewMeter($this->program, $this->addresses['site'], $reader->address, $fundAddress, $key->address, $limit, $expiry);
+            $plan[] = 'renew_meter';
+        }
+
+        self::line('limit', self::demo($limit));
+        self::line('expiry', gmdate('Y-m-d H:i:s', $expiry).' UTC');
+        echo "\ncomposed    ".implode(', then ', $plan)."\n";
+
+        $solBefore = $this->rpc->balance($reader->address);
+        echo "sending     signed by the trial reader, as a wallet would ({$verb})\n";
+        $outcome = $this->submitter->send($instructions, $reader);
+        self::outcome($outcome);
+        if (!$outcome->ok()) {
+            return 1;
+        }
+
+        // What the reader paid in SOL, and where it went. Rent is what the
+        // new accounts hold; whatever else left the wallet is the fee.
+        $fundTokenAccount = Pda::fundTokenAccount($fundAddress, $mint, $this->program->tokenProgram);
+        $accounts = $this->rpc->multipleAccounts([$fundAddress, $fundTokenAccount, $meterAddress]);
+        $spent = $solBefore - $this->rpc->balance($reader->address);
+        $newRent = 0;
+        echo "\n";
+        foreach (['fund' => [$fund, 0], 'fund tokens' => [$fund, 1], 'meter' => [$meter, 2]] as $label => [$existed, $slot]) {
+            $lamports = $accounts[$slot]['lamports'] ?? 0;
+            if ($existed === null) {
+                $newRent += $lamports;
+            }
+            self::line($label, self::sol($lamports).($existed === null ? '   rent, paid now' : '   already open'));
+        }
+        self::line('fee', self::sol($spent - $newRent));
+        self::line('spent', self::sol($spent).' in all, from the reader\'s SOL');
+        $this->printReaderBalances($reader->address);
+
+        echo "\n";
+
+        return $this->prove($index, $key) ? 0 : 1;
+    }
+
+    /**
+     * Sign a fresh nonce with `$key` and check it against the meter as the
+     * chain holds it now. The site's three checks from `SolPay\Core\Proof`'s
+     * docblock follow the signature: the meter names this key, it is this
+     * site's, and it has not expired. The nonce here is never stored, since
+     * nothing will present it twice.
+     */
+    private function prove(int $index, Keypair $key): bool
+    {
+        [, $meter] = $this->readFundAndMeter($this->readerKey()->address, $index);
+        if ($meter === null) {
+            self::line('proof', "no meter for fund {$index}");
+
+            return false;
+        }
+
+        $nonce = random_bytes(32).pack('J', time());
+        $signed = Proof::verifyKey($meter->key, $nonce, $key->sign($nonce));
+        $names = $meter->key === $key->address;
+        $ours = $meter->site === $this->addresses['site'];
+        $live = !$meter->expired(time());
+        $accepted = $signed && $names && $ours && $live;
+
+        self::line('proof', sprintf(
+            '%s by %s: signature %s, key %s, site %s, %s',
+            $accepted ? 'ACCEPTED' : 'REFUSED',
+            $key->address,
+            $signed ? 'valid' : 'invalid',
+            $names ? 'named' : 'not the meter\'s',
+            $ours ? 'this one' : 'another',
+            $live ? 'not expired' : 'expired',
+        ));
+
+        return $accepted;
+    }
+
+    /**
+     * The fund and this site's meter on it, in one call.
+     *
+     * @return array{0: ?Fund, 1: ?Meter, 2: string, 3: string} fund, meter, and their addresses
+     */
+    private function readFundAndMeter(string $reader, int $index): array
+    {
+        $fundAddress = Pda::fundAddress($reader, $this->addresses['mint'], $index, $this->program->id)['address'];
+        $meterAddress = Pda::meterAddress($this->addresses['site'], $fundAddress, $this->program->id)['address'];
+        [$fund, $meter] = $this->rpc->multipleAccounts([$fundAddress, $meterAddress]);
+
+        return [
+            $fund === null ? null : Fund::decode($fund['data']),
+            $meter === null ? null : Meter::decode($meter['data']),
+            $fundAddress,
+            $meterAddress,
+        ];
+    }
+
+    private function fundBalance(string $fundAddress): int
+    {
+        $address = Pda::fundTokenAccount($fundAddress, $this->addresses['mint'], $this->program->tokenProgram);
+        $account = $this->rpc->multipleAccounts([$address])[0];
+
+        return $account === null ? 0 : TokenAccount::decode($account['data'])->amount;
+    }
+
+    private function siteAccount(): Site
+    {
+        if ($this->site === null) {
+            $account = $this->rpc->multipleAccounts([$this->addresses['site']])[0];
+            if ($account === null) {
+                throw new RuntimeException("no Site account at {$this->addresses['site']}; the devnet program may have been reset");
+            }
+            $this->site = Site::decode($account['data']);
+        }
+
+        return $this->site;
+    }
+
+    private function readerKey(): Keypair
+    {
+        return Keypair::loadOrCreate($this->config->keypairPath('trial-reader'));
+    }
+
+    private function keyPath(int $index): string
+    {
+        return $this->config->keypairPath("trial-key-{$index}");
+    }
+
+    private function printReaderBalances(string $reader): void
+    {
+        $tokenAccount = AssociatedToken::address($reader, $this->addresses['mint'], $this->program->tokenProgram);
+        self::line('wallet', self::sol($this->rpc->balance($reader)).', '.self::demo($this->tokenBalance($tokenAccount)));
+    }
+
+    private function tokenBalance(string $tokenAccount): int
+    {
+        $account = $this->rpc->multipleAccounts([$tokenAccount])[0];
+
+        return $account === null ? 0 : TokenAccount::decode($account['data'])->amount;
+    }
+
+    private function printMeter(Meter $meter, string $fundAddress): void
+    {
+        self::line('meter', sprintf(
+            'used %s, paid %s, limit %s, unpaid %s',
+            self::demo($meter->used),
+            self::demo($meter->paid),
+            self::demo($meter->limit),
+            self::demo($meter->unpaid()),
+        ));
+        self::line('fund', self::demo($this->fundBalance($fundAddress)).' left');
+    }
+
+    private static function outcome(Outcome $outcome): void
+    {
+        echo match ($outcome->status) {
+            SubmitStatus::Confirmed => "CONFIRMED   {$outcome->signature}\n",
+            SubmitStatus::Unconfirmed => "UNCONFIRMED {$outcome->signature}: sent, and no answer inside the window\n",
+            SubmitStatus::Failed => 'FAILED      '.(Causes::describe($outcome->cause) ?? $outcome->detail)."\n",
+            SubmitStatus::Sent => "SENT        {$outcome->signature}: not waited for\n",
+        };
+        if ($outcome->status === SubmitStatus::Failed && $outcome->cause !== null) {
+            echo "            {$outcome->detail}\n";
+        }
+        if ($outcome->signature !== null) {
+            echo "explorer    https://explorer.solana.com/tx/{$outcome->signature}?cluster=devnet\n";
+        }
+    }
+
+    private static function line(string $label, string $value): void
+    {
+        printf("%-11s %s\n", $label, $value);
+    }
+
+    // `%F` rather than `%f`: PHP's `%f` follows the locale, and the author's
+    // shell is comma-decimal (notes/working-with-claude.md, "Hazards").
+    private static function sol(int $lamports): string
+    {
+        return sprintf('%.9F SOL', $lamports / self::LAMPORTS_PER_SOL);
+    }
+
+    private static function signedSol(int $lamports): string
+    {
+        return ($lamports >= 0 ? '+' : '').self::sol($lamports);
+    }
+
+    private static function demo(int $baseUnits): string
+    {
+        return sprintf('%.6F DEMO', $baseUnits / 1_000_000);
+    }
+}
+
+/**
+ * @param list<string> $argv
+ *
+ * @return array{0: list<string>, 1: array<string, string>} positional arguments, and `--name=value` options
+ */
+function fundTrialsArguments(array $argv): array
+{
+    $positional = [];
+    $options = [];
+    foreach (array_slice($argv, 1) as $argument) {
+        if (preg_match('/^--([a-z]+)=(.*)$/', $argument, $match) === 1) {
+            $options[$match[1]] = $match[2];
+        } else {
+            $positional[] = $argument;
+        }
+    }
+
+    return [$positional, $options];
+}
+
+[$positional, $options] = fundTrialsArguments($argv);
+$command = $positional[0] ?? 'help';
+// Every subcommand but `scan` takes a fund index second; `scan` takes a wallet.
+$index = $command === 'scan' ? 0 : (int) ($positional[1] ?? 0);
+if ($index < 0 || $index > 255) {
+    fwrite(STDERR, "a fund index is one byte: 0 to 255\n");
+    exit(2);
+}
+
+$root = dirname(__DIR__);
+$config = Config::load($root);
+$rpc = new Rpc(
+    $config->rpcUrl(),
+    $config->program(),
+    (string) $config->rpc()['commitment'],
+    (int) $config->rpc()['http_timeout_s'],
+);
+$trials = new FundTrials($config, $rpc, Submitter::fromConfig($rpc, $config));
+
+exit(match ($command) {
+    'site' => $trials->site(),
+    'reader' => $trials->reader(),
+    'first' => $trials->first($index),
+    'open' => $trials->open($index, $options),
+    'wrong' => $trials->wrong($index),
+    'renew' => $trials->renew($index, $options),
+    'proof' => $trials->proof($index),
+    'meter' => $trials->meter($index, (int) ($positional[2] ?? 1)),
+    'close' => $trials->close($index),
+    'empty' => $trials->empty($index),
+    'scan' => $trials->scan($positional[1] ?? null),
+    default => (static function (): int {
+        // The usage is the file's own docblock, so it cannot drift from it.
+        $source = (string) file_get_contents(__FILE__);
+        preg_match('/\/\*\*\n(.*?)\*\//s', $source, $match);
+        echo preg_replace('/^ \* ?/m', '', $match[1] ?? '');
+
+        return 2;
+    })(),
+});

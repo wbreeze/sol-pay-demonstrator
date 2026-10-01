@@ -48,6 +48,7 @@ parameters:
         - bin/name-the-mint
         - bin/upstream-drift
         - bin/sweep
+        - bin/fund-trials
 
     # `templates/` is not analysed and should not be. `View` renders them with
     # `extract()`, so every variable in a template is undefined as far as any
