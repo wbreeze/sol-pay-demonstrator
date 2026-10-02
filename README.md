@@ -11,24 +11,26 @@ SQLite, the public devnet endpoint, called from the server.
 ## Why this exists
 
 [sol-pay](https://github.com/wbreeze/sol-pay) is an on-chain metering program
-for Solana. A site opens a contract with a reader, counts page views against
-it, and collects what has accumulated. The reader's money stays in the reader's
-wallet until it is spent, and nothing anywhere keeps an account of who read
-what. That repository holds the program, its specification in
+for Solana. A reader's wallet opens a fund, and a meter on that fund for a
+site. The site counts page views against the meter and collects what has
+accumulated from the fund, up to a limit and until an expiry that the reader
+set. The money stays in a fund the reader controls until it is spent, and
+nothing anywhere keeps an account of who read what. That repository holds the
+program, its specification in
 [`wasm-client/SPEC.md`](https://github.com/wbreeze/sol-pay/blob/master/wasm-client/SPEC.md),
 and the state diagram the flow follows.
 
 The client library is published as `sol-pay-client`, once per language:
 
-- [npm](https://www.npmjs.com/package/sol-pay-client) — the wasm build, for the
-  browser half. It holds the reader's wallet and signs `approve_and_open`,
-  `approve_and_renew`, `close_and_revoke` and the sign-in message. It never
-  sees the site authority.
+- [npm](https://www.npmjs.com/package/sol-pay-client) — the wasm build, for a
+  browser. **This site does not load it**
+  ([SPEC.md §12.2](SPEC.md#122-front-end)): the page signs with WebCrypto, and
+  the server composes every message that is signed.
 - [Packagist](https://packagist.org/packages/wbreeze/sol-pay-client) —
   `wbreeze/sol-pay-client`, the PHP port, **and the one this site
-  demonstrates**. It holds the site authority, signs `meter_and_settle` and
-  nothing else, reads and decodes accounts over RPC, and never sees the
-  reader's key.
+  demonstrates**. It composes the setup transaction that a reader's wallet
+  signs, signs `meter_and_settle` with the site authority, reads and decodes
+  accounts over RPC, and never sees the reader's wallet key.
 - [crates.io](https://crates.io/crates/sol-pay-client) — the Rust crate, which
   a Rust server would take for the same row.
 
@@ -37,9 +39,9 @@ screens — `set_meter`, `manage_meter`, `metered_page` — and says they belong
 the integrator. This repository builds them, in PHP, on the PHP port.
 
 It is meant to be read as much as run. Everything sol-pay declines to supply —
-RPC, the wallet adapter, the session, the viewer-to-wallet map, the decision to
-meter a request, error attribution, log hygiene — is here, in one place, in the
-smallest honest form.
+RPC, the transaction request a wallet fetches, the browser key and its session,
+the decision to meter a request, error attribution, log hygiene — is here, in
+one place, in the smallest honest form.
 
 ## Reading order
 
@@ -114,8 +116,15 @@ its own.
 
 First-run setup is a screen rather than a command. It creates the demo mint and
 the treasury account, calls `initialize_site` once, and writes the resulting
-addresses into the configuration that the server and the browser both read. See
-[SPEC.md §12.0](SPEC.md#120-the-shape-decided).
+addresses into the configuration that the server reads. See
+[SPEC.md §12.0](SPEC.md#120-the-shape).
+
+A reader's setup is a scan from a phone's wallet, and a phone cannot reach
+`localhost`. So a development copy has a stand-in:
+`NEWSPRINT_DEV_WALLET=1 bin/run-dev` turns on the development wallet, a keypair
+in `var/` that signs in place of the phone. The faucet page shows its address
+for pasting. It is refused unless the request comes from this machine and the
+endpoint is devnet's. See [SPEC.md §12.6](SPEC.md#126-hosting-and-the-development-wallet).
 
 `bin/devnet-smoke` is the first time `SolPay\Core\Tx` meets a validator.
 Conformance proves `compile` and `wire` agree byte-for-byte with
@@ -206,6 +215,8 @@ The key proof, the key-signed close and the setup scan are the page's.
 | `POST /meter/setup` | records a pending setup, renewal or deposit, and answers its Solana Pay link (`SPEC.md` §6.3) | JSON |
 | `POST /meter/setup/continue` | *continue*: a fresh key proof against the meter the setup named, and a session (`SPEC.md` §6.3) | JSON, and the cookie |
 | `POST /pay/{id}/development` | the development wallet signs the pending setup in place of a phone; loopback and devnet only (`SPEC.md` §12.6) | JSON |
+| `GET /inspector/panel` | the panel's sections for a page that read nothing (`SPEC.md` §9) | a fragment with `X-Fragment: 1`, a page without it |
+| `GET /inspector/event/{signature}` | one decoded event, on demand (`SPEC.md` §9) | JSON |
 
 ### Called by the reader's wallet
 
@@ -216,16 +227,12 @@ not the page, so they answer any origin.
 | --- | --- | --- |
 | `GET /pay/{id}` | the label and icon the wallet shows before it asks | JSON |
 | `POST /pay/{id}` | the setup transaction composed for the wallet's account, unsigned, and the sentence it does | JSON |
-| `GET /inspector/panel` | the panel's sections for a page that read nothing (`SPEC.md` §9) | a fragment with `X-Fragment: 1`, a page without it |
-| `GET /inspector/event/{signature}` | one decoded event, on demand (`SPEC.md` §9) | JSON |
 
 ### Operator-facing
 
 | route | what it is |
 | --- | --- |
 | `GET /health` | PHP version, the three extensions, and the age of the oldest expired row under `sweep`. Keyed to no reader, deliberately (`SPEC.md` §10.4) |
-| `GET /diagnostics/wallets` | a workbench rather than a screen — `SPEC.md` §6 lists five screens and this is none of them |
-| `POST /diagnostics/report` | writes one wallet report into `var/wallet-reports/` |
 
 An unknown path is a 404 rendered as a page. A stale link and a browser asking
 for `/favicon.ico` are ordinary things, and Slim's default for both is a stack
@@ -252,7 +259,7 @@ on a site whose whole argument is that you can read what it is doing.
   handler instead.
 
 `bin/check` runs all of that here, in CI's order: validate, install, build the
-content, PHPUnit, the pinned analyser, the vendored assets, and the boot check.
+content, PHPUnit, the pinned analyser, and the boot check.
 
 ```
 bin/check                        all of it
@@ -274,24 +281,12 @@ commit. Two of them, and they mean different things:
 - **`bin/devnet-canary`** — the sol-pay program is deployed and executable at
   the configured id, and the endpoint answers. Read-only, unfunded, and it
   exits 75 rather than 1 when devnet simply did not answer: the rate limit of
-  [SPEC.md §12.4](SPEC.md#124-rpc-decided) is weather, not news, and a monitor
+  [SPEC.md §12.4](SPEC.md#124-rpc) is weather, not news, and a monitor
   that cannot tell them apart is a monitor everyone learns to ignore.
 - **`bin/upstream-drift`** — whether the published `sol-pay-client` has moved
-  past what this repository pins: `composer.lock` for the server half,
-  `public/vendor/README.md`'s provenance table for the two browser files. An
-  example pinned to a version nobody installs still passes its tests and still
-  teaches the wrong API. Exits 1: news, not an outage.
-
-  The same script asks one more question, and it is not a version question.
-  `sol-pay-client` returns instructions already shaped like `@solana/kit`'s
-  `IInstruction`, and `public/assets/tx.js` hands them straight to
-  `appendTransactionMessageInstructions` — an agreement neither package
-  declares. So the script reads the kit range `sol-pay-client` publishes in
-  `peerDependencies` for the exact version vendored here, and checks the
-  committed kit against it. Outside the range exits 2, louder than 1, because
-  that one does not fail at install — it fails at `compileTransaction`, in a
-  browser, with a wallet prompt already open. Until `sol-pay-client` publishes
-  such a range the check says so and changes nothing.
+  past the version that `composer.lock` pins. An example pinned to a version
+  nobody installs still passes its tests and still teaches the wrong API. Exits
+  1: news, not an outage.
 
 Both run by hand too, and neither needs a key. A failure opens one issue and
 comments on it thereafter rather than filing a fresh one every morning.

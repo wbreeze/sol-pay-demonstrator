@@ -301,38 +301,6 @@ button:hover { filter: brightness(1.1); }
  * `manage_meter` decision — reachable at any time, not only at the limit —
  * is the same argument one screen further on.
  */
-/* The masthead used to carry "signed in as …" and a sign-out link. Both are
-   gone: see the note in templates/layout.php. `.linkish` survives because the
-   meter uses it for "forget this wallet", which is the same control in the one
-   place it belongs. */
-.forget { margin: 0 0 0.5rem; }
-/* Outlined like the wallet buttons beside it, not solid: forgetting a wallet
-   is the quietest thing in this box and should not be the loudest button in
-   it. It is not a `.wallet` — no wallet is opened — so it gets its own rule
-   rather than borrowing that name. */
-.forget button {
-    padding: 0.55rem 0.9rem;
-    border: 1px solid var(--rule);
-    border-radius: 0.3rem;
-    background: var(--paper);
-    color: var(--ink);
-    font: inherit;
-    font-size: 0.95rem;
-}
-.forget button:hover { border-color: var(--accent); color: var(--accent); filter: none; }
-
-.linkish {
-    background: none;
-    border: 0;
-    padding: 0;
-    font: inherit;
-    color: var(--accent);
-    text-decoration: underline;
-    cursor: pointer;
-}
-
-.wallets { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 1rem 0; }
-
 .wallet {
     display: inline-flex;
     align-items: center;
@@ -348,9 +316,6 @@ button:hover { filter: brightness(1.1); }
 }
 .wallet:hover { border-color: var(--accent); color: var(--accent); }
 .wallet:disabled { opacity: 0.55; cursor: default; }
-.wallet img { border-radius: 0.2rem; }
-
-[data-status][data-kind="error"] { color: var(--accent); }
 
 .fine { font-size: 0.85rem; color: var(--ink-soft); }
 .fine summary { cursor: pointer; }
@@ -368,17 +333,6 @@ button:hover { filter: brightness(1.1); }
 .secondary:hover { border-color: var(--accent); color: var(--accent); }
 .secondary:disabled, .secondary:disabled:hover { opacity: 0.55; cursor: default; border-color: var(--rule); color: var(--ink-soft); }
 
-.report {
-    max-height: 28rem;
-    overflow: auto;
-    padding: 0.75rem;
-    border: 1px solid var(--rule);
-    background: var(--paper-sunk);
-    font-size: 0.75rem;
-    line-height: 1.45;
-    white-space: pre;
-}
-
 .meter .limit { display: inline-flex; align-items: baseline; gap: 0.4rem; font-size: 0.95rem; }
 .meter .limit input {
     padding: 0.35rem 0.5rem;
@@ -390,8 +344,6 @@ button:hover { filter: brightness(1.1); }
     font-size: 1rem;
     text-align: right;
 }
-.meter [data-wallet-choices] { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
-.meter [data-meter-status][data-kind="error"] { color: var(--accent); font-style: normal; }
 
 /* §6.3: the four answers, then the scan. The expiry's guidance sits under
    each choice, because the choice is about whose device this is. */
@@ -435,11 +387,6 @@ button:hover { filter: brightness(1.1); }
     color: var(--ink);
     font: 0.9rem ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-
-/* §10.4's receipt: the DELETE, reported rather than asserted. */
-.receipt { margin: 0.75rem 0 1rem; }
-.receipt dt { font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
-.receipt dd { margin: 0.1rem 0 0.7rem; }
 
 /* Between the body and the meter strip: where to go from the end of a piece.
    Sans, like the deck, because it is furniture rather than writing — and no

@@ -94,13 +94,9 @@ return [
                                                      // computes it rather than trusting this comment.
     ],
 
-    // SPEC §5. Sign In With Solana, required with no fallback: a wallet
-    // without the feature is refused by name rather than failed obscurely.
+    // SPEC §5. A browser is known by a key it made, proven against the meter
+    // that names it. These are the lifetimes of what that needs.
     'auth' => [
-        // The Wallet Standard chain identifier. A string the two sides must
-        // agree on rather than one the format dictates; it matches what a
-        // wallet is given when it signs and sends.
-        'chain_id' => 'solana:devnet',
         // SPEC §5.2: a key proof's nonce is good for five minutes, the time a
         // page needs to sign and answer, and is forgotten at its first use
         // whatever the outcome.

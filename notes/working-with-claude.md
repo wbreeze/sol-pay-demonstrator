@@ -30,7 +30,7 @@ Four environments, and only two of them reach a network.
 | --- | --- | --- | --- | --- |
 | The author's macOS shell | 8.5 | yes | yes | yes |
 | The VM behind a connected folder | no | none | yes | no |
-| Claude's cloud container | 8.4 | proxied, no npm/packagist/devnet | no | no |
+| Claude's cloud container | 8.4 | proxied, no packagist/devnet | no | no |
 | GitHub Actions | 8.2–8.5 matrix | yes | yes | no |
 
 Consequences worth knowing before planning any work:
@@ -39,7 +39,7 @@ Consequences worth knowing before planning any work:
   run.** Both need PHP and the git history together, and no single environment
   Claude reaches has both. - **The diagrams are the author's to render.**
   Plates rendered in the container carry DejaVu and do not match the committed
-  set. - **Devnet, Composer, npm and `bin/vendor-assets` are his too.** -
+  set. - **Devnet and Composer are his too.** -
   **The container serves as a CI stand-in.** Two of the four CI jobs reproduce
   there exactly: the pinned PHPStan PHAR downloads through its proxy, and the
   real PHPUnit runs the real test files. Build a tarball of the tree into
@@ -48,10 +48,12 @@ Consequences worth knowing before planning any work:
   a connected folder is refused. **Include `content/`** — without it
   `bin/build-content` produces an empty index and `TemplateRenderTest` fails
   for a staging reason rather than a real one. - **More is reachable offline
-  than it looks.** The browser transaction path runs in node once
-  `public/vendor` exists. Phantom's real signed message replays through the
-  PHP parser. The app boots against a stub RPC that logs every call, which is
-  how call counts get checked by counting rather than by reading a diff. When
+  than it looks.** The app boots against a stub RPC that emulates the
+  program's instructions, checks every signature and logs every call, and
+  headless Chromium drives the pages against it: the browser key, the proof,
+  setup with the development wallet, renewal and the close all run there.
+  That is also how call counts get checked by counting rather than by reading
+  a diff. When
   a claim looks browser-only or chain-only, check whether the artefact can be
   brought to the container first. It has worked every time it has been tried.
   - *What is not reproducible offline is timing.** The container runs CI's

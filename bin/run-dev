@@ -29,8 +29,8 @@
 # Set PHP_CLI_SERVER_WORKERS=1 to get the old behaviour back deliberately.
 #
 # **A router script**, \`bin/dev-router.php\`, so static files are served with
-# \`Cache-Control: no-store\` and \`.wasm\` with \`application/wasm\`. Without it a
-# browser can keep a cached \`assets/meter.js\` across a restart, which means the
+# \`Cache-Control: no-store\`. Without it a
+# browser can keep a cached \`assets/key.js\` across a restart, which means the
 # page runs code that is not the code on disk and nothing on screen says so.
 #
 # **Two environment variables for measuring and testing**, read by the site

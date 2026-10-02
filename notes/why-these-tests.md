@@ -23,8 +23,6 @@ whose point is not obvious does not get deleted for looking strange.
 | a `fn` closing over a variable the request later mutates by reference | the same file again, plus a companion that runs the scanner over a deliberately broken sample, so a green result cannot mean "nothing scanned" |
 | a bareword array key (`chain =>`), valid PHP and fatal at runtime | `tests/Support/BarewordTest.php`, and now `phpstan` |
 | a property access on a class with no such property | `ci.yml`'s `phpstan` job, level 5 |
-| the wallet registry keyed by name rather than by feature | `/diagnostics/wallets` plus `usable(chain)` |
-| 350 KB downloaded inside the blockhash window | both libraries preload before the click |
 | a page spending an RPC call nothing on it needed | `var/profile-pages`, and a HAR read against written-down predictions |
 | a meter address that starts depending on the site *account* | `tests/Chain/RequestReadTest.php` — the meter's two addresses come from the session and setup alone |
 | a pre-send account reading shown on a screen that reports a charge | `tests/Metering/MeterResultTest.php` — the sending factories must have nowhere to put a `MeterState` |
@@ -41,7 +39,6 @@ whose point is not obvious does not get deleted for looking strange.
 | the authority countersigning a close the key did not sign | `tests/Metering/MeterCloseTest.php` — the key's signature over the kept message, or no transaction |
 | a meter renewed to another device's key, still charged from this one | `tests/Chain/RequestReadTest.php` for the read that ends the session, `MeterStateTest` for what counts as holding the meter; `Meter` asks again inside the lock |
 | a page title and its heading drifting apart | `tests/Support/PageTitleTest.php`, for the two pages where one phrase is written twice |
-| a failure report carrying nothing about the failure | `tests/Support/FailureReportTest.php` — the challenge is recorded *before* the wallet call, because the call is what throws |
 | devnet reset, or the program redeployed elsewhere | `bin/devnet-canary`, daily |
 | this repository pinned behind a published `sol-pay-client` | `bin/upstream-drift`, daily |
 | an Anchor event renamed upstream, changing its discriminator | `ProgramEventTest`, which derives all three rather than trusting a copy |

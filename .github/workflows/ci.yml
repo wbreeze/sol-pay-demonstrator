@@ -118,7 +118,7 @@ jobs:
         # `composer.lock` stays a record of what the *site* needs; and an
         # analyser that floats picks its own version, which means CI can go red
         # on a morning when nobody committed anything. Bump the number here on
-        # purpose, the way `bin/vendor-assets` is run on purpose.
+        # purpose.
         env:
           PHPSTAN_VERSION: '2.2.7'
         run: |
@@ -205,34 +205,6 @@ jobs:
             exit 1
           fi
           grep -qi '<title' /tmp/index.html || { echo 'the answer was 200 but not a page'; exit 1; }
-
-  vendored-assets:
-    # SPEC §12.2 commits `public/vendor/` on purpose, and the reason it gives is
-    # that a clone must not need npm. A missing file there is not a build
-    # failure anywhere else — the page just silently loads nothing — so it is
-    # checked here instead.
-    name: vendored assets
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: the committed browser dependencies are present
-        run: |
-          set -euo pipefail
-          missing=0
-          for f in \
-            public/vendor/README.md \
-            public/vendor/sol-pay-client/sol_pay_client.js \
-            public/vendor/sol-pay-client/sol_pay_client_bg.wasm \
-            public/vendor/solana-kit/kit.min.js
-          do
-            if [ -s "$f" ]; then
-              printf '  %8s  %s\n' "$(wc -c < "$f" | tr -d ' ')" "$f"
-            else
-              echo "::error file=$f::missing or empty — re-run bin/vendor-assets and commit the result"
-              missing=1
-            fi
-          done
-          exit $missing
 
   content-dates:
     # The dates on a published piece are written by hand, and this is the job

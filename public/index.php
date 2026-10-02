@@ -1550,13 +1550,6 @@ $app->post('/setup', function (Request $request, Response $response) use ($view,
 });
 
 /**
- * A workbench, not a screen (§6 lists five and this is none of them).
- *
- * Claude reasons from specifications and cannot open a browser; this is where
- * the browser answers back. `GET` renders the page, `POST` lands what it found
- * in `var/`, which Claude can read and which git ignores.
- */
-/**
  * The panel's sections, for a page that did not read the chain (2026-09-09).
  *
  * Two shapes from one URL, and the reason is that the panel must not need
@@ -1682,29 +1675,6 @@ $app->get('/inspector/event/{signature}', function (Request $request, Response $
     }
 
     return $json($response, ['text' => $event->name.' — '.implode(' · ', $parts)]);
-});
-
-$app->get('/diagnostics/wallets', function (Request $request, Response $response) use ($view, $shell, $page): Response {
-    return $page($response, $shell('Wallet diagnostics', $view->render('diagnostics')));
-});
-
-$app->post('/diagnostics/report', function (Request $request, Response $response) use ($json, $config): Response {
-    $body = (string) $request->getBody();
-    if ($body === '' || json_decode($body) === null) {
-        return $json($response, ['message' => 'unreadable report'], 400);
-    }
-
-    $dir = $config->root.'/var/wallet-reports';
-    if (!is_dir($dir) && !mkdir($dir, 0o700, true) && !is_dir($dir)) {
-        return $json($response, ['message' => 'could not create var/wallet-reports'], 500);
-    }
-
-    $name = gmdate('Ymd-His').'.json';
-    if (file_put_contents($dir.'/'.$name, $body."\n") === false) {
-        return $json($response, ['message' => 'could not write the report'], 500);
-    }
-
-    return $json($response, ['path' => 'var/wallet-reports/'.$name]);
 });
 
 /** Operator-facing, and deliberately not keyed to any reader (§10.4). */

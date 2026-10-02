@@ -1395,10 +1395,38 @@ to the public endpoint had a median of 1,223 ms in the morning and about
 500 ms in the evening, and this site's own code was 5 to 140 ms per request.
 Nearly all of a charging view is waiting, and a call a page does not need is
 felt as the site being broken on a bad morning. The per-page counts under the
-delegate design are at `Progress_1.1.1`. They are measured again, with
-`NEWSPRINT_RPC_TIMING=1`, once the fund design's path runs. On 2026-09-30 the
-fund design's own reads cost about half a second each from the author's
-machine.
+delegate design are at `Progress_1.1.1`. On 2026-09-30 the fund design's own
+reads cost about half a second each from the author's machine.
+
+**The fund design's counts**, taken on 2026-10-02 with `NEWSPRINT_RPC_TIMING=1`
+against a stand-in endpoint that logs every call. A count does not depend on
+the endpoint, so these hold on devnet. The times do not, and are not given.
+
+| request | calls | which |
+| --- | --- | --- |
+| any page that only reads: `/`, an article's GET, `/meter`, `/faucet` | 1 | the accounts, in one `getMultipleAccounts` |
+| an article's GET, when the POST follows at once | 0 | the page defers its read to the POST |
+| `POST /a/{slug}`, the charge | 4 | the accounts twice, a blockhash, the send |
+| `POST /a/{slug}/confirm` | 3 | the status, the transaction for its event, the accounts |
+| `POST /meter/advance` | 6 | the accounts twice, a blockhash, the send, the status, the accounts |
+| `POST /key/nonce` | 0 | |
+| `POST /key/prove` | 1 | the meter |
+| `POST /meter/setup`, a setup | 1 | the site |
+| `POST /meter/setup`, a renewal or a deposit | 2 | the site, then the session's fund |
+| `POST /pay/{id}` | 3 | the site, the fund with the meter and the wallet's holding, a blockhash |
+| `POST /meter/setup/continue` | 2 | the site, then the meter |
+| `POST /meter/close/prepare` | 3 | the accounts twice, a blockhash |
+| `POST /meter/close` | 3 | the send, the status, the accounts |
+| `POST /faucet`, a grant | 4 | a blockhash, the send, the status, the accounts |
+
+`POST /pay/{id}` was not driven directly: its count is the development
+wallet's five (`POST /pay/{id}/development`) less the send and the status.
+
+**Five of these read the accounts twice**, where the delegate design's charge
+read them once: the charge, the advance, the close's prepare, *continue* and a
+renewal's start. In the charge and the advance the second read is the one taken
+inside the meter's lock (§7.2), which is the read the decision rests on. Whether
+the first can be dropped is open. Each is about half a second on devnet.
 
 ### 12.5 Session, grant, nonce and lock store: SQLite
 

@@ -1,7 +1,5 @@
-# Anchored to the repository root, all of them, and that is not cosmetic:
-# an unanchored `vendor` also ignores `public/vendor`, which SPEC §12.2
-# requires to be committed. The rule would have hidden the two vendored files
-# from git with no error anywhere.
+# Anchored to the repository root, all of them, so that a rule for a
+# directory here cannot hide a directory of the same name further down.
 /SPEC.pdf
 /README.pdf
 /handoff/

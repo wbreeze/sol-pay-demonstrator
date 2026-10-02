@@ -126,25 +126,6 @@ run_analyse() {
     php -d memory_limit=1G "$phar" analyse -c "$neon" --no-progress
 }
 
-run_assets() {
-    say 'the committed browser dependencies are present'
-    local missing=0
-    for f in \
-        public/vendor/README.md \
-        public/vendor/sol-pay-client/sol_pay_client.js \
-        public/vendor/sol-pay-client/sol_pay_client_bg.wasm \
-        public/vendor/solana-kit/kit.min.js
-    do
-        if [ -s "$f" ]; then
-            printf '  %8s  %s\n' "$(wc -c < "$f" | tr -d ' ')" "$f"
-        else
-            printf '  missing or empty: %s — re-run bin/vendor-assets\n' "$f"
-            missing=1
-        fi
-    done
-    [ "$missing" -eq 0 ] || fail 'a vendored browser dependency is missing'
-}
-
 run_boot() {
     say 'the site boots'
     local port="${PORT:-8123}" code='' server
@@ -176,7 +157,6 @@ case "${1:-all}" in
         run_install
         run_tests
         run_analyse
-        run_assets
         run_boot
         printf '\n\033[32mall green here. CI still has the versions this machine does not.\033[0m\n'
         ;;
