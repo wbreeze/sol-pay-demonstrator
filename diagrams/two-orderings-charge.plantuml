@@ -6,7 +6,7 @@
 $lifelines()
 
 B -> S : POST the article
-S -> D : lock this wallet; is there a grant?
+S -> D : lock this meter; is there a grant?
 D --> S : no grant
 S -> C : send the charge\n(the server signs it)
 

@@ -5,26 +5,27 @@
 !include style.iuml
 $lifelines()
 
-B -> S : POST the close's signature
-S -> C : ask about the signature,\nup to 6 times, 2 s apart
-S -> C : read the contract account
+B -> S : POST the signed close
+S -> C : send the close
+S -> C : ask about the close,\nup to 6 times, 2 s apart
+S -> C : read the meter account
 C --> S : still there
 S -> D : note: a close is pending
-S --> B : reload in a moment
+S --> B : forgotten once the close lands
 hnote over C : the close\nlands at\nsecond 20
 
-== the reader reloads ==
+== the reader comes back ==
 
-B -> S : GET the meter
+B -> S : GET the meter page
 S -> D : whose session is this?
-D --> S : this wallet, with a pending close
-S -> C : read the contract account
+D --> S : this meter, with a pending close
+S -> C : read the meter account
 C --> S : gone
 S -> D : delete sessions, grants, lock row, note
-S --> B : no paying wallet stored
+S --> B : this browser holds no meter
 
 note over S, D
-  Without the note, the reload cannot tell
+  Without the note, the later request cannot tell
   a meter just closed from one never opened.
 end note
 @enduml

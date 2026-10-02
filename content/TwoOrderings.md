@@ -2,7 +2,7 @@
 title: Two orderings that disagree on purpose
 slug: two-orderings
 created: 2026-09-07
-revised: 2026-09-17
+revised: 2026-10-02
 metered: true
 status: published
 lede: >
@@ -58,8 +58,8 @@ has landed. Then one of four things happens:
   can no longer land, because its blockhash has expired. The server marks the
   grant that way, and keeps it.
 
-![A sequence diagram with four lifelines: the reader's browser, the site server, the site database and the chain. The browser posts the article. The server locks the wallet, finds no grant, and sends the charge it signed. Two branches. If the endpoint's check refuses the charge, nothing is sent, and the server returns why the charge failed, with nothing recorded. If the charge is accepted, the server records the grant as pending and returns the article with a line saying the charge is on its way. After a divider labelled the page asks what became of the charge: the browser posts a confirm, and the server asks about the signature up to six times, two seconds apart. Three branches. Confirmed: mark the grant confirmed, and return the meter with the charge in it. Landed and failed: mark the grant refused but keep it, and say the charge was turned down and nothing was charged. No answer yet: say it is not confirmed yet, and that a later request asks again. A note says the grant is written before the page is built, and is kept whatever the chain answers.](/assets/img/two-orderings-charge-light.png)
-![A sequence diagram with four lifelines: the reader's browser, the site server, the site database and the chain. The browser posts the article. The server locks the wallet, finds no grant, and sends the charge it signed. Two branches. If the endpoint's check refuses the charge, nothing is sent, and the server returns why the charge failed, with nothing recorded. If the charge is accepted, the server records the grant as pending and returns the article with a line saying the charge is on its way. After a divider labelled the page asks what became of the charge: the browser posts a confirm, and the server asks about the signature up to six times, two seconds apart. Three branches. Confirmed: mark the grant confirmed, and return the meter with the charge in it. Landed and failed: mark the grant refused but keep it, and say the charge was turned down and nothing was charged. No answer yet: say it is not confirmed yet, and that a later request asks again. A note says the grant is written before the page is built, and is kept whatever the chain answers.](/assets/img/two-orderings-charge-dark.png)
+![A sequence diagram with four lifelines: the reader's browser, the site server, the site database and the chain. The browser posts the article. The server locks the meter, finds no grant, and sends the charge it signed. Two branches. If the endpoint's check refuses the charge, nothing is sent, and the server returns why the charge failed, with nothing recorded. If the charge is accepted, the server records the grant as pending and returns the article with a line saying the charge is on its way. After a divider labelled the page asks what became of the charge: the browser posts a confirm, and the server asks about the signature up to six times, two seconds apart. Three branches. Confirmed: mark the grant confirmed, and return the meter with the charge in it. Landed and failed: mark the grant refused but keep it, and say the charge was turned down and nothing was charged. No answer yet: say it is not confirmed yet, and that a later request asks again. A note says the grant is written before the page is built, and is kept whatever the chain answers.](/assets/img/two-orderings-charge-light.png)
+![A sequence diagram with four lifelines: the reader's browser, the site server, the site database and the chain. The browser posts the article. The server locks the meter, finds no grant, and sends the charge it signed. Two branches. If the endpoint's check refuses the charge, nothing is sent, and the server returns why the charge failed, with nothing recorded. If the charge is accepted, the server records the grant as pending and returns the article with a line saying the charge is on its way. After a divider labelled the page asks what became of the charge: the browser posts a confirm, and the server asks about the signature up to six times, two seconds apart. Three branches. Confirmed: mark the grant confirmed, and return the meter with the charge in it. Landed and failed: mark the grant refused but keep it, and say the charge was turned down and nothing was charged. No answer yet: say it is not confirmed yet, and that a later request asks again. A note says the grant is written before the page is built, and is kept whatever the chain answers.](/assets/img/two-orderings-charge-dark.png)
 
 Until the chain answers, the page shows none of the meter's numbers. A read
 of the reader's accounts taken straight after sending would return the
@@ -85,7 +85,8 @@ A charge that lands and fails costs the same, plus the fee for the failed
 transaction. The endpoint's check has already turned away the charges that
 were bound to fail. What gets past it and fails anyway is a charge whose
 accounts changed in the second between the check and the chain: the reader
-spending from the same wallet in that moment, say. Taking the article back
+withdrawing from the fund in that moment, say, or another site settling on the
+same fund. Taking the article back
 afterwards would leave the reader wondering what happened to the page they
 were reading.
 
@@ -112,45 +113,43 @@ article without a second charge.
 [The request nobody made](/a/request-nobody-made) says more about that second
 request.
 
-## Erase nothing until the contract account is gone
+## Erase nothing until the meter account is gone
 
 Closing works the other way round.
 
-The reader's wallet signs and sends one transaction with two instructions. The
-first closes the reader's contract with the site and forgives whatever is
-unpaid. The second revokes the site's permission to draw from the reader's
-token account. The browser then reports the transaction's signature to the
-server.
+The close is one instruction. It closes the reader's meter and forgives
+whatever is unpaid. The reader's browser signs the close with the key the
+meter names. The server adds the site's signature, pays the fee, and sends the
+transaction.
 
-The server asks the chain about that signature up to six times, two seconds
-apart.
+The server asks the chain about the close up to six times, two seconds apart.
 
-- **The transaction landed and failed.** The server deletes nothing, and says
-  so.
+- **The transaction was refused, or landed and failed.** The server deletes
+  nothing, and says so.
 
-Otherwise the server reads the reader's contract account from the chain, and
+Otherwise the server reads the reader's meter account from the chain, and
 decides:
 
-- **The account is gone.** The server deletes every session for that wallet,
-  every grant, and the row it keeps for that wallet. The cookie is cleared.
-  The page shows a receipt that counts what was deleted.
+- **The account is gone.** The server deletes every session for that meter,
+  every grant, and the row it keeps for that meter. The cookie is cleared. The
+  page says the meter is closed, and the browser deletes its key.
 - **The account is still there.** The server deletes nothing. It writes a
-  note that a close is pending, and tells the reader to reload in a moment.
-  The section *Give the waiting path a way to finish later* explains the
-  note.
+  note that a close is pending, and tells the reader that the site will forget
+  the meter once the close lands. The browser keeps its key. The section *Give
+  the waiting path a way to finish later* explains the note.
 
-![A sequence diagram with the same four lifelines. The reader's wallet sends close and revoke to the chain. The browser posts the close's signature to the server. The server asks about that signature up to six times, two seconds apart. If the transaction landed and failed, nothing is deleted. Otherwise the server reads the contract account. If the account is gone, the server deletes sessions, grants and the lock row, and returns a receipt of what was deleted. If the account is still there, the server writes a note that a close is pending and tells the reader to reload in a moment. A note says the signature only says when to look, and the missing account is the proof.](/assets/img/two-orderings-close-light.png)
-![A sequence diagram with the same four lifelines. The reader's wallet sends close and revoke to the chain. The browser posts the close's signature to the server. The server asks about that signature up to six times, two seconds apart. If the transaction landed and failed, nothing is deleted. Otherwise the server reads the contract account. If the account is gone, the server deletes sessions, grants and the lock row, and returns a receipt of what was deleted. If the account is still there, the server writes a note that a close is pending and tells the reader to reload in a moment. A note says the signature only says when to look, and the missing account is the proof.](/assets/img/two-orderings-close-dark.png)
+![A sequence diagram with the same four lifelines. The browser posts the close, signed with its key. The server adds the site's signature and sends the close to the chain, then asks about it up to six times, two seconds apart. If the transaction was refused or landed and failed, nothing is deleted. Otherwise the server reads the meter account. If the account is gone, the server deletes sessions, grants and the lock row, and answers that the meter is closed. If the account is still there, the server writes a note that a close is pending and answers that the site will forget the meter once the close lands. A note says the signature only says when to look, and the missing account is the proof.](/assets/img/two-orderings-close-light.png)
+![A sequence diagram with the same four lifelines. The browser posts the close, signed with its key. The server adds the site's signature and sends the close to the chain, then asks about it up to six times, two seconds apart. If the transaction was refused or landed and failed, nothing is deleted. Otherwise the server reads the meter account. If the account is gone, the server deletes sessions, grants and the lock row, and answers that the meter is closed. If the account is still there, the server writes a note that a close is pending and answers that the site will forget the meter once the close lands. A note says the signature only says when to look, and the missing account is the proof.](/assets/img/two-orderings-close-dark.png)
 
 Now the two mistakes have swapped sizes.
 
-Erase on the strength of a close that has not landed, and the receipt says
-the contract is closed. The contract is still open. The site is still
-permitted to draw from the reader's token account. The grants for articles the
-reader has already paid for are gone. The reader leaves believing that an
-authorization has ended when the authorization is still live. Ending the
-authorization was the whole reason for the click. Nothing afterwards prompts
-the reader to check the receipt against the chain.
+Erase on the strength of a close that has not landed, and the page says the
+meter is closed. The meter is still open. The site is still permitted to draw
+on the reader's fund, up to the limit. The grants for articles the reader has
+already paid for are gone. The reader leaves believing that the arrangement
+has ended when the arrangement is still live. Ending the arrangement was the
+whole reason for the click. Nothing afterwards prompts the reader to check the
+page against the chain.
 
 The other mistake is to keep the records a little longer and ask the reader to
 try again.
@@ -160,68 +159,60 @@ mistake is simply on the other side this time.
 
 ## Take the account as proof, not the signature
 
-The two paths differ in one more way, and the difference decides what counts
-as proof.
+Both paths ask the chain about a signature, and in neither path is the answer
+the proof.
 
-When the site charges, the server signs and sends the transaction itself. The
-signature the server asks about is the server's own. The later request that asks
-about it takes the signature from the site's own record of the grant, never
-from the browser.
+A signature's status says that a transaction was processed. It says so only
+while the endpoint still remembers the transaction, and an endpoint that
+answers nothing has not said the transaction failed. So the status tells the
+server when to look. What the server looks at is the meter account. The
+account's address is derived from the site's address and the reader's fund, so
+the server can find the account without asking anyone. A meter account that no
+longer exists is not a report about a transaction. A missing account is the
+state the transaction was for, read back from the chain that holds it.
 
-When a reader closes the meter, the reader's wallet sends the transaction. The
-server only hears about the transaction from the browser. The signature is a
-string from a place the server does not control. Even a genuine signature
-shows only that something was submitted.
+Setting a meter up shows the rule most plainly, because there the server has
+no signature to ask about. The reader's wallet sends the setup transaction,
+and the wallet tells the site nothing. When the reader presses *continue*, the
+server looks for the meter account, checks that it names the browser's key,
+and trusts nothing else.
 
-The server does ask for that signature's status. The answer tells the server
-when to look. The answer is not the proof. The proof is the contract account. The
-account's address is derived from the site's address and the reader's wallet,
-so the server can find the account without asking anyone. A contract account
-that no longer exists is not a report about a transaction. A missing account
-is the state the transaction was for, read back from the chain that holds it.
-
-Opening a meter follows the same rule in the other direction. After the reader's
-wallet sends the transaction that opens a contract, the server looks for the
-contract account and trusts nothing else.
-
-In code, the difference between trusting the signature and reading the
-account is a few lines. Those few lines are the difference between a site
-that believes its readers' browsers and a site that does not have to.
+In code, the difference between trusting a report and reading the account is a
+few lines. Those few lines are the difference between a site that believes
+what it is told and a site that does not have to.
 
 ## Give the waiting path a way to finish later
 
-Waiting has a cost. Until this piece was written, the site had not paid all
-of it.
+Waiting has a cost, and a path that waits has to pay all of it.
 
 Suppose the close lands at second twenty. The server asked for the last time
-at about second twelve, read the chain, found the contract still there, and deleted
-nothing. The reader reloads, as told. The meter now says that this wallet has
-no contract and nothing to close. The meter is right. But the erasure ran only
-in the request that saw the contract account gone, and that request had
-already given up. The site kept the session and the grants that the close was
-meant to delete.
+at about second twelve, read the chain, found the meter still there, and
+deleted nothing. The reader comes back a minute later. The meter page now says
+that this browser holds no meter and has nothing to close. The page is right.
+But the erasure ran only in the request that saw the meter account gone, and
+that request had already given up. The site kept the session and the grants
+that the close was meant to delete.
 
 A path that leans back needs a second way to reach its end. Charging has one
 already: the pending mark on the grant is its note, and a later request
 finishes the job. So the request that gives up on a close now leaves a note
-too: a close was sent for this wallet, with this
-signature. Every later request that knows its wallet checks for a note before
-doing anything else. When a note is there, the server reads the contract
-account again. If the account is gone, the server finishes the erasure, note
+too: a close was sent for this meter, with this signature. Every later request
+that knows its meter checks for a note before doing anything else. When a note
+is there, the server reads the meter account again. If the account is gone, the server finishes the erasure, note
 included, and the request goes on as if nobody were identified.
 
-![A sequence diagram with the same four lifelines. The browser posts the close's signature. The server asks about the signature up to six times, reads the contract account, finds it still there, writes a note that a close is pending, and tells the reader to reload. The close then lands at second twenty. After a divider labelled the reader reloads: the browser asks for the meter, the server looks up the session and finds this wallet with a pending close, reads the contract account, finds it gone, deletes sessions, grants, the lock row and the note, and answers that no paying wallet is stored. A note says that without the note, the reload cannot tell a meter just closed from one never opened.](/assets/img/two-orderings-late-close-light.png)
-![A sequence diagram with the same four lifelines. The browser posts the close's signature. The server asks about the signature up to six times, reads the contract account, finds it still there, writes a note that a close is pending, and tells the reader to reload. The close then lands at second twenty. After a divider labelled the reader reloads: the browser asks for the meter, the server looks up the session and finds this wallet with a pending close, reads the contract account, finds it gone, deletes sessions, grants, the lock row and the note, and answers that no paying wallet is stored. A note says that without the note, the reload cannot tell a meter just closed from one never opened.](/assets/img/two-orderings-late-close-dark.png)
+![A sequence diagram with the same four lifelines. The browser posts the signed close. The server sends it, asks about it up to six times, reads the meter account, finds it still there, writes a note that a close is pending, and answers that the site will forget the meter once the close lands. The close then lands at second twenty. After a divider labelled the reader comes back: the browser asks for the meter page, the server looks up the session and finds this meter with a pending close, reads the meter account, finds it gone, deletes sessions, grants, the lock row and the note, and answers that this browser holds no meter. A note says that without the note, the reload cannot tell a meter just closed from one never opened.](/assets/img/two-orderings-late-close-light.png)
+![A sequence diagram with the same four lifelines. The browser posts the signed close. The server sends it, asks about it up to six times, reads the meter account, finds it still there, writes a note that a close is pending, and answers that the site will forget the meter once the close lands. The close then lands at second twenty. After a divider labelled the reader comes back: the browser asks for the meter page, the server looks up the session and finds this meter with a pending close, reads the meter account, finds it gone, deletes sessions, grants, the lock row and the note, and answers that this browser holds no meter. A note says that without the note, the reload cannot tell a meter just closed from one never opened.](/assets/img/two-orderings-late-close-dark.png)
 
-Without the note, the reload cannot tell a wallet that has just closed its
-meter from a wallet that has never opened one. Both show the same thing on
-chain: no contract account.
+Without the note, the later request cannot tell a browser whose meter has just
+closed from a browser that never had one. Both show the same thing on chain:
+no meter account.
 
 The note has limits of its own, and they follow the same rule as the rest of
 this piece:
 
 - **If the chain does not answer,** the note stays and nothing is deleted.
-- **If the contract is still there three minutes after the close was sent,**
+- **If the meter is still there three minutes after the close was sent,**
   the close can no longer land, because its blockhash has expired. The note
   is dropped, and nothing is deleted.
 - **If the reader never comes back,** the note waits, but not forever. The
@@ -229,7 +220,7 @@ this piece:
   as they would for any reader. Once nothing is left for the note to erase,
   the scheduled sweep deletes the note too.
 
-The note holds the wallet address and the close's signature. The chain
+The note holds the meter and the close's signature. The chain
 already shows both, in the close transaction itself. The privacy page lists
 the note anyway, because it is something the site holds.
 
@@ -246,10 +237,10 @@ Make both paths write and then wait, and closing breaks. That bug would be
 very hard to notice. When the close lands in time, the visible result is
 identical. A close nearly always lands in time. The bug would show only when
 the chain is slow, only for a reader who had just asked to end the
-arrangement, and only as a receipt that says something false.
+arrangement, and only as a page that says something false.
 
-![A sequence diagram of the wrong order for closing. The wallet sends close and revoke. The browser posts the signature. The server deletes sessions and grants first, marked as the mistake, then asks about the signature six times while the chain is slow, and returns a receipt saying the contract is closed, also marked. A note says that if the close never lands, the contract stays open and the site can still draw from the reader's token account, while the receipt says the opposite and the reader has no reason to check it.](/assets/img/two-orderings-tidy-close-light.png)
-![A sequence diagram of the wrong order for closing. The wallet sends close and revoke. The browser posts the signature. The server deletes sessions and grants first, marked as the mistake, then asks about the signature six times while the chain is slow, and returns a receipt saying the contract is closed, also marked. A note says that if the close never lands, the contract stays open and the site can still draw from the reader's token account, while the receipt says the opposite and the reader has no reason to check it.](/assets/img/two-orderings-tidy-close-dark.png)
+![A sequence diagram of the wrong order for closing. The browser posts the signed close, and the server sends it. The server deletes sessions and grants first, marked as the mistake, then asks about the close six times while the chain is slow, and answers that the meter is closed, also marked. A note says that if the close never lands, the meter stays open and the site can still draw on the reader's fund, while the page says the opposite and the reader has no reason to check it.](/assets/img/two-orderings-tidy-close-light.png)
+![A sequence diagram of the wrong order for closing. The browser posts the signed close, and the server sends it. The server deletes sessions and grants first, marked as the mistake, then asks about the close six times while the chain is slow, and answers that the meter is closed, also marked. A note says that if the close never lands, the meter stays open and the site can still draw on the reader's fund, while the page says the opposite and the reader has no reason to check it.](/assets/img/two-orderings-tidy-close-dark.png)
 
 ## The rule
 

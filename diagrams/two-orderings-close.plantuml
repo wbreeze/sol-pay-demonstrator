@@ -1,28 +1,28 @@
 @startuml
-' Closing a meter: nothing is deleted until the contract account is gone.
+' Closing a meter: nothing is deleted until the meter account is gone.
 ' Source for public/assets/img/two-orderings-close-*.png.
 !include style.iuml
 $lifelines()
 
-B -> C : close and revoke\n(the reader's wallet sends it)
-B -> S : POST the close's signature
-S -> C : ask about the signature,\nup to 6 times, 2 s apart
+B -> S : POST the close,\nsigned with the browser's key
+S -> C : send the close\n(the server adds its signature)
+S -> C : ask about the close,\nup to 6 times, 2 s apart
 
-alt landed and failed
+alt refused, or landed and failed
   S --> B : nothing was deleted
 else confirmed, or no answer after 6 asks
-  S -> C : read the contract account
+  S -> C : read the meter account
   alt account gone
     S -> D : delete sessions, grants, lock row
-    S --> B : receipt: what was deleted
+    S --> B : the meter is closed
   else account still there
     S -> D : note: a close is pending
-    S --> B : reload in a moment
+    S --> B : forgotten once the close lands
   end
 end
 
 note over S, C
-  The signature only says when to look.
+  The status only says when to look.
   The missing account is the proof.
 end note
 @enduml
