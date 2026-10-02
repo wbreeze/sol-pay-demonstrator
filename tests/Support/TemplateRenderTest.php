@@ -347,6 +347,11 @@ final class TemplateRenderTest extends TestCase
         self::assertStringContainsString('data-kind="deposit"', $html);
         self::assertStringContainsString('id="renew"', $html);
         self::assertSame(1, substr_count($html, 'data-setup-scan'), 'one scan region serves both forms');
+
+        // SPEC §6.4: *continue* returns a reader to the article they came
+        // from. The line that says so is hidden until `key.js` knows of one.
+        self::assertMatchesRegularExpression('/<p class="fine" data-back hidden>/', $html);
+        self::assertStringContainsString('[data-back]', (string) file_get_contents(dirname(__DIR__, 2).'/public/assets/key.js'));
         self::assertStringContainsString('folds in the 0.14 you are carrying', self::said($html));
     }
 

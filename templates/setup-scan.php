@@ -31,6 +31,11 @@
         When the wallet says it is done,
         <button type="button" class="wallet" data-setup-continue>Continue</button>
     </p>
+    <?php /* Filled by `key.js` on the meter page, for a reader who came there
+             from an article: *continue* returns them to it. */ ?>
+    <p class="fine" data-back hidden>
+        Continue takes you back to <a href="/">the article you came from</a>.
+    </p>
     </div>
     <p class="pending" data-setup-status role="status" hidden></p>
 </div>

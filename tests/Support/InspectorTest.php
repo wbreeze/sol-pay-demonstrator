@@ -12,6 +12,7 @@ use PHPUnit\Framework\TestCase;
 use Newsprint\Metering\MeterResult;
 use Newsprint\Chain\MeterState;
 use SolPay\Core\AccountMeta;
+use SolPay\Core\Fund;
 use SolPay\Core\Meter;
 use SolPay\Core\TokenAccount;
 use SolPay\Core\Instruction;
@@ -26,6 +27,7 @@ use SolPay\Core\Site;
 final class InspectorTest extends TestCase
 {
     private const SITE = '7X4hDbm44UQYnmXshwSdCyAMhh3bJe2X5u1z2m1dSCVt';
+    private const READER = '6SmkFx2x1kYR87MvrUWW2sWJf8HjYCvDek5KJTrvYxfQ';
 
     private function inspector(): Inspector
     {
@@ -439,12 +441,25 @@ final class InspectorTest extends TestCase
         self::assertStringStartsWith(Alias::BROWSER_KEY, $names[$read->meter->key]['alias']);
         self::assertStringContainsString('["meter", '.Alias::for(Alias::SITE, self::SITE).', '.Alias::for(Alias::FUND, $read->fund).']', (string) $names[$read->meterAddress]['note']);
 
-        self::assertSame('2023-11-14 22:13 UTC — past', $this->row($sections, 'You, on chain', 'expiry'));
+        // SPEC §9.2: the fund, decoded. Its reader draws `RDR`, and the
+        // fund's seeds are then written out in full rather than named.
+        self::assertStringStartsWith(Alias::READER, $names[self::READER]['alias']);
+        self::assertStringContainsString('was not told it by this page', (string) $names[self::READER]['note']);
+        self::assertStringContainsString(
+            '["fund", '.Alias::for(Alias::READER, self::READER).', '.Alias::for(Alias::MINT, $this->state()->site->mint).', 3]',
+            (string) $names[$read->fund]['note'],
+        );
+        self::assertSame('3', $this->row($sections, 'Your fund, on chain', 'index'));
+        self::assertSame('2, across every site that meters on this fund', $this->row($sections, 'Your fund, on chain', 'meters open'));
+        self::assertSame('255', $this->row($sections, 'Your meter, on chain', 'bump'));
+        self::assertSame('252', $this->row($sections, 'Your fund, on chain', 'bump'));
+
+        self::assertSame('2023-11-14 22:13 UTC — past', $this->row($sections, 'Your meter, on chain', 'expiry'));
         self::assertStringStartsWith('no — Expired', (string) $this->row($sections, 'Preflight, for this request', 'can_meter'));
     }
 
     /** A browser holding a meter, so the crowded panel is the one under test. */
-    private function meter(int $expiry = 4_000_000_000): MeterState
+    private function meter(int $expiry = 4_000_000_000, bool $withFund = true): MeterState
     {
         $site = $this->state()->site;
         $meter = 'Fgm6costwpmn4d1CTqdM5su8jBptdwnW134cNoFixgqs';
@@ -460,7 +475,30 @@ final class InspectorTest extends TestCase
             new TokenAccount($site->mint, $fund, 210_000, null, 0),
             $site,
             6,
+            $withFund ? new Fund(self::READER, $site->mint, 3, 2, 252) : null,
         );
+    }
+
+    /**
+     * A fund account that is not there: closed, or never opened. The seeds
+     * are named rather than written out, and nothing draws `RDR`.
+     */
+    public function testAFundThatIsNotThereIsSaidToBeMissing(): void
+    {
+        $read = $this->meter(withFund: false);
+        $sections = $this->inspector()->sections($this->state(), null, $read);
+        $names = $this->names($sections);
+
+        self::assertArrayNotHasKey(self::READER, $names);
+        self::assertStringContainsString('["fund", your wallet, ', (string) $names[$read->fund]['note']);
+        self::assertStringStartsWith('not found', (string) $this->row($sections, 'Your fund, on chain', 'fund account'));
+        self::assertNull($this->row($sections, 'Your fund, on chain', 'index'));
+    }
+
+    /** The delegate design's row. A treasury has no delegate to show under the fund design. */
+    public function testTheTreasuryShowsNoDelegateRow(): void
+    {
+        self::assertNull($this->row($this->inspector()->sections($this->state()), 'Treasury', 'delegate'));
     }
 
     /** A metered result carrying one instruction, optionally naming a stranger. */
@@ -504,7 +542,8 @@ final class InspectorTest extends TestCase
             'The values, in full',
             'Preflight, for this request',
             'The last transaction',
-            'You, on chain',
+            'Your meter, on chain',
+            'Your fund, on chain',
             'Treasury',
             'Site account, decoded',
             'Deployment',
@@ -545,13 +584,17 @@ final class InspectorTest extends TestCase
         ]);
 
         $sent = $this->inspector()->sections($this->state(), null, $this->meter(), $ahead);
-        self::assertStringStartsWith('before the charge for this article confirmed', (string) $this->row($sent, 'You, on chain', 'read'));
+        // Both accounts were read then, so both sections say so.
+        foreach (['Your meter, on chain', 'Your fund, on chain'] as $heading) {
+            self::assertStringStartsWith('before the charge for this article confirmed', (string) $this->row($sent, $heading, 'read'), $heading);
+        }
         self::assertSame($sig, $this->section($sent, 'The last transaction')['instructions'] ?? null);
         self::assertStringStartsWith('sent — ', (string) $this->row($sent, 'The last transaction', 'outcome'));
 
         // The same reader after the answer: no such row.
         $after = $this->inspector()->sections($this->state(), null, $this->meter(), MeterResult::confirmedLater($sig, true));
-        self::assertNull($this->row($after, 'You, on chain', 'read'));
+        self::assertNull($this->row($after, 'Your meter, on chain', 'read'));
+        self::assertNull($this->row($after, 'Your fund, on chain', 'read'));
 
         $later = $this->section($after, 'The last transaction');
         self::assertSame($sig, $later['carry'] ?? null);

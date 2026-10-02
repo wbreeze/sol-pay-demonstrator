@@ -35,13 +35,17 @@ final class Alias
      * The fund design's four (SPEC §9.1, 2026-10-01): the meter, the fund it
      * draws on, the fund's token account where the money is, and the browser
      * key the meter answers to. They replace the delegate design's contract,
-     * payer and payer token account. The reader's wallet (`RDR`) arrives
-     * with the decoded fund, which this site does not read yet.
+     * payer and payer token account.
+     *
+     * `RDR` is the reader's wallet, as the fund account names it. The site is
+     * never told it by the page (SPEC §5): it is read from the chain, where
+     * the fund records it for anyone to read.
      */
     public const METER = 'MPDA';
     public const FUND = 'FPDA';
     public const FUND_TOKEN_ACCOUNT = 'FATA';
     public const BROWSER_KEY = 'BKEY';
+    public const READER = 'RDR';
 
     /**
      * The site authority (SPEC §4.4), added 2026-09-08 — the one address that
@@ -101,6 +105,7 @@ final class Alias
         self::FUND => 'Your fund',
         self::FUND_TOKEN_ACCOUNT => "Your fund's token account",
         self::BROWSER_KEY => "This browser's key",
+        self::READER => 'Your wallet, as your fund names it',
         self::AUTHORITY => 'The site authority',
         self::UNNAMED => 'An address this panel cannot place',
         self::DATA => "An instruction's bytes",
@@ -109,7 +114,7 @@ final class Alias
     /** Every prefix this class defines, which is what `MEANINGS` must cover. */
     public const PREFIXES = [
         self::PROGRAM, self::SITE, self::MINT, self::TREASURY, self::TOKEN_PROGRAM,
-        self::METER, self::FUND, self::FUND_TOKEN_ACCOUNT, self::BROWSER_KEY,
+        self::METER, self::FUND, self::FUND_TOKEN_ACCOUNT, self::BROWSER_KEY, self::READER,
         self::AUTHORITY, self::UNNAMED, self::DATA,
     ];
 

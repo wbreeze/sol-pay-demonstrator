@@ -94,7 +94,8 @@ final class Inspector
             'This site, on chain',
             'Preflight, for this request',
             'The last transaction',
-            'You, on chain',
+            'Your meter, on chain',
+            'Your fund, on chain',
             'Treasury',
             'Configuration drift',
             'Site account, decoded',
@@ -315,9 +316,6 @@ final class Inspector
                     ['treasury token account', $this->address($site->treasury, $known)],
                     ['balance', $amount($state->treasury->amount)],
                     ['owner', $this->address($state->treasury->owner, $known)],
-                    ['delegate', $state->treasury->delegate === null
-                        ? 'none'
-                        : $this->address($state->treasury->delegate, $known)],
                 ],
             ];
         }
@@ -344,7 +342,7 @@ final class Inspector
         }
 
         if ($meter !== null) {
-            $sections[] = $this->reader($meter, $amount, $known, $result?->awaiting() ?? false);
+            array_push($sections, ...$this->reader($meter, $amount, $known, $result?->awaiting() ?? false));
             $sections[] = $this->preflight($state, $meter, $amount);
         }
 
@@ -637,6 +635,13 @@ final class Inspector
             if ($meter->meter !== null) {
                 $roles[$meter->meter->key] = Alias::BROWSER_KEY;
             }
+            // The fund account names its reader. The page never told this
+            // site the wallet (SPEC §5); it is here because the chain holds
+            // it for anyone to read, and the fund's seeds cannot be written
+            // out without it.
+            if ($meter->fundAccount !== null) {
+                $roles[$meter->fundAccount->reader] = Alias::READER;
+            }
         }
 
         // Seeds are written with the short names above rather than with
@@ -682,15 +687,23 @@ final class Inspector
             if ($meter->meter !== null) {
                 $derivations[$meter->meter->key] = 'generated in this browser and kept there; the meter names it';
             }
+            if ($meter->fundAccount !== null) {
+                $derivations[$meter->fundAccount->reader] = 'your own; this site read it from your fund and was not told it by this page';
+            }
 
             // Seeded by the site and the mint, so none can be written without
             // a site account to read them from. An unprovisioned copy has no
             // site and these rows go bare, which is correct: the addresses
             // would not exist either.
             if ($state !== null) {
+                // With the fund decoded, the seeds are written out in full:
+                // the reader by short name and the index as its number.
+                // Without it they are named, which is all that is known.
                 $derivations[$meter->fund] = sprintf(
-                    '["fund", your wallet, %s, index] + bump, by %s',
+                    '["fund", %s, %s, %s] + bump, by %s',
+                    $meter->fundAccount === null ? 'your wallet' : $of($meter->fundAccount->reader),
                     $of($state->site->mint),
+                    $meter->fundAccount === null ? 'index' : (string) $meter->fundAccount->index,
                     $of($program->id),
                 );
                 $derivations[$meter->fundTokenAccount] = $ata(
@@ -826,10 +839,12 @@ final class Inspector
     }
 
     /**
-     * You, on chain: the meter this browser holds and the fund it draws on.
+     * The meter this browser holds, and the fund it draws on: two sections
+     * since 2026-10-02, because they are two accounts with two owners. The
+     * meter is this site's count against one fund. The fund is the reader's,
+     * and other sites may meter on it too.
      *
-     * **The expiry and the key are the rows that matter here**, as the
-     * delegate was before them. The key says which browser the meter answers
+     * **The expiry and the key are the rows that matter here**. The key says which browser the meter answers
      * to, and a renewal from another device changes it. The expiry bounds
      * what a meter left on a machine can cost, whatever happens to the
      * machine (SPEC §5.5). The balance is the fund's token account's, read on
@@ -838,7 +853,7 @@ final class Inspector
      * @param callable(int): string $amount both unit forms, at the mint's own decimals
      * @param array<string, array{alias: string, derivation: ?string}> $known every address this request can name, for {@see address()}
      *
-     * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>}
+     * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>}>
      */
     private function reader(MeterState $read, callable $amount, array $known, bool $beforeCharge = false): array
     {
@@ -862,9 +877,29 @@ final class Inspector
             $rows[] = ['used', $amount($meter->used)];
             $rows[] = ['paid', $amount($meter->paid)];
             $rows[] = ['unpaid', $amount($meter->unpaid())];
+            $rows[] = ['bump', (string) $meter->bump];
         }
 
-        $rows[] = ['your fund', $this->address($read->fund, $known)];
+        $meterRows = $rows;
+        $rows = [];
+        if ($beforeCharge) {
+            $rows[] = $meterRows[0];
+        }
+
+        // The fund, decoded (SPEC §9.2). `meters` counts the meters open on
+        // it across every site, which is the one figure here that is not
+        // about this site.
+        $rows[] = ['your fund', $this->address($read->fund, $known, $read->fundAccount !== null)];
+        if ($read->fundAccount !== null) {
+            $fund = $read->fundAccount;
+            $rows[] = ['reader', $this->address($fund->reader, $known)];
+            $rows[] = ['mint', $this->address($fund->mint, $known)];
+            $rows[] = ['index', (string) $fund->index];
+            $rows[] = ['meters open', sprintf('%d, across every site that meters on this fund', $fund->meters)];
+            $rows[] = ['bump', (string) $fund->bump];
+        } else {
+            $rows[] = ['fund account', 'not found — it has been closed, or was never opened'];
+        }
         $rows[] = [
             "the fund's token account",
             $this->address(
@@ -881,8 +916,8 @@ final class Inspector
             : ['balance', $amount($read->funds->amount)];
 
         return [
-            'heading' => 'You, on chain',
-            'rows' => $rows,
+            ['heading' => 'Your meter, on chain', 'rows' => $meterRows],
+            ['heading' => 'Your fund, on chain', 'rows' => $rows],
         ];
     }
 

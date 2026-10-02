@@ -6,6 +6,7 @@ namespace Newsprint\Chain;
 
 use Newsprint\Auth\Binding;
 use SolPay\Core\Blocked;
+use SolPay\Core\Fund;
 use SolPay\Core\Meter;
 use SolPay\Core\Preflight;
 use SolPay\Core\Shortfall;
@@ -35,6 +36,8 @@ final class MeterState
         public readonly ?TokenAccount $funds,
         private readonly Site $site,
         public readonly int $decimals,
+        /** The fund account, decoded. Nothing decides by it; the inspector shows it. */
+        public readonly ?Fund $fundAccount = null,
     ) {
     }
 

@@ -72,7 +72,7 @@ final class RequestReadTest extends TestCase
         $config = $this->provisioned();
         $binding = $this->binding();
 
-        [$meter, $tokenAccount] = $this->meterReader($config)->addresses($binding);
+        [$meter, $tokenAccount, $fund] = $this->meterReader($config)->addresses($binding);
 
         self::assertSame($binding->meter, $meter, 'the session names the meter');
         self::assertSame(
@@ -80,13 +80,14 @@ final class RequestReadTest extends TestCase
             $tokenAccount,
             'the token account is the fund\'s, in the mint setup recorded',
         );
+        self::assertSame($binding->fund, $fund, 'and the fund itself, which the inspector decodes');
     }
 
     /**
      * And the order the two readers' slices go in, because
      * {@see RequestRead} splits the response by counting.
      */
-    public function testTheBatchIsTheSitesThreeThenTheMetersTwo(): void
+    public function testTheBatchIsTheSitesThreeThenTheMetersThree(): void
     {
         $config = $this->provisioned();
 
@@ -94,7 +95,7 @@ final class RequestReadTest extends TestCase
         $meter = $this->meterReader($config)->addresses($this->binding());
 
         self::assertSame([self::SITE, self::TREASURY, self::MINT], $site);
-        self::assertCount(5, [...$site, ...$meter]);
+        self::assertCount(6, [...$site, ...$meter], 'one call carries all six');
     }
 
     /**

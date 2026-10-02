@@ -689,6 +689,14 @@ floor. A deposit alone is a valid transaction and touches no meter. So
 same pending setup and the same route, composing the transfer and nothing
 else.
 
+**After a renewal or a deposit, *continue* returns the reader to the article
+they came from**, decided 2026-10-02. A reader reaches `manage_meter` from an
+article that would not charge, and the article is where they were going. The
+page keeps that article's path for the tab, in `sessionStorage`, and only when
+the reader arrived from one of this site's own articles. The server is not
+told, and nothing else can be made a destination. A reader who came to
+`manage_meter` any other way stays on it.
+
 ### 6.5 Mobile
 
 Mobile needs no path of its own under the fund design. The page holds no
@@ -963,8 +971,11 @@ account, not from the server's memory.*
 the reader's path works. Until then it keeps the principles below and shows
 only what still holds. The sections it keeps, in order from what changes to
 what does not: *The values, in full*; *Preflight, for this request*; *The last
-transaction*, on a request that made one; *You, on chain*, which is the meter
-and the fund; *Treasury*; *Site account, decoded*; *Deployment*.
+transaction*, on a request that made one; *Your meter, on chain*; *Your fund,
+on chain*; *Treasury*; *Site account, decoded*; *Deployment*. The meter and
+the fund are two sections, decided 2026-10-02, because they are two accounts:
+the meter is this site's count, and the fund is the reader's, which other
+sites may meter on too.
 *Configuration drift* appears only when the chain and `config/site.php`
 disagree, placed beside the account it disagrees with.
 
@@ -1422,11 +1433,31 @@ the endpoint, so these hold on devnet. The times do not, and are not given.
 `POST /pay/{id}` was not driven directly: its count is the development
 wallet's five (`POST /pay/{id}/development`) less the send and the status.
 
+**The times, on devnet**, from the author's machine on 2026-10-02, the same
+build with `NEWSPRINT_RPC_TIMING=1`. Across 85 calls the median was 473 ms,
+and every method's median was within 3 ms of it, so a request costs about
+half a second per call whatever the call is. Three calls ran long: 1.5 s,
+3.1 s and 11.5 s.
+
+| request | calls | time |
+| --- | --- | --- |
+| `POST /a/{slug}`, the charge | 4 | 2.0 s to 2.1 s, five of six. One took 4.6 s |
+| `POST /a/{slug}/confirm` | 4 | 3.9 s to 4.2 s, of which 1.9 s to 2.1 s is the endpoint |
+| `POST /meter/advance` | 7 | 5.5 s. One took 16.6 s, on the 11.5 s call |
+| a charge refused at the limit | 2 | 1.0 s |
+| `GET /meter` | 1 | 0.5 s |
+
+On devnet the status is asked for twice where the stand-in answered at the
+first ask, so the confirm and the advance each make one call more than the
+table above. The other two seconds of the confirm are the wait between asks
+(§7.3), not the endpoint.
+
 **Five of these read the accounts twice**, where the delegate design's charge
 read them once: the charge, the advance, the close's prepare, *continue* and a
 renewal's start. In the charge and the advance the second read is the one taken
 inside the meter's lock (§7.2), which is the read the decision rests on. Whether
-the first can be dropped is open. Each is about half a second on devnet.
+the first can be dropped is open. Each costs 473 ms at the median: a quarter
+of the charge, and half of the refusal at the limit.
 
 ### 12.5 Session, grant, nonce and lock store: SQLite
 

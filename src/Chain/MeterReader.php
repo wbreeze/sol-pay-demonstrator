@@ -7,6 +7,7 @@ namespace Newsprint\Chain;
 use Newsprint\Auth\Binding;
 use Newsprint\Support\Config;
 use SolPay\Core\DecodeException;
+use SolPay\Core\Fund;
 use SolPay\Core\Meter;
 use SolPay\Core\Pda;
 use SolPay\Core\TokenAccount;
@@ -57,6 +58,10 @@ final class MeterReader
                 $this->config->provisioned()['mint'],
                 $this->config->program()->tokenProgram,
             ),
+            // The fund itself, for the inspector (SPEC §9.2): its reader, its
+            // index and how many meters are open on it. A third address in
+            // the same call, so it costs no round trip.
+            $binding->fund,
         ];
     }
 
@@ -76,6 +81,7 @@ final class MeterReader
             funds: ($accounts[1] ?? null) === null ? null : TokenAccount::decode($accounts[1]['data']),
             site: $state->site,
             decimals: $state->mintDecimals ?? (int) $this->config->siteParams()['decimals'],
+            fundAccount: ($accounts[2] ?? null) === null ? null : Fund::decode($accounts[2]['data']),
         );
     }
 }

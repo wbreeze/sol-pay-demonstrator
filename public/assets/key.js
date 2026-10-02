@@ -189,6 +189,8 @@ async function close(button) {
       // The meter is gone, so everything that acted on it goes: the close
       // button, and the renew and deposit forms with any scan they started.
       pending = null;
+      forgetCameFrom();
+      offerBack();
       document.querySelectorAll('[data-close-controls]').forEach((controls) => { controls.hidden = true; });
       return;
     }
@@ -284,7 +286,16 @@ async function proceed(button) {
     const { status: code, body } = await post('/meter/setup/continue', payload);
     if (body.ok) {
       if (body.meter) await write('meter', body.meter);
-      location.reload();
+      // A reader who came to the meter page from an article was on the way
+      // to that article. Renewing or adding to the fund was the interruption,
+      // so *continue* takes them back to it. Anywhere else, the page reloads.
+      const back = cameFrom();
+      if (back) {
+        forgetCameFrom();
+        location.assign(back);
+      } else {
+        location.reload();
+      }
       return;
     }
     say(status, body.message || `Not yet (${code}).`);
@@ -295,11 +306,70 @@ async function proceed(button) {
   }
 }
 
+// ---- where the reader was going ------------------------------------------
+
+/**
+ * The article a reader left to reach the meter page, kept for this tab only.
+ * A blocked article sends the reader to `/meter` to renew or to add money, and
+ * the article is where they were going. Only this site's own article paths are
+ * kept, so nothing else can be made a destination.
+ */
+const BACK = 'newsprint:back';
+const ARTICLE = /^\/a\/[a-z0-9-]+$/;
+
+function rememberCameFrom() {
+  if (location.pathname !== '/meter' || !document.referrer) return;
+  try {
+    const from = new URL(document.referrer);
+    if (from.origin !== location.origin) return;
+    if (ARTICLE.test(from.pathname)) {
+      sessionStorage.setItem(BACK, from.pathname);
+    } else if (from.pathname !== '/meter') {
+      // Arrived from somewhere that is not an article, so an article kept
+      // from an earlier visit is no longer where the reader was going. A
+      // reload of this page keeps what it had.
+      sessionStorage.removeItem(BACK);
+    }
+  } catch {
+    // No referrer worth reading, or no storage: the page reloads as before.
+  }
+}
+
+function cameFrom() {
+  if (location.pathname !== '/meter') return null;
+  try {
+    const kept = sessionStorage.getItem(BACK);
+    return kept && ARTICLE.test(kept) ? kept : null;
+  } catch {
+    return null;
+  }
+}
+
+function forgetCameFrom() {
+  try {
+    sessionStorage.removeItem(BACK);
+  } catch {
+    // Nothing was kept.
+  }
+}
+
+/** Say where *continue* will lead, and offer the way back without it. */
+function offerBack() {
+  const back = cameFrom();
+  document.querySelectorAll('[data-back]').forEach((offer) => {
+    offer.hidden = back === null;
+    const link = offer.querySelector('a');
+    if (back !== null && link) link.href = back;
+  });
+}
+
 // ---- wiring ---------------------------------------------------------------
 
 function arrive() {
   if (document.prerendering) return;
   bind();
+  rememberCameFrom();
+  offerBack();
   document.querySelectorAll('[data-close-meter], [data-setup-form]').forEach((element) => { element.hidden = false; });
 }
 
