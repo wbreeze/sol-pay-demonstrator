@@ -2,7 +2,7 @@
 title: The first transaction, and the one that counted
 slug: first-transaction
 created: 2026-09-05
-revised: 2026-09-22
+revised: 2026-10-02
 metered: true
 status: published
 lede: >
@@ -151,9 +151,10 @@ could not.
   `meter_and_settle` instruction was built by the PHP client, compiled by
   `SolPay\Tx`, signed by the site authority, and accepted. Unlike setup,
   metering sits on the path every reader takes.
-- **Later that day** a metering call settled, moving 0.15 DEMO from a reader's
-  token account into the site's treasury. The settle carried what the other
-  three could not: a cross-program invocation, a delegate, and a transfer.
+- **Later that day** a metering call settled, moving 0.15 DEMO from a reader
+  into the site's treasury. The settle carried what the other three could not:
+  a cross-program invocation and a transfer of somebody else's money, made on
+  the site's signature alone.
 
 The accepted call and the settled call are different claims. A
 `meter_and_settle` whose unpaid total has not reached the collection threshold
@@ -162,6 +163,12 @@ On 7 September the specification's sentence changed. The client library now
 "builds instructions and the message that carries them, and decodes bytes".
 Every other verb in that section survives unchanged. The library still does not
 sign, send, or learn what happened to a transaction.
+
+The metering program has changed since that settle. A reader's money now sits
+in a fund that the program controls, where in September the site drew on the
+reader's own token account by permission. The encoder did not change. It
+compiles every transaction this site handles today, the setup transaction that
+a reader's wallet signs among them, and every settle since has ridden it.
 
 ## The rule
 
