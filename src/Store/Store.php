@@ -340,9 +340,9 @@ final class Store
      * A nonce goes after five minutes whether or not it was presented, and a
      * pending setup after ten. A pending-close note goes when it expires, or
      * once its meter has no session and no grant left, since the note then
-     * protects nothing.
+     * protects nothing. A faucet source goes after its window (§4.3).
      *
-     * @return array{grants: int, sessions: int, meters: int, nonces: int, setups: int, closes: int}
+     * @return array{grants: int, sessions: int, meters: int, nonces: int, setups: int, closes: int, sources: int}
      */
     public function sweepExpired(): array
     {
@@ -375,6 +375,9 @@ final class Store
         );
         $closes->execute([$now]);
 
+        $sources = $this->pdo->prepare('DELETE FROM faucet_sources WHERE expires_at <= ?');
+        $sources->execute([$now]);
+
         return [
             'grants' => $grants->rowCount(),
             'sessions' => $sessions->rowCount(),
@@ -382,6 +385,7 @@ final class Store
             'nonces' => $nonces->rowCount(),
             'setups' => $setups->rowCount(),
             'closes' => $closes->rowCount(),
+            'sources' => $sources->rowCount(),
         ];
     }
 
@@ -541,6 +545,25 @@ final class Store
         $stmt->execute([$address, $this->now(), $signature]);
 
         return $stmt->rowCount() === 1;
+    }
+
+    /**
+     * §4.3's rate limit per source: how many sends this source has asked for
+     * inside the window. `$source` is a keyed hash of an IP address (`Faucet`),
+     * so this table holds no address a reader could be found by.
+     */
+    public function faucetAttempts(string $source): int
+    {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM faucet_sources WHERE source = ? AND expires_at > ?');
+        $stmt->execute([$source, $this->now()]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    public function recordFaucetAttempt(string $source, int $windowSeconds): void
+    {
+        $stmt = $this->pdo->prepare('INSERT INTO faucet_sources (source, expires_at) VALUES (?, ?)');
+        $stmt->execute([$source, $this->now() + $windowSeconds]);
     }
 
     // ---- §10.4 aggregates ------------------------------------------------

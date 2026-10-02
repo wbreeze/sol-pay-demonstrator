@@ -34,7 +34,7 @@ require $root.'/vendor/autoload.php';
 
 $verbose = false;
 $paths = [];
-foreach (array_slice($argv, 1) as $arg) {
+foreach (array_slice($_SERVER['argv'], 1) as $arg) {
     if ($arg === '--verbose') {
         $verbose = true;
     } elseif (str_starts_with($arg, '-')) {

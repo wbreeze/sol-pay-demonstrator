@@ -126,6 +126,42 @@ final class RouteTest extends TestCase
         self::assertSame('', $development->getHeaderLine('Access-Control-Allow-Origin'));
     }
 
+    /**
+     * SPEC §4.3: the faucet gives something away, and it has no session for
+     * `SameSite=Lax` to protect. A form on another site must not be able to
+     * spend its reserve, so the route asks where the request came from before
+     * it reads anything else.
+     */
+    public function testTheFaucetRefusesAFormOnAnotherSite(): void
+    {
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('POST', 'https://example.test/faucet', ['REMOTE_ADDR' => '203.0.113.7'])
+            ->withHeader('Sec-Fetch-Site', 'cross-site')
+            ->withParsedBody(['address' => '11111111111111111111111111111111']);
+
+        $response = $this->app()->handle($request);
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertStringContainsString('did not come from a page on this site', (string) $response->getBody());
+    }
+
+    /**
+     * `NEWSPRINT_DEV_WALLET=1` turns the development wallet on for a process
+     * without a tracked file carrying a local choice. It can only turn it on.
+     */
+    public function testTheDevelopmentWalletCanBeTurnedOnFromTheEnvironment(): void
+    {
+        $root = dirname(__DIR__, 2);
+        self::assertFalse((bool) (\Newsprint\Support\Config::load($root)->development()['wallet'] ?? false), 'off as committed');
+
+        putenv(\Newsprint\Support\Config::DEV_WALLET_VARIABLE.'=1');
+        try {
+            self::assertTrue(\Newsprint\Support\Config::load($root)->development()['wallet']);
+        } finally {
+            putenv(\Newsprint\Support\Config::DEV_WALLET_VARIABLE);
+        }
+    }
+
     /** @return array<string, mixed> */
     private function health(): array
     {

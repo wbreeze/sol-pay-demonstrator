@@ -121,8 +121,11 @@ final class Database
      * Version 4 (slice 3) rebuilds `pending_setups`, which nothing had written:
      * a setup belongs to the browser key it names, not to a session, since a
      * browser setting up has none yet. *Continue* proves that key (§6.3).
+     *
+     * Version 5 (slice 4) adds `faucet_sources`, the faucet's rate limit per
+     * source (§4.3). `create()` adds it; nothing else changes.
      */
-    public const VERSION = 4;
+    public const VERSION = 5;
 
     public static function migrate(PDO $pdo): void
     {
@@ -145,7 +148,7 @@ final class Database
             $current = (int) $pdo->query('PRAGMA user_version')->fetchColumn();
             if ($current < 2) {
                 self::fromDelegateDesign($pdo);
-            } else {
+            } elseif ($current < 4) {
                 self::addColumn($pdo, 'sessions', 'close_message', 'TEXT');
                 // Empty in every version-2 or -3 file: no route wrote it.
                 $pdo->exec('DROP TABLE IF EXISTS pending_setups');
@@ -280,6 +283,15 @@ final class Database
                 granted_at INTEGER NOT NULL,
                 signature  TEXT
             );
+
+            -- §4.3: the faucet's rate limit per source. `source` is a keyed
+            -- hash of the IP address that asked, never the address itself,
+            -- and a row lives one window (a day) and is then swept.
+            CREATE TABLE IF NOT EXISTS faucet_sources (
+                source     TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS faucet_sources_source ON faucet_sources (source);
 
             -- §10.4's aggregates. Counts, not joins: a fact about the
             -- article. The count must not need the row, which is why it is

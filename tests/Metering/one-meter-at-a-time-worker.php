@@ -37,7 +37,7 @@ require dirname(__DIR__, 2).'/vendor/autoload.php';
 use Newsprint\Store\Database;
 use Newsprint\Store\Store;
 
-[, $db, $meter, $article, $barrier, $workers, $holdUs, $mode] = $argv;
+[, $db, $meter, $article, $barrier, $workers, $holdUs, $mode] = $_SERVER['argv'];
 
 $store = new Store(Database::open($db), static fn (): int => time());
 

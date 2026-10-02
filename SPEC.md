@@ -177,7 +177,7 @@ the fund design kept the `Site` account's layout, and `bin/fund-trials site`
 confirmed on 2026-09-30 that the 0.2.0 client library decodes the existing
 account and that it agrees with `config/site.php`.
 
-### 4.3 The faucet: a fountain for the demo
+### 4.3 The faucet, for the demo only
 
 **No implementation would ship this.** It exists because a demonstration on
 devnet has no exchange to buy from, and it stands in for exactly that step.
@@ -218,11 +218,13 @@ setup, and hundreds of fees besides. The grant under the delegate design was
 
 **Nothing is behind a click.** Before the reader submits the form, the screen
 says which address will receive what, that it is once per address, that none
-of it is worth anything, and that this is the demo's fountain rather than
-anything a real site would offer. A single button sends it.
+of it is worth anything, and that the faucet exists for the demo and is not
+something a real site would offer. A single button sends it.
 
 **One grant per address**, recorded in the faucet ledger, and a rate limit per
-address and per source IP address. The faucet is the only part of this demo
+source IP address: five sends a day, counted whether or not the send lands.
+The limit keeps a keyed hash of the IP address for that day and never the
+address itself (§10.4). The faucet is the only part of this demo
 with an abuse surface worth naming, because it is the only part that gives
 anything away. What it gives away is worthless, so the limit exists to keep
 the faucet key solvent, not to protect an asset.
@@ -492,7 +494,7 @@ meter* ends it.
 ## 6. The reader's path
 
 Six screens. Three are the cyan nodes of sol-pay's state diagram. The other
-three exist because a demonstration needs a front door, a fountain and a
+three exist because a demonstration needs a front door, a faucet and a
 privacy statement.
 
 | screen | reached when | the wallet signs |
@@ -1175,6 +1177,7 @@ it, and let the bound be checked.
 | meter lock row | the meter's address | with the meter's last session and grant, or at the close |
 | pending close | the meter's address, the close's signature | when the close lands and the erasure runs; or when it can no longer land |
 | faucet ledger | an address, and when it was granted | never: see 3 below |
+| faucet sources | a keyed hash of the IP address that asked the faucet to send, and when the row lapses. The key is derived from the faucet's secret, which is not in the database | after a day |
 | request logs | IP address, path, time | a short rotation, never keyed to a meter or a wallet |
 
 Five qualifications. The first four are why the rule is not as strong as it
@@ -1247,7 +1250,7 @@ Stated so that they are not mistaken for oversights:
   demo's own deployment and not for its documentation: §15 owes integrators a
   written answer.
 - **Mainnet, or any real money.**
-- **The faucet as a pattern.** It is a fountain for the demo (§4.3). No real
+- **The faucet as a pattern.** It exists for the demo (§4.3). No real
   site gives coin away from a form, and none should copy it.
 - **Managing funds.** Withdrawing from a fund, closing it, or listing a
   reader's funds is the management page that `wasm-client/SPEC.md` §4.10 sets
@@ -1425,15 +1428,18 @@ instance needs a store that spans them, for the lock and for the nonces.
 on localhost: the key, the proof, metering, renewal, closing the meter. The development
 wallet stands in for the wallet.
 
-- It is a keypair in `var/dev-wallet.json`. Until the faucet form arrives,
-  `bin/dev-wallet fund` sends it what the faucet sends a reader.
+- It is a keypair in `var/dev-wallet.json`, funded from the faucet form like
+  any address. The form shows its address for pasting when it is on. The
+  faucet grants once, so `bin/dev-wallet fund` sends the same amounts again,
+  with no ledger, when the development wallet runs short.
 - Beside the link, the panel offers *sign with the development wallet*. The
   page posts to `POST /pay/{id}/development`. The server records the
   development wallet's account on the pending setup, as `POST /pay/{id}`
   would, composes the identical transaction, then signs it with the
   development wallet and submits it. *Continue* follows as for a phone.
-- It is off unless configured on, and refused unless the request comes from a
-  loopback address and the RPC endpoint is devnet's. It is labelled on screen
+- It is off unless turned on, by `NEWSPRINT_DEV_WALLET=1` in the server's
+  environment or in `config/site.php`, and refused unless the request comes
+  from a loopback address and the RPC endpoint is devnet's. It is labelled on screen
   as the development stand-in it is, and §9's deployment section shows it
   when it is on.
 
@@ -1482,7 +1488,7 @@ a link, in one sitting, with no instructions beyond what the site tells them:
 
 1. Open an article and meet the meter beside the lede.
 2. Follow the panel to the faucet, paste a wallet address, read what is about
-   to happen and that this is the demo's fountain, and see SOL and 0.60 DEMO
+   to happen and that the faucet exists only for the demo, and see SOL and 0.60 DEMO
    arrive.
 3. Back in the panel, choose a limit at or above 0.50, an expiry, a deposit of
    0.50 and fund 0, and scan once. Press *continue*.

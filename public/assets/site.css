@@ -421,6 +421,21 @@ button:hover { filter: brightness(1.1); }
 .meter .qr:empty { display: none; }
 [data-setup-status] { overflow-wrap: anywhere; }
 
+/* §4.3: the faucet's one field is an address, which is long. */
+.faucet label { display: block; font-size: 0.95rem; }
+.faucet input {
+    display: block;
+    width: 100%;
+    max-width: 34rem;
+    margin-top: 0.3rem;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--rule);
+    border-radius: 0.25rem;
+    background: var(--paper);
+    color: var(--ink);
+    font: 0.9rem ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 /* §10.4's receipt: the DELETE, reported rather than asserted. */
 .receipt { margin: 0.75rem 0 1rem; }
 .receipt dt { font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }

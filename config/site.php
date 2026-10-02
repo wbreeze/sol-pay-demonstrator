@@ -78,6 +78,10 @@ return [
         // (SPEC §4.3); 0.05 was thirteen times that.
         'sol_lamports' => 10_000_000, // 0.01 SOL
         'demo_base_units' => 600_000, // 0.60 DEMO
+        // The rate limit per source IP address. It keeps the faucet key
+        // solvent and protects nothing else: what it gives away is worthless.
+        'per_source' => 5,
+        'source_window_s' => 86_400, // a day
     ],
 
     // SPEC §12.0's first run. The operator funds one address and setup moves
@@ -122,7 +126,9 @@ return [
         // SPEC §12.6: a keypair in `var/dev-wallet.json` signs the setup a
         // wallet would sign, so setup runs on localhost with no phone.
         // `bin/dev-wallet` prints its address and funds it from the faucet.
-        'wallet' => true,
+        // Leave this false and run with `NEWSPRINT_DEV_WALLET=1` instead, so
+        // that a tracked file does not carry a local choice.
+        'wallet' => false,
     ],
 
     // SPEC §7.1 and §7.4. Both are policy numbers with no chain meaning.

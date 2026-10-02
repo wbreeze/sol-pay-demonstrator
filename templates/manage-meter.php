@@ -106,7 +106,7 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
             <p><button type="submit" class="wallet">Renew</button></p>
         </form>
 
-        <h2>Add to the fund</h2>
+        <h2 id="add">Add to the fund</h2>
         <p>
             A deposit alone, touching no meter: the limit, the expiry and what
             has been used stay as they are.

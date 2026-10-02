@@ -350,6 +350,46 @@ final class TemplateRenderTest extends TestCase
         self::assertStringContainsString('folds in the 0.14 you are carrying', self::said($html));
     }
 
+    /**
+     * SPEC §4.3: nothing is behind a click. Before the form is submitted the
+     * page says what is sent, that it is once per address, that it is worth
+     * nothing, and that no real site would offer it. The form is a plain POST.
+     */
+    public function testTheFaucetSaysWhatItSendsBeforeItIsAsked(): void
+    {
+        $vars = ['site' => $this->site(), 'demo' => '0.6', 'sol' => '0.01', 'provisioned' => true, 'address' => '', 'result' => null, 'development' => null];
+        $html = $this->renderStrictly('faucet', $vars);
+        $said = self::said($html);
+
+        foreach (['0.6 DEMO', '0.01 SOL', 'Once per address', 'worth nothing', 'No real site would have one'] as $claim) {
+            self::assertStringContainsString($claim, $said, $claim);
+        }
+        self::assertMatchesRegularExpression('/<form method="post" action="\/faucet"/', $html);
+        self::assertMatchesRegularExpression('/<input[^>]*name="address"/', $html);
+        self::assertSame(1, substr_count($html, '<button'), 'a single button sends it');
+        self::assertStringNotContainsString('<script', $html, 'no script: the form is the whole of it');
+        self::assertStringNotContainsString('data-faucet-development', $html);
+
+        $refused = self::said($this->renderStrictly('faucet', ['address' => 'PAYRfig', 'result' => [
+            'granted' => false, 'reason' => 'x', 'message' => 'this wallet has already had its one grant', 'signature' => null,
+        ]] + $vars));
+        self::assertStringContainsString('Nothing was sent: this wallet has already had its one grant.', $refused);
+        self::assertStringContainsString('value="PAYRfig"', $refused, 'what was pasted is still in the field');
+
+        $granted = self::said($this->renderStrictly('faucet', ['address' => 'PAYRfig', 'result' => [
+            'granted' => true, 'reason' => 'confirmed', 'message' => 'confirmed', 'signature' => 'SIGfig',
+        ]] + $vars));
+        self::assertStringContainsString('are on their way to <code>PAYRfig</code>', $granted);
+        self::assertStringContainsString('explorer.solana.com/tx/SIGfig?cluster=devnet', $granted);
+        self::assertStringNotContainsString('<form', $granted, 'once per address, so no second form');
+
+        $development = $this->renderStrictly('faucet', ['development' => 'DEVWfig'] + $vars);
+        self::assertStringContainsString('Development stand-in', $development);
+        self::assertStringContainsString('DEVWfig', $development);
+
+        self::assertStringContainsString('has not been set up yet', self::said($this->renderStrictly('faucet', ['provisioned' => false] + $vars)));
+    }
+
     /** §8.2's `Expired`, which the delegate design never had. */
     public function testAnExpiredMeterSaysWhenItExpired(): void
     {
@@ -606,8 +646,10 @@ final class TemplateRenderTest extends TestCase
                 ]),
                 'site' => $this->site(),
             ]));
-            self::assertStringContainsString('href="/meter"', $html, $stage);
-            self::assertStringContainsString('what you have spent', $html, $stage);
+            // One link each. A short fund's is the offer itself (§8.2): the
+            // answer is money, so the link goes to where money is added.
+            self::assertSame(1, substr_count($html, 'href="/meter'), $stage);
+            self::assertStringContainsString($stage === 'failed' ? 'href="/meter#add">Add to the fund' : 'what you have spent', $html, $stage);
         }
 
         $unreadable = self::said($this->renderStrictly('meter', [

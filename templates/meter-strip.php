@@ -68,7 +68,7 @@ $awaiting = $result->awaiting();
         <?= View::e((string) $solvency['short_demo']) ?> <?= $symbol ?>.
         This is §13.2's walkthrough rather than a fault: the faucet is stingy on
         purpose so that a depleted fund is reachable.
-        <a href="/meter">The meter</a> shows where you stand.
+        <a href="/meter#add">Add to the fund</a> on the meter page.
     </p>
 <?php endif ?>
 <?php elseif ($advanced['outcome'] === MeterOutcome::Blocked && $meter['stage'] === 'expired'): ?>
@@ -217,6 +217,7 @@ $awaiting = $result->awaiting();
         and your fund is short by
         <?= View::e((string) $solvency['short_demo']) ?>.
         It will be refused, and nothing will be charged.
+        <a href="/meter#add">Add to the fund</a> first.
     </p>
 <?php endif ?>
 

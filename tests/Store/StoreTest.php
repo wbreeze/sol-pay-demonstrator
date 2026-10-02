@@ -34,10 +34,35 @@ final class StoreTest extends TestCase
         return new Binding($meter, 'FPDA'.substr($meter, 4), $key);
     }
 
-    /** @return array{grants: int, sessions: int, meters: int, nonces: int, setups: int, closes: int} */
-    private static function swept(int $grants = 0, int $sessions = 0, int $meters = 0, int $nonces = 0, int $setups = 0, int $closes = 0): array
+    /** @return array{grants: int, sessions: int, meters: int, nonces: int, setups: int, closes: int, sources: int} */
+    private static function swept(int $grants = 0, int $sessions = 0, int $meters = 0, int $nonces = 0, int $setups = 0, int $closes = 0, int $sources = 0): array
     {
-        return compact('grants', 'sessions', 'meters', 'nonces', 'setups', 'closes');
+        return compact('grants', 'sessions', 'meters', 'nonces', 'setups', 'closes', 'sources');
+    }
+
+    /**
+     * SPEC §4.3's rate limit per source: attempts are counted inside the
+     * window, per source, and a row is swept once its window has passed.
+     */
+    public function testFaucetAttemptsAreCountedPerSourceAndForgottenAfterTheWindow(): void
+    {
+        $store = $this->store();
+
+        $store->recordFaucetAttempt('source-fig', 86_400);
+        $this->now += 3_600;
+        $store->recordFaucetAttempt('source-fig', 86_400);
+        $store->recordFaucetAttempt('source-cat', 86_400);
+
+        self::assertSame(2, $store->faucetAttempts('source-fig'));
+        self::assertSame(1, $store->faucetAttempts('source-cat'));
+
+        $this->now += 86_400 - 3_600;
+        self::assertSame(1, $store->faucetAttempts('source-fig'), 'the first has left the window');
+        self::assertSame(self::swept(sources: 1), $store->sweepExpired());
+
+        $this->now += 3_600;
+        self::assertSame(0, $store->faucetAttempts('source-fig'));
+        self::assertSame(self::swept(sources: 2), $store->sweepExpired());
     }
 
     public function testASessionHoldsTheMeterItsFundAndTheProvenKey(): void
@@ -365,7 +390,7 @@ final class StoreTest extends TestCase
 
         $tables = $pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")->fetchAll(\PDO::FETCH_COLUMN);
         self::assertSame(
-            ['article_purchases', 'faucet_ledger', 'grants', 'meters', 'nonces', 'pending_closes', 'pending_setups', 'sessions'],
+            ['article_purchases', 'faucet_ledger', 'faucet_sources', 'grants', 'meters', 'nonces', 'pending_closes', 'pending_setups', 'sessions'],
             $tables,
             'the delegate design\'s own tables are gone',
         );

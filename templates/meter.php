@@ -99,6 +99,11 @@ $onChain = $meter['meter'];
             for each later change.
         </p>
         <p><button type="submit" class="wallet">Set up the meter</button></p>
+        <p class="fine">
+            A wallet with no <?= $symbol ?> cannot deposit any.
+            <a href="/faucet">The faucet</a> sends a little, once, to an
+            address you paste.
+        </p>
     </form>
 <?= $view->render('setup-scan', ['development' => $meter['setup']['dev_wallet']]) ?>
     <noscript><p class="pending">Setting up a meter needs JavaScript: the key that the meter names is made and kept by this page's script.</p></noscript>
@@ -116,6 +121,9 @@ $onChain = $meter['meter'];
         <?= $symbol ?> of what this settle would move. The fund holds
         <?= View::e((string) $meter['balance']) ?> <?= $symbol ?>.
     </p>
+    <?php /* §8.2: the answer is money, so the screen offers the way to add
+             it. One link, to where the scan is (`manage_meter`). */ ?>
+    <p><a href="/meter#add">Add to the fund</a> from your wallet, with one scan, then open this article again.</p>
 <?php endif ?>
 <?php $said = Causes::describe($meter['result']?->cause); ?>
 <?php if ($said !== null): ?>
@@ -167,7 +175,8 @@ $onChain = $meter['meter'];
 <?php /* §6 asks manage_meter to carry a permanent link from the meter, not
          only at the limit. Here it renders on every stage that holds a
          session, including `unreadable`, where the chain cannot be read. */ ?>
-<?php if ($onChain !== null || $meter['stage'] === 'unreadable'): ?>
+<?php $offered = $meter['stage'] === 'failed' && ($meter['result']?->shortfall ?? 0) > 0; ?>
+<?php if (!$offered && ($onChain !== null || $meter['stage'] === 'unreadable')): ?>
     <p class="fine">
         <a href="/meter">The meter</a> — what you have spent, and where it stands,
         with the ways to renew it, add to its fund, or close it.

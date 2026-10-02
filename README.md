@@ -178,6 +178,7 @@ cannot keep them honest about what the routes do.
 | `GET /a/{slug}` | the article, or the meter in its place. It cannot charge |
 | `GET /meter` | `manage_meter`: reachable at any time rather than only at the limit (`SPEC.md` §6) |
 | `GET /privacy` | a 301 to `/a/privacy`. `SPEC.md` §10.2 asks that the URL carry the page, not that a second handler render it |
+| `GET /faucet` | the demo's faucet: a form that takes a pasted wallet address (`SPEC.md` §4.3) |
 | `GET /setup` | first run, once per deployment (`SPEC.md` §12.0) |
 
 ### The charging path
@@ -189,12 +190,12 @@ Every one of these is a POST, and each answers with HTML.
 | `POST /a/{slug}` | the page view. The only route that can charge for an article (`SPEC.md` §7) |
 | `POST /a/{slug}/confirm` | what became of that charge, asked on a later request (`SPEC.md` §7.3) |
 | `POST /meter/advance` | seven views in one instruction, so the collection threshold is reached on purpose (`SPEC.md` §7.4) |
+| `POST /faucet` | sends the grant to the pasted address, once per address, and refuses a request that came from another site's page (`SPEC.md` §4.3) |
 | `POST /setup` | runs the provisioner once, and refuses a request that came from another site's page (`SPEC.md` §12.0) |
 
 ### Called by the page's own scripts
 
-The key proof, the key-signed close and the setup scan are the page's. The
-faucet form arrives as the fund design is built (`SPEC.md` §4.3).
+The key proof, the key-signed close and the setup scan are the page's.
 
 | route | what it is | answers with |
 | --- | --- | --- |

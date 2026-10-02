@@ -779,7 +779,7 @@ function fundTrialsArguments(array $argv): array
     return [$positional, $options];
 }
 
-[$positional, $options] = fundTrialsArguments($argv);
+[$positional, $options] = fundTrialsArguments($_SERVER['argv']);
 $command = $positional[0] ?? 'help';
 // Every subcommand but `scan` takes a fund index second; `scan` takes a wallet.
 $index = $command === 'scan' ? 0 : (int) ($positional[1] ?? 0);

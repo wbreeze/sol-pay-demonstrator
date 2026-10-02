@@ -99,20 +99,22 @@ run_tests() {
     vendor/bin/phpunit "$@"
 }
 
-# `register_argc_argv=1` for the analyser alone, measured 2026-10-01. PHPStan
-# counts `$argv` as defined only when `ini_get('register_argc_argv')` is '1',
-# and Homebrew's PHP 8.5 ships it '0' while its CLI still sets `$argv`, so six
-# scripts read as undefined. Turning it on in php.ini instead makes PHP 8.5's
-# built-in server (`bin/run-dev`) log a deprecation on every request, for
-# deriving `$_SERVER['argv']` from the query string. So it is on here, where
-# only the analyser sees it. A changed setting does not invalidate PHPStan's
-# result cache: after one, `clear-result-cache` once.
+# The scripts read `$_SERVER['argv']` and not bare `$argv`, decided 2026-10-02.
+# PHPStan counts `$argv` as defined only when `ini_get('register_argc_argv')`
+# is '1'. Homebrew's PHP 8.5 ships it '0' while its CLI still sets `$argv`, so
+# six scripts read as undefined there and nowhere else. Passing
+# `-d register_argc_argv=1` to the analyser did not hold: the error came back
+# on `bin/build-content`. Turning it on in php.ini makes PHP 8.5's built-in
+# server (`bin/run-dev`) log a deprecation on every request. `$_SERVER['argv']`
+# is set by the CLI whatever the setting, and the analyser has no opinion on
+# it, so the check no longer depends on the machine's ini. A use guarded by
+# `??` was never reported and stays as it is.
 run_analyse() {
     local phar floor neon
     phar="$(phpstan_phar)"
 
     say "phpstan $(phpstan_version)"
-    php -d memory_limit=1G -d register_argc_argv=1 "$phar" analyse --no-progress
+    php -d memory_limit=1G "$phar" analyse --no-progress
 
     floor="$(floor_php_version)"
     neon="var/phpstan-floor.neon"
@@ -121,7 +123,7 @@ run_analyse() {
     printf 'includes:\n  - ../phpstan.neon\nparameters:\n  phpVersion: %s\n' "$floor" > "$neon"
 
     say "phpstan again at the floor (phpVersion ${floor})"
-    php -d memory_limit=1G -d register_argc_argv=1 "$phar" analyse -c "$neon" --no-progress
+    php -d memory_limit=1G "$phar" analyse -c "$neon" --no-progress
 }
 
 run_assets() {

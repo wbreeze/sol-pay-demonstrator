@@ -17,6 +17,7 @@ declare(strict_types=1);
 use Newsprint\Auth\Binding;
 use Newsprint\Auth\KeyProof;
 use Newsprint\Auth\Session;
+use Newsprint\Chain\Faucet;
 use Newsprint\Chain\Keypair;
 use Newsprint\Chain\ProgramEvent;
 use Newsprint\Chain\RequestRead;
@@ -1428,6 +1429,58 @@ $app->post('/meter/setup/continue', function (Request $request, Response $respon
  */
 $app->get('/privacy', function (Request $request, Response $response): Response {
     return $response->withHeader('Location', '/a/privacy')->withStatus(301);
+});
+
+/**
+ * SPEC §4.3: the faucet as a form. The reader pastes an address; the site
+ * signs and sends, because nothing here spends the reader's money. A plain
+ * form and a page in answer, with no script.
+ *
+ * The development wallet's address is shown for pasting when that wallet is on
+ * (§12.6), so that it is funded the way any reader's wallet is.
+ */
+$faucetPage = static function (Request $request, string $address, ?array $result) use ($view, $shell, $config, $siteVars, $reads, $devWallet): string {
+    $amounts = $config->faucet();
+    $development = null;
+    if ($devWallet($request) && $config->isProvisioned()) {
+        $development = Keypair::loadOrCreate($config->keypairPath('dev-wallet'))->address;
+    }
+
+    return $shell('The faucet', $view->render('faucet', [
+        'site' => $siteVars($reads($request)),
+        'demo' => Units::fromBaseUnits((int) $amounts['demo_base_units'], (int) $config->siteParams()['decimals']),
+        'sol' => Units::fromBaseUnits((int) $amounts['sol_lamports'], 9),
+        'provisioned' => $config->isProvisioned(),
+        'address' => $address,
+        'result' => $result,
+        'development' => $development,
+    ]), $reads($request));
+};
+
+$app->get('/faucet', function (Request $request, Response $response) use ($page, $faucetPage): Response {
+    return $page($response, $faucetPage($request, '', null));
+});
+
+$app->post('/faucet', function (Request $request, Response $response) use ($page, $faucetPage, $config, $rpcFactory, $store): Response {
+    $address = trim((string) (((array) $request->getParsedBody())['address'] ?? ''));
+
+    // No session exists for `SameSite=Lax` to be absent from, so this route
+    // asks where the request came from, as `/setup` does. A form on another
+    // site must not be able to spend the faucet's reserve.
+    if (!SameOrigin::allows($request)) {
+        $said = 'this request did not come from a page on this site';
+
+        return $page($response, $faucetPage($request, $address, ['granted' => false, 'reason' => $said, 'message' => $said, 'signature' => null]), 403);
+    }
+    if (!$config->isProvisioned()) {
+        return $page($response, $faucetPage($request, $address, null), 409);
+    }
+
+    $rpc = $rpcFactory();
+    $result = (new Faucet($config, Submitter::fromConfig($rpc, $config), $store()))
+        ->grant($address, (string) ($request->getServerParams()['REMOTE_ADDR'] ?? ''));
+
+    return $page($response, $faucetPage($request, $address, $result), $result['granted'] ? 200 : 422);
 });
 
 /**

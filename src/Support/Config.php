@@ -17,6 +17,8 @@ use SolPay\Core\Program;
  */
 final class Config
 {
+    public const DEV_WALLET_VARIABLE = 'NEWSPRINT_DEV_WALLET';
+
     /**
      * @param array<string, mixed> $static
      * @param array<string, string>|null $provisioned
@@ -104,7 +106,16 @@ final class Config
      */
     public function development(): array
     {
-        return $this->static['development'] ?? [];
+        $configured = $this->static['development'] ?? [];
+        // `NEWSPRINT_DEV_WALLET=1` turns the development wallet on for one
+        // process, as `NEWSPRINT_RPC_TIMING` does for timing. It can only
+        // turn it on, and the route's own checks (loopback, devnet) still
+        // apply (SPEC §12.6).
+        if (getenv(self::DEV_WALLET_VARIABLE) === '1') {
+            $configured['wallet'] = true;
+        }
+
+        return $configured;
     }
 
     /** @return array<string, int> */

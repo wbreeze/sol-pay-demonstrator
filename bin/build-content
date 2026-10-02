@@ -47,7 +47,7 @@ if (!class_exists(\Symfony\Component\Yaml\Yaml::class)) {
 $root = dirname(__DIR__);
 $source = (string) (getenv('NEWSPRINT_CONTENT_SOURCE') ?: $root.'/content');
 $target = (string) (getenv('NEWSPRINT_CONTENT_TARGET') ?: $root.'/var/content');
-$quiet = in_array('--quiet', $argv, true);
+$quiet = in_array('--quiet', $_SERVER['argv'], true);
 
 if (!is_dir($target) && !mkdir($target, 0o755, true) && !is_dir($target)) {
     fwrite(STDERR, "cannot create {$target}\n");

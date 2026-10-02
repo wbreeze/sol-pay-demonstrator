@@ -25,10 +25,8 @@ use SolPay\Core\Ids;
  * read the class as text, because what failed was an agreement between files,
  * and no test that exercises one alone would have noticed.
  *
- * **The route half is away until the faucet form returns** (slice 4 of the
- * fund design). `POST /faucet` sent to the session's wallet, and a session
- * under the fund design holds a meter, not a wallet. The check that the route
- * answers with a `message` comes back with the route.
+ * The route is a plain form since slice 4 of the fund design, and its page
+ * prints `message` (`FaucetTest`, `TemplateRenderTest`).
  */
 final class FaucetMessageTest extends TestCase
 {
@@ -37,11 +35,11 @@ final class FaucetMessageTest extends TestCase
     {
         $source = (string) file_get_contents(dirname(__DIR__, 2).'/src/Chain/Faucet.php');
 
-        // Every return from grant() — three of them — names both fields.
+        // Every return from grant() — six of them — names both fields.
         preg_match_all('/return \[[^;]*?\];/s', $source, $returns);
         $arrays = array_filter($returns[0], static fn (string $r): bool => str_contains($r, "'granted' =>"));
 
-        self::assertCount(3, $arrays, 'grant() has three exits: spent, failed, granted');
+        self::assertCount(6, $arrays, 'grant() has six exits: not an address, spent, rate limited, unreachable, failed, granted');
         foreach ($arrays as $return) {
             self::assertStringContainsString("'reason' =>", $return, 'what the chain said');
             self::assertStringContainsString("'message' =>", $return, 'what a reader is told');

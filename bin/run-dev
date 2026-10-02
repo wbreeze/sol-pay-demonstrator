@@ -8,6 +8,7 @@
 #   NEWSPRINT_RPC_TIMING=1 bin/run-dev
 #   NEWSPRINT_CHARGE_FAULT=fail-after-serving bin/run-dev
 #   NEWSPRINT_CHARGE_FAULT=never-land bin/run-dev
+#   NEWSPRINT_DEV_WALLET=1 bin/run-dev
 #
 # Two choices here are deliberate, and both are easy to undo by accident.
 #
@@ -50,6 +51,10 @@
 #   dropped. Devnet only: against any other endpoint, or with a value it does
 #   not know, the site refuses to run. The inspector's first section says when
 #   it is on. See `src/Chain/ChargeFault.php`.
+# - `NEWSPRINT_DEV_WALLET=1` turns the development wallet on (SPEC §12.6): a
+#   keypair in `var/dev-wallet.json` signs a setup in place of a phone. It is
+#   still refused unless the request is from this machine and the endpoint is
+#   devnet's. The inspector's first section says when it is on.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -70,7 +75,9 @@ echo "Newsprint on http://localhost:${PORT}/ — ${PHP_CLI_SERVER_WORKERS} worke
 # miss.
 timing=off
 [ "${NEWSPRINT_RPC_TIMING:-}" = 1 ] && timing=on
-echo "RPC timing headers: ${timing} · charge fault: ${NEWSPRINT_CHARGE_FAULT:-none}"
+wallet=off
+[ "${NEWSPRINT_DEV_WALLET:-}" = 1 ] && wallet=on
+echo "RPC timing headers: ${timing} · charge fault: ${NEWSPRINT_CHARGE_FAULT:-none} · development wallet: ${wallet}"
 echo
 
 php -S "localhost:${PORT}" -t public bin/dev-router.php

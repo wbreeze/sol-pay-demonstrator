@@ -43,7 +43,7 @@ require __DIR__.'/../vendor/autoload.php';
 use Newsprint\Content\DateAudit;
 
 $root = dirname(__DIR__);
-$requireGit = in_array('--require-git', $argv, true);
+$requireGit = in_array('--require-git', $_SERVER['argv'], true);
 
 /** @return array{0: int, 1: string} */
 function git(string $root, string ...$args): array

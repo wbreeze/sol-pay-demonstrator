@@ -47,7 +47,7 @@ $rpc = new Rpc(
     (int) $config->rpc()['http_timeout_s'],
 );
 
-$wantAirdrop = in_array('--airdrop', $argv, true);
+$wantAirdrop = in_array('--airdrop', $_SERVER['argv'], true);
 
 /** The site authority (SPEC §4.4). Generated here on first run and never committed. */
 $authority = Keypair::loadOrCreate($config->keypairPath('authority'));

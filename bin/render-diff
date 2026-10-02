@@ -405,6 +405,12 @@ function fixtures(string $tree): array
     $f['strip-adv-unread-short'] = $strip(['result' => $R::granted(), 'solvency' => $solvency(80000), 'advanced' => $advance($O::Unreadable)]);
 
     // manage_meter, its three stages.
+    $faucet = static fn (array $o = []): array => ['faucet', $o + ['site' => $site, 'demo' => '0.6', 'sol' => '0.01', 'provisioned' => true, 'address' => '', 'result' => null, 'development' => null]];
+    $f['faucet'] = $faucet();
+    $f['faucet-refused'] = $faucet(['address' => $METER, 'result' => ['granted' => false, 'reason' => 'x', 'message' => 'this wallet has already had its one grant', 'signature' => null]]);
+    $f['faucet-granted'] = $faucet(['address' => $METER, 'result' => ['granted' => true, 'reason' => 'confirmed', 'message' => 'confirmed', 'signature' => 'SIGfig']]);
+    $f['faucet-development'] = $faucet(['development' => $METER]);
+
     $manage = static fn (array $o = []): array => ['manage-meter', $o + ['stage' => 'open', 'site' => $site] + $panel()];
     $f['manage-anonymous'] = ['manage-meter', ['stage' => 'anonymous', 'site' => $site]];
     $f['manage-anonymous-ended'] = ['manage-meter', ['stage' => 'anonymous', 'ended' => true, 'site' => $site]];
