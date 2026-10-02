@@ -2,13 +2,15 @@
 title: The error log that keeps a reader's spending
 slug: the-logs
 created: 2026-09-23
+revised: 2026-10-02
 metered: true
 status: published
 lede: >
   A failed charge returns a number, and the number does not say which program
   raised it. The answer is in the transaction logs. The same logs carry the
-  reader's wallet address and spending, so a site that forwards them to an
-  error tracker builds the profile it set out not to keep.
+  reader's meter and spending, one step from the reader's wallet, so a site
+  that forwards them to an error tracker builds the profile it set out not to
+  keep.
 reading_time: 4
 ---
 
@@ -29,10 +31,10 @@ independently:
 
 - `LimitReached` is 6003, from the metering program. The reader has reached
   the limit. The response is to offer renewal or closing.
-- `InsufficientFunds` is 1, from the Token program. The reader's balance, or
-  the approved amount, no longer covers the transfer.
-- `OwnerMismatch` is 4, from the Token program. The site's contract is no
-  longer the delegate on the reader's token account.
+- `Expired` is 6007, from the metering program. The meter's time is up. The
+  response is the same: renewal or closing.
+- `InsufficientFunds` is 1, from the Token program. The reader's fund holds
+  less than the transfer needs. The response is to offer a deposit.
 
 A refusal inside the transfer is reported against the top-level instruction,
 `meter_and_settle`. So the error's instruction index points at the metering
@@ -42,28 +44,36 @@ when the difference matters.
 
 The raising program is in the transaction logs. A node returns them inside its
 reply, in `error.data.logs`, not as a file anywhere. Each program that fails
-leaves a line beginning `Program <address> failed`, and the last such line
-names the one that raised the error. The sol-pay client library's `cause` takes
+leaves a line beginning `Program <address> failed`. An error passes outward
+from the program that raised it through each program that called it, and every
+one of them writes that line with the same code. The first such line names the
+program that raised the error. The lines after it name the callers. The
+sol-pay client library's `cause` takes
 that address and the code and returns one of three things: an error from the
 metering program, an error from the Token program, or an unknown code from a
 named program.
 
 ## What else the logs carry
 
-Transaction logs and the transaction's account list carry the reader's wallet
-address. The metering program's events carry amounts: the page-view count,
-`used`, `paid` and `transferred`, encoded as base64 lines that anyone can
-decode. None of it is secret. All of it is on chain already, readable by
-anyone holding the signature. A fair question follows: if analysis firms can
-mine the ledger, what does a saved log add?
+The logs and the account list of a charge name the reader's meter and the fund
+the meter draws on. They do not name the reader's wallet. The wallet is one
+step away all the same: the fund records the wallet that opened it, and anyone
+can read the fund. The transactions that set a meter up and close it name the
+wallet outright. The metering program's events carry amounts: the page-view
+count, `used`, `paid` and `transferred`, encoded as base64 lines that anyone
+can decode. None of it is secret. All of it is on chain already, readable by
+anyone holding the signature.
 
-The ledger holds a pseudonym: a wallet address. That address stands in for a
-reader without saying who the reader is. Associating the address with a person
-is work. That work is what those firms sell. A log that the site retains or
-shares has the work already done. The site's own session id sits in the same
-record as the wallet address, beside the reader's IP address and the time. The
-site associates a reader it recognizes and a pseudonymous address that the
-ledger keeps forever.
+A fair question follows: if analysis firms can mine the ledger, what does a
+saved log add?
+
+The ledger holds a pseudonym: a meter, and behind the meter a fund and a
+wallet. The pseudonym stands in for a reader without saying who the reader is.
+Associating the pseudonym with a person is work. That work is what those firms
+sell. A log that the site retains or shares has the work already done. The
+site's own session id sits in the same record as the meter, beside the
+reader's IP address and the time. The site associates a reader it recognizes
+and a pseudonym that the ledger keeps forever.
 
 The association, once made, goes wherever the error goes. Shared or retained by
 an error tracker, an application log, an analytics pipeline, or any of the
@@ -101,25 +111,22 @@ Two details make that rule hold:
   instruction's own program.
 
 The inspector shows the decoded cause and a link to the transaction on an
-explorer. The reader who owns the wallet can read the full logs there, where
-the logs belong.
+explorer. The reader can read the full logs there, where the logs belong.
 
-## One code that needs a second read
+## One code, one meaning, and still a read
 
-`InsufficientFunds` stays ambiguous even with the right program attached. The
-Token program returns it for a short balance and for a short approved amount,
-and the two need opposite responses: a short balance needs a top-up, and a
-short approval needs renewal. The client library's `diagnose` settles it with a
-read rather than a guess. The site reads the reader's token account and
-compares the balance and the approved amount with what the transfer needed.
-Both shortfalls can be true at once, and a site should show both, balance
-first, because a renewal the balance cannot cover fixes nothing.
+With the right program attached, `InsufficientFunds` means one thing: the fund
+holds less than the unpaid total the settle tried to move. The answer is
+money. The code does not say how much, and a reader who is told "insufficient
+funds" with no figure cannot act on it. So the site reads the fund's token
+account and compares the balance with what the transfer needed. The screen
+then says how much the fund is short by, and offers the deposit.
 
 ## The rule
 
 **Extract the program and the code, then discard the rest.** Diagnosing a
 failed charge needs two facts from the logs. Keeping the logs keeps everything
-else in them, the wallet address included. A wallet address kept beside a
-session id is the association. The error path is where a careful site is most
+else in them, the reader's meter included. A meter kept beside a session id,
+an IP address and a time is the association. The error path is where a careful site is most
 likely to copy reader data somewhere it never meant to, because nobody reviews
 an error handler for what it remembers.
