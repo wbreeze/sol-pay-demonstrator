@@ -2,142 +2,152 @@
 title: The ID of what's paying
 slug: no-sign-in-page
 created: 2026-09-07
-revised: 2026-09-22
+revised: 2026-10-02
 metered: true
 status: published
 lede: >
   Every site that monetizes itself reaches for the same shape first: prove who
-  you are, then we'll leverage your use. This site was built from a diagram
-  that never asked for that. The shape showed up anyway, because that is the
-  shape of what software does now. What the meter actually needs to know is
-  never a person.
+  you are, then we'll leverage your use. A meter does not need that. What a
+  page view needs to know is which meter it draws on, and whether the browser
+  in front of the site is the one that meter names. Neither is a person.
 reading_time: 6
 ---
 
 *By Douglas Lovell with Claude Opus 5 (Anthropic)*
 
-The original spec for this demonstration and its original construction had a
-sign-in screen.
+This site has no sign-in page. A reader opens an article, meets the meter
+beside the lede, and either sets one up or keeps reading the lede. Nothing
+asks who the reader is.
 
-## The objection
+## The objection to a sign-in page
 
 In the state machine that
 [sol-pay](https://github.com/wbreeze/sol-pay#what-is-here) documents,
-`identified` is a choice, not a screen. A wallet address is known or it is not.
-If not, the next stop is setting a limit using a wallet. A sign-in screen was
-this site's own addition. Its specification even said so in passing — a demo
-"needs a front door and a wallet needs a sign-in" — and nobody had asked
-whether the second half of that was true.
+`identified` is a choice, not a screen. A browser holds a meter or it does
+not. If not, the next stop is setting one up. A sign-in screen would be an
+addition, and the objection to adding one is a single sentence: *a sign-in
+page feels like identifying for tracking.*
 
-The objection was one sentence: *a sign-in page feels like identifying for
-tracking.*
-
-Which it is. That is what the sign-in page did. It collected an identity and
-did nothing else.  That this site's version of "sign-in" held one address, a
-session id and nothing more was not evident.  A reader who has spent twenty
-years being asked to sign in before anything happens has very different
-expectations about what that arrangement means.  The experience said:
-*you have been identified.* The solution: no sign-in page.
+The objection holds even when the site behind the page keeps almost nothing. A
+reader who has spent twenty years being asked to sign in before anything
+happens has firm expectations about what that arrangement means. The page
+says: *you have been identified.* This site keeps one row and a cookie. A
+screen whose only job is to collect an identity has no way to show a reader
+that restraint.
 
 ## Who is granting what to whom
 
-The sign-in shape gets one thing backwards, and it is the thing that matters. A
-sign-in admits a reader to a site, on the site's terms. What happens at this
-meter is the reverse. The reader is about to grant the site something: a
-scope, in tokens, that the reader chooses and that the site cannot exceed. The
-site is the party being held to a limit. The reader can raise it, let it run
-out, or revoke it. The site has no say in any of that.
+The sign-in shape gets backwards the thing that matters most. A sign-in admits
+a reader to a site, on the site's terms. What happens at this meter is the
+reverse. The reader is about to grant the site something: a limit, in tokens,
+and an expiry. The reader chooses both, and the site cannot exceed either. The
+site is the party being held to a limit. The reader can raise the limit, let
+the meter expire, or close it. The site has no say in any of that.
 
-Seen that way, "who are you" is the wrong question for the site to be asking.
-The only thing it needs to know is which grant it is drawing on. The address
-that signed the grant is the whole answer. The sol-pay client library drew that
-line on its first day: *who is this visitor* is a site's own affair, and the
-payment core wants exactly one input, a wallet address: not a person. Not a
-session with a name attached. An address that can sign, and that already has a
-balance.
+Seen that way, "who are you" is the wrong question for the site to ask. The
+site needs to know which meter it is drawing on, and nothing about the person
+who opened it. The sol-pay client library draws that line itself: *who is this
+visitor* is a site's own affair, and the library answers one narrow question
+for the site, whether a signature is valid for the key a meter names.
 
-The revised experience moved identification of the wallet into the meter
-panel, one click before the grant, on the same screen as the price. A reader
-who declines has lost nothing and is still reading the lede. A reader who
-continues sees, in the same breath, what the address is for and what it will be
-allowed to spend.
+So the identifying happens inside the meter panel, on the same screen as the
+price. A reader who declines has lost nothing and is still reading the lede. A
+reader who continues sees, in the same place, what the limit is and what the
+site will be allowed to take.
 
-## A token, not an account
+## A key, not an account
 
-A wallet address is a pseudonym — a name nobody chose, that the same person
-tends to keep, and that can be checked without being explained. It is not
-anonymous: exchanges, address reuse, chain analysis and plain timing link
-addresses to people every day, and none of that is this site's doing or this
-site's to promise against. It is not an account either. An account has a
-profile, a history, preferences — things a site keeps about someone across
-visits, on purpose, because that is the product. A verifiable pseudonymous
-token has none of that built in. It proves one thing: that whoever is here
-right now controls the secret key behind the wallet.
+The reader's browser makes a key the first time it sets up a meter. The key
+stays in that browser, and the page's own script cannot read the secret half
+out. The setup transaction writes the public half into the meter. From then
+on the meter answers the site's question itself: the browser that can sign for
+that key is the browser the meter names.
 
-That is also why the wallet still signs something, even with the sign-in screen
-gone.  It would be tempting to skip the signature too. The reader is about to
-sign a transaction on chain. Watch for it and take its signer as the reader.
-This is not sufficient because a landed signature is public. Anyone reading the
-ledger could copy it into this site's form and be handed the session that draws
-on somebody else's grant. The signature is there for the reader's sake as much
-as the site's: it makes sure that nobody but the key holder can spend what the
-key holder authorized. It proves possession and control of a financial
-instrument, not identity.  The difference is at the core of this design.
+The key is made for this site and for nothing else. A browser keeps each
+site's storage apart, so no other site can read the key, use it, or learn that
+it exists. A second site that meters the same reader gets a second key, made
+on that site's own pages, and the two keys have nothing in common. The key
+cannot follow a browser from one site to another, because the key was never
+the browser's. It belongs to one meter on one site.
 
-Everything else follows from the address. The contract is derived from the site
-and the payer rather than looked up, so a reader who comes back tomorrow with a
-fresh session lands on the same grant with nothing remembered in between.
+Within this site the key is a pseudonym. Nobody chose it, the same browser
+keeps it, and it can be checked without being explained. The key is not an
+account. An account has a profile, a history, preferences, all things a site
+keeps about someone across visits, on purpose, because that is the product. A
+key proves one thing, that the browser here right now holds the secret half.
 
-## The whole of making the relation
+The browser still has to prove that, and the reason is that everything else
+about a meter is public. Every meter is on the chain for anyone to read. A
+site that took a browser's word for which meter it holds would hand any
+visitor a session that draws on somebody else's fund. So the site issues a
+random number, the browser signs it with the key, and the site checks the
+signature against the key the meter names. The site forgets the number at
+first use, so a copied proof is worth nothing. The proof shows possession of a
+key. It says nothing about identity, and that difference is the core of this
+design.
 
-The whole of making the relation is not one, but two wallet interactions on a
-first visit. The first proves control of the address. The second grants the
-scope. No wallet does both in a single prompt. The two interactions sit behind
-two clicks rather than one because a wallet interaction has to originate from a
-real user gesture.  After the first wait for a wallet response initiated by a
-click gesture, any second wallet call is outside of that gesture. On
-Android that is a blocked navigation, not a warning. One wallet interaction per
-click is also the more honest experience: proving control and granting scope
-are not the same act.
+A publisher that already has accounts would record the meter on the account
+row. Nothing else here would change.
 
-## Postscript: the same mistake, one screen up
+## One wallet gesture
 
-Our development work eliminated the sign-in screen in one revision. It left a
-prompt in the masthead that could have gone at the same time. It did not.
+The wallet appears once. It signs one transaction that opens the reader's
+fund, moves coin into it, and opens this site's meter on it, naming the key
+the browser made. After that, reading does not require the wallet. A charge is
+signed by the site, against the meter, within the limit the reader set.
 
-Across the top of every page, under the wordmark, the site had been saying
-`signed in as 4xkQ…9fT`, with a link to sign out beside it. The objection that
-killed the sign-in screen applies to a name and an exit repeated on every page
-at least as well: that is what an account looks like, and an account is assumed
-to have contents. Nobody had argued for the masthead either. It arrived as a
-convention — sites that have sign-in have a signed-in indicator — and a
-convention is never asked to justify itself.
+A reader who comes back tomorrow needs no wallet either. The browser still
+holds its key and knows which meter is its own. The browser proves the key,
+and the site binds a fresh session to the same meter, with nothing remembered
+in between.
 
-It also had a bug, and the bug was the same fact seen from underneath. Closing
-a contract erases the session. The meter reports that erasure in place,
-rather than reloading, so a reader can watch the deletion happen. The masthead
-had already rendered before any of that and went on saying *signed in as* to a
-reader the site had just finished forgetting. One fact displayed in two
-places. Only one of them reflected the change.
+## What the site does learn about the wallet
 
-The address now appears exactly once, where it does work: on the meter, beside
-what it is allowed to spend, next to a control that offers to forget it. The
-vocabulary in use followed the change in focus — *Signed in* and *signed out*
-name a relationship this site does not have. Instead, the screens say the paying
-wallet is **stored**, or **forgotten**.  That is a token kept or let go, not a
-person let in or shown the door.
+The page never tells the site which wallet the reader holds. The site still
+meets the wallet's public key in two places, and an implementer should know
+both.
+
+The wallet gives its public key when it asks the site for the setup
+transaction, because the site has to compose the transaction for that wallet.
+This site keeps the public key until the reader continues, ten minutes at
+most, and then erases it.
+
+The chain keeps it for good. A fund names the wallet that opened it, and a
+meter names its fund, so anyone who reads the meter can read the wallet. Two
+sites that meter on the same fund can see that they share a reader. That link
+is a property of a public ledger and of one fund used twice, not of the
+browser's key and not of this site. A reader who wants two sites kept apart
+opens a second fund. This site reads the wallet from the fund only to show it
+back to the reader, in the inspector, as one more value that came from an
+account.
+
+## Where the meter shows
+
+A name and a way out, repeated at the top of every page, is the furniture of
+an account. It invites a reader to assume the account has contents. What
+exists here is a cookie, a row naming one meter, and a meter on a public
+chain.
+
+So the meter shows in one place, where it does work: on the meter page, beside
+what it has spent and what it may still spend, next to the control that closes
+it. Closing the meter is how a reader makes the site forget them. The browser
+signs the close with its key, the site erases its row, and the browser deletes
+the key.
+
+The words follow from that. The screens do not say *signed in* or *signed
+out*. Those words name a relationship this site does not have. The screens say
+this browser holds a meter for this site, and *close this meter* ends it.
 
 ## The rule
 
 Software defaults to identifying people, even when the transaction in front of
-it does not need one. The default is not a technical requirement. It is the
-shape twenty years of login screens have trained every builder to reach for
-first — here, on a diagram that never asked for it, for a site whose whole
-point is that the reader is the one setting terms.
+it does not need a person. The default is not a technical requirement. It is
+the shape twenty years of login screens have trained every builder to reach
+for first.
 
-What replaced it was not less than identification. It was narrower: a token,
+What replaces it is not less than identification. It is narrower: a key,
 proved by a signature, standing for *what* is paying rather than *who* is
-paying.  [Privacy](/privacy) makes the fuller case for why that narrowness is
-worth keeping on purpose. Here it is the smaller claim: asked what a page view
-needs to know about its reader, the honest answer was never a person. It was an
-address that can sign, and a limit that address chose.
+paying. [Privacy](/privacy) makes the fuller case for why that narrowness is
+worth keeping on purpose. Here the claim is smaller. Asked what a page view
+needs to know about its reader, the honest answer was never a person. It was a
+key that a meter names, and a limit the reader chose.
