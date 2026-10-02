@@ -393,6 +393,34 @@ button:hover { filter: brightness(1.1); }
 .meter [data-wallet-choices] { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
 .meter [data-meter-status][data-kind="error"] { color: var(--accent); font-style: normal; }
 
+/* §6.3: the four answers, then the scan. The expiry's guidance sits under
+   each choice, because the choice is about whose device this is. */
+.meter .setup { margin: 0.75rem 0 0; }
+.meter .setup > .limit { margin: 0.5rem 1.25rem 0.25rem 0; }
+.meter .expiry {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.1rem;
+    margin: 0.75rem 0;
+    padding: 0.5rem 0.75rem 0.75rem;
+    border: 1px solid var(--rule);
+    border-radius: 0.25rem;
+}
+.meter .expiry legend { padding: 0 0.3rem; font-size: 0.95rem; }
+.meter .expiry label { margin-top: 0.35rem; }
+.meter .expiry .fine { padding-left: 1.6rem; }
+.meter .scan { margin: 1rem 0 0; padding-top: 0.75rem; border-top: 1px solid var(--rule); }
+/* Dark on light in both schemes: scanners expect that polarity. */
+.meter .qr svg {
+    display: block;
+    width: min(16rem, 100%);
+    height: auto;
+    margin: 0.5rem 0 0.75rem;
+    background: #fff;
+}
+.meter .qr:empty { display: none; }
+[data-setup-status] { overflow-wrap: anywhere; }
+
 /* §10.4's receipt: the DELETE, reported rather than asserted. */
 .receipt { margin: 0.75rem 0 1rem; }
 .receipt dt { font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }

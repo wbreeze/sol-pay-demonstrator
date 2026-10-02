@@ -38,6 +38,11 @@ use Newsprint\Metering\MeterMiddleware;
 use Newsprint\Metering\MeterClose;
 use Newsprint\Metering\MeterOutcome;
 use Newsprint\Metering\MeterResult;
+use Newsprint\Pay\Composition;
+use Newsprint\Pay\QrCode;
+use Newsprint\Pay\SetupAnswers;
+use Newsprint\Pay\SetupComposer;
+use Newsprint\Pay\SetupRefusal;
 use Newsprint\Setup\Provisioner;
 use Newsprint\Setup\SameOrigin;
 use Newsprint\Setup\Step;
@@ -47,6 +52,7 @@ use Newsprint\Support\Inspector;
 use Newsprint\Support\View;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Psr\Http\Server\RequestHandlerInterface as RequestHandler;
 use Slim\Exception\HttpNotFoundException;
 use Slim\Factory\AppFactory;
 use SolPay\Core\BlockedKind;
@@ -54,6 +60,8 @@ use SolPay\Core\DecodeException;
 use SolPay\Core\Fund;
 use SolPay\Core\Meter as OnChainMeter;
 use SolPay\Core\PayError;
+use SolPay\Core\TokenAccount;
+use SolPay\Core\Tx;
 use SolPay\Core\Units;
 
 require __DIR__.'/../vendor/autoload.php';
@@ -275,23 +283,32 @@ $followUpFactory = static function () use ($config, $rpcFactory, $store): Charge
 };
 
 /**
- * The development stand-in for getting a meter into this browser before setup
- * exists (fund design, slice 2; removed when slice 3's scan lands). The panel
- * shows this browser's public key, `bin/fund-trials hand` renews a trial
- * meter to it, and the page is told the meter's address. The key never
- * leaves the browser, so the affordance moves nothing a reader's setup would
- * not.
+ * SPEC §12.6: the development wallet, a keypair in `var/dev-wallet.json` that
+ * signs the setup a phone's wallet would sign. It does not bypass anything
+ * that protects a reader: the key and the proof are untouched, and the
+ * transaction is the one a wallet would get. What it replaces is the phone.
  *
- * Gated as SPEC §12.6 gates the development wallet: off unless configured on,
- * and refused unless the request comes from a loopback address and the RPC
- * endpoint is devnet's.
+ * Off unless configured on, and refused unless the request comes from a
+ * loopback address and the RPC endpoint is devnet's.
  */
-$devKeyTrial = static function (Request $request) use ($config): bool {
+$devWallet = static function (Request $request) use ($config): bool {
     $remote = (string) ($request->getServerParams()['REMOTE_ADDR'] ?? '');
 
-    return (bool) ($config->development()['key_trial'] ?? false)
+    return (bool) ($config->development()['wallet'] ?? false)
         && in_array($remote, ['127.0.0.1', '::1'], true)
         && str_contains((string) parse_url($config->rpcUrl(), PHP_URL_HOST), 'devnet');
+};
+
+/**
+ * The base of the links a wallet fetches (SPEC §12.3): the configured public
+ * URL, or this request's own origin where there is none. On localhost that
+ * origin is one a phone cannot reach, which is why the development wallet
+ * exists.
+ */
+$publicBase = static function (Request $request) use ($config): string {
+    $uri = $request->getUri();
+
+    return $config->publicUrl() ?? $uri->getScheme().'://'.$uri->getAuthority();
 };
 
 /**
@@ -318,7 +335,7 @@ $readMeter = static function (string $address) use ($rpcFactory): ?OnChainMeter 
  * the preflight can block on, `limit` and `expired`, then `failed` when the
  * chain refused a charge the preflight let through.
  */
-$meterVars = static function (Request $request, ?MeterResult $result = null) use ($reads, $config, $store, $devKeyTrial): array {
+$meterVars = static function (Request $request, ?MeterResult $result = null) use ($reads, $config, $store, $devWallet): array {
     $params = $config->siteParams();
     $read = $reads($request);
     $state = $read->site();
@@ -348,7 +365,15 @@ $meterVars = static function (Request $request, ?MeterResult $result = null) use
         // SPEC §10.4 qualification 3: closing costs the reader the articles
         // they hold, and they are told how many before they click.
         'live_grants' => 0,
-        'dev_key_trial' => $devKeyTrial($request),
+        // SPEC §6.3 step 1: what the panel asks, with its defaults. The
+        // limit's default is the floor, and the deposit's is the minimum
+        // limit, so a first visit reads to the limit without a top-up.
+        'setup' => [
+            'limit' => Units::fromBaseUnits($state?->site->minLimit ?? (int) $params['min_limit'], $decimals),
+            'deposit' => Units::fromBaseUnits($state?->site->minLimit ?? (int) $params['min_limit'], $decimals),
+            'expiries' => array_keys(SetupAnswers::EXPIRIES),
+            'dev_wallet' => $devWallet($request),
+        ],
     ];
 
     if ($read->binding() === null) {
@@ -394,6 +419,8 @@ $meterVars = static function (Request $request, ?MeterResult $result = null) use
 
     $panel['balance'] = Units::fromBaseUnits($meter->balance(), $decimals);
     $panel['limit_floor'] = Units::fromBaseUnits($meter->limitFloor(), $decimals);
+    // A renewal's limit starts at the floor, which carries the residue.
+    $panel['setup']['limit'] = $panel['limit_floor'];
     $panel['meter'] = [
         'address' => $meter->meterAddress,
         'limit' => Units::fromBaseUnits($onChain->limit, $decimals),
@@ -1057,6 +1084,325 @@ $app->post('/meter/close', function (Request $request, Response $response) use (
         'signature' => $outcome->signature,
         'erased' => $erased,
     ]), Session::isSecure($request));
+});
+
+/**
+ * SPEC §6.3's composer for this site, from the `Site` account this request
+ * read, or null when there is no site to compose against.
+ */
+$setupComposer = static function (Request $request) use ($reads, $config): ?SetupComposer {
+    $state = $reads($request)->site();
+    if ($state === null) {
+        return null;
+    }
+
+    return new SetupComposer(
+        $config->program(),
+        $state->address,
+        $state->site,
+        $state->mintDecimals ?? (int) $config->siteParams()['decimals'],
+        (string) $config->siteParams()['symbol'],
+    );
+};
+
+/**
+ * Compose a pending setup for a wallet: one `getMultipleAccounts` for the
+ * fund, the meter and the wallet's token account, then the rules.
+ *
+ * @throws RpcException|DecodeException the chain could not be read
+ */
+$composeFor = static function (Request $request, SetupAnswers $answers, string $account) use ($setupComposer, $rpcFactory): Composition|SetupRefusal|null {
+    $composer = $setupComposer($request);
+    if ($composer === null) {
+        return null;
+    }
+
+    $at = $composer->addresses($account, $answers->index);
+    [$fund, $meter, $holding] = $rpcFactory()->multipleAccounts([$at['fund'], $at['meter'], $at['holding']]);
+
+    return $composer->compose(
+        $answers,
+        $account,
+        $fund === null ? null : Fund::decode($fund['data']),
+        $meter === null ? null : OnChainMeter::decode($meter['data']),
+        $holding === null ? null : TokenAccount::decode($holding['data']),
+        time(),
+    );
+};
+
+/**
+ * SPEC §6.3 step 2: the page posts its key and the panel's answers, and the
+ * server records a pending setup. Three kinds, one route:
+ *
+ * - **a setup** from a browser with no meter: the four answers, the fund index
+ *   among them (§6.4);
+ * - **a renewal** from `manage_meter`: the session knows its fund, so the
+ *   index is read from the fund rather than asked;
+ * - **a deposit**, *add to the fund*: the amount alone (§6.4).
+ *
+ * The answer is the link a wallet fetches, and whether this request may use
+ * the development wallet instead (§12.6).
+ */
+$app->post('/meter/setup', function (Request $request, Response $response) use ($json, $reads, $store, $config, $rpcFactory, $devWallet, $publicBase): Response {
+    $state = $reads($request)->site();
+    if ($state === null) {
+        return $json($response, ['message' => 'this site is not provisioned, or the chain could not be read'], 409);
+    }
+    $decimals = $state->mintDecimals ?? (int) $config->siteParams()['decimals'];
+
+    $body = json_decode((string) $request->getBody(), true);
+    $body = is_array($body) ? $body : [];
+    $kind = (string) ($body['kind'] ?? SetupAnswers::SETUP);
+    try {
+        $deposit = Units::toBaseUnits(trim((string) ($body['deposit'] ?? '0')), $decimals);
+        $limit = Units::toBaseUnits(trim((string) ($body['limit'] ?? '0')), $decimals);
+    } catch (\Throwable) {
+        return $json($response, ['message' => 'that is not an amount'], 400);
+    }
+
+    // A renewal or a deposit belongs to the session's fund, and the fund
+    // records its own index.
+    $fund = null;
+    $index = (int) ($body['index'] ?? 0);
+    if ($kind === 'renew' || $kind === SetupAnswers::DEPOSIT) {
+        $held = $reads($request)->binding();
+        if ($held === null) {
+            return $json($response, ['message' => 'this browser holds no meter here'], 409);
+        }
+        try {
+            $account = $rpcFactory()->multipleAccounts([$held->fund])[0];
+            if ($account === null) {
+                return $json($response, ['message' => 'the fund this meter draws on is not there'], 409);
+            }
+            $index = Fund::decode($account['data'])->index;
+        } catch (RpcException|DecodeException $e) {
+            return $json($response, ['message' => 'the chain could not be read: '.$e->getMessage()], 502);
+        }
+        $fund = $held->fund;
+    }
+
+    $key = (string) ($body['key'] ?? '');
+    $expiry = (string) ($body['expiry'] ?? 'day');
+    if ($kind === SetupAnswers::DEPOSIT) {
+        if ($deposit <= 0) {
+            return $json($response, ['message' => 'add an amount above zero'], 400);
+        }
+        $answers = new SetupAnswers(SetupAnswers::DEPOSIT, $index, $deposit, fund: $fund);
+    } else {
+        if (preg_match('/^[1-9A-HJ-NP-Za-km-z]{32,44}$/', $key) !== 1) {
+            return $json($response, ['message' => 'this browser has no key to name'], 400);
+        }
+        if (!array_key_exists($expiry, SetupAnswers::EXPIRIES)) {
+            return $json($response, ['message' => 'choose an expiry from the list'], 400);
+        }
+        if ($index < 0 || $index > 255) {
+            return $json($response, ['message' => 'a fund index is a number from 0 to 255'], 400);
+        }
+        // The program enforces this and would refuse the transaction, but a
+        // reader should not have to scan to be told a number is too small.
+        // The floor for a renewal also carries the residue, and is checked
+        // again when the wallet asks.
+        if ($limit < $state->site->minLimit) {
+            return $json($response, [
+                'message' => 'the smallest limit you can set is '.Units::fromBaseUnits($state->site->minLimit, $decimals),
+            ], 400);
+        }
+        $answers = new SetupAnswers(SetupAnswers::SETUP, $index, $deposit, $limit, $expiry, $key, $fund);
+    }
+
+    $id = $store()->createPendingSetup($answers, (int) $config->auth()['setup_ttl_s']);
+
+    $link = 'solana:'.$publicBase($request).'/pay/'.$id;
+
+    return $json($response, [
+        'id' => $id,
+        'link' => $link,
+        'qr' => QrCode::svg($link),
+        'development' => $devWallet($request),
+    ])->withHeader('Cache-Control', 'no-store');
+});
+
+/**
+ * SPEC §12.3: a wallet that runs in a browser fetches the transaction request
+ * from another origin, and a JSON POST from there is preflighted. So both
+ * halves answer any origin, refusals included, because a refusal the wallet
+ * cannot read is a spinner, not a sentence. Nothing here reads a cookie, so
+ * an open origin gives nothing away. The page's own routes stay same-origin,
+ * `/pay/{id}/development` among them.
+ */
+$walletOrigin = static function (Request $request, RequestHandler $handler): Response {
+    return $handler->handle($request)
+        ->withHeader('Access-Control-Allow-Origin', '*')
+        ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        ->withHeader('Access-Control-Allow-Headers', 'Content-Type');
+};
+
+$app->options('/pay/{id}', static fn (Request $request, Response $response): Response => $response->withStatus(204))
+    ->add($walletOrigin);
+
+/**
+ * SPEC §12.3: the Solana Pay transaction request, first half. The wallet asks
+ * who is asking, and this site answers with a label and an icon it serves
+ * itself (§10.3). Public, since the wallet carries no cookie.
+ */
+$app->get('/pay/{id}', function (Request $request, Response $response, array $args) use ($json, $store, $publicBase): Response {
+    if ($store()->pendingSetup((string) $args['id']) === null) {
+        return $json($response, ['message' => 'this setup link has expired; start again on the page'], 404);
+    }
+
+    return $json($response, ['label' => 'Newsprint', 'icon' => $publicBase($request).'/favicon.svg']);
+})->add($walletOrigin);
+
+/**
+ * SPEC §12.3, second half: the wallet posts its account, and the server
+ * records it on the pending setup, composes the transaction (§6.3) and returns
+ * it unsigned, with the account as fee payer and a blockhash fetched now.
+ *
+ * A refusal is an error with a sentence and no transaction, checked before the
+ * wallet sees anything.
+ */
+$app->post('/pay/{id}', function (Request $request, Response $response, array $args) use ($json, $store, $rpcFactory, $composeFor): Response {
+    $id = (string) $args['id'];
+    $pending = $store()->pendingSetup($id);
+    if ($pending === null) {
+        return $json($response, ['message' => 'this setup link has expired; start again on the page'], 404);
+    }
+
+    $body = json_decode((string) $request->getBody(), true);
+    $account = is_array($body) ? (string) ($body['account'] ?? '') : '';
+    if (preg_match('/^[1-9A-HJ-NP-Za-km-z]{32,44}$/', $account) !== 1) {
+        return $json($response, ['message' => 'that is not an account'], 400);
+    }
+
+    $store()->recordSetupWallet($id, $account);
+
+    try {
+        $composed = $composeFor($request, $pending['answers'], $account);
+        if (!$composed instanceof Composition) {
+            return $json($response, ['message' => $composed?->message ?? 'this site is not provisioned'], 400);
+        }
+        $message = Tx::compile($composed->instructions, $account, $rpcFactory()->latestBlockhash()['blockhash']);
+    } catch (RpcException|DecodeException $e) {
+        return $json($response, ['message' => 'the chain could not be read: '.$e->getMessage()], 502);
+    }
+
+    // Unsigned: one zeroed slot per required signature, which the wallet
+    // fills. Every instruction here is the account's, so that is one slot.
+    $unsigned = Tx::wire($message, array_fill(0, ord($message[0]), str_repeat("\0", 64)));
+
+    return $json($response, ['transaction' => base64_encode($unsigned), 'message' => $composed->message()])
+        ->withHeader('Cache-Control', 'no-store');
+})->add($walletOrigin);
+
+/**
+ * SPEC §12.6: the development wallet answers the pending setup in place of a
+ * phone. The server composes the identical transaction, for the development
+ * wallet's account, then signs it with that keypair and submits it.
+ * *Continue* follows as for a phone.
+ */
+$app->post('/pay/{id}/development', function (Request $request, Response $response, array $args) use ($json, $store, $config, $rpcFactory, $composeFor, $devWallet): Response {
+    if (!$devWallet($request)) {
+        return $json($response, ['message' => 'the development wallet is off here'], 403);
+    }
+    $id = (string) $args['id'];
+    $pending = $store()->pendingSetup($id);
+    if ($pending === null) {
+        return $json($response, ['message' => 'this setup has expired; start again'], 404);
+    }
+
+    $wallet = Keypair::loadOrCreate($config->keypairPath('dev-wallet'));
+    $store()->recordSetupWallet($id, $wallet->address);
+
+    try {
+        $composed = $composeFor($request, $pending['answers'], $wallet->address);
+    } catch (RpcException|DecodeException $e) {
+        return $json($response, ['message' => 'the chain could not be read: '.$e->getMessage()], 502);
+    }
+    if (!$composed instanceof Composition) {
+        return $json($response, ['message' => $composed?->message ?? 'this site is not provisioned'], 400);
+    }
+
+    $rpc = $rpcFactory();
+    $outcome = Submitter::fromConfig($rpc, $config)->send($composed->instructions, $wallet);
+    if ($outcome->status === SubmitStatus::Failed) {
+        return $json($response, ['message' => 'the setup was refused: '.$outcome->detail], 409);
+    }
+
+    return $json($response, [
+        'ok' => true,
+        'signature' => $outcome->signature,
+        'message' => $composed->message(),
+        'confirmed' => $outcome->status === SubmitStatus::Confirmed,
+    ]);
+});
+
+/**
+ * SPEC §6.3 step 5: the reader presses *continue*. Nothing polls: this is
+ * the one read, on the reader's own gesture.
+ *
+ * For a setup, the page signs a fresh nonce with its key. The server derives
+ * the meter from the recorded wallet and the fund index, reads it once, and
+ * checks the proof against it (§5.2): a meter that is not there yet, or still
+ * names another key, refuses the proof, and the page offers the same control
+ * again. A proof that passes binds the session (§5.3), and the pending setup,
+ * with the wallet's address, is erased.
+ *
+ * For a deposit there is no key to prove; the page reloads and reads the
+ * fund's balance.
+ */
+$app->post('/meter/setup/continue', function (Request $request, Response $response) use ($json, $store, $config, $readMeter, $finishClose, $setupComposer): Response {
+    $body = json_decode((string) $request->getBody(), true);
+    $body = is_array($body) ? $body : [];
+    $id = (string) ($body['id'] ?? '');
+    $pending = $store()->pendingSetup($id);
+    if ($pending === null) {
+        return $json($response, ['message' => 'this setup has expired; start again'], 404);
+    }
+    if ($pending['wallet'] === null) {
+        return $json($response, ['message' => 'no wallet has asked for this setup yet. Scan the code, approve in the wallet, then continue.', 'pending' => true], 409);
+    }
+
+    $answers = $pending['answers'];
+    if ($answers->kind === SetupAnswers::DEPOSIT) {
+        $store()->forgetPendingSetup($id);
+
+        return $json($response, ['ok' => true]);
+    }
+
+    $composer = $setupComposer($request);
+    if ($composer === null) {
+        return $json($response, ['message' => 'this site is not provisioned'], 409);
+    }
+    $meter = $composer->addresses($pending['wallet'], $answers->index)['meter'];
+
+    $signature = base64_decode((string) ($body['signature'] ?? ''), true);
+    $uri = $request->getUri();
+    try {
+        $proven = (new KeyProof($store(), $config->provisioned()['site'], $readMeter))
+            ->check($meter, (string) ($body['nonce'] ?? ''), $uri->getScheme().'://'.$uri->getAuthority(), $signature === false ? '' : $signature);
+    } catch (RpcException|DecodeException $e) {
+        return $json($response, ['message' => 'the meter could not be read: '.$e->getMessage()], 502);
+    }
+
+    // The meter must name the key this setup named. A proof by that key
+    // against a meter that does not exist yet, or still names another key,
+    // is the transaction not having landed.
+    if (!$proven instanceof Binding || $proven->key !== $answers->key) {
+        return $json($response, [
+            'message' => 'the meter is not on chain with this browser\'s key yet. Give the wallet a moment, then continue again.',
+            'pending' => true,
+        ], 409);
+    }
+
+    $finishClose($proven->meter);
+    $old = Session::idFrom($request);
+    if ($old !== null) {
+        $store()->destroySession($old);
+    }
+    $session = $store()->createSession($proven, (int) $config->auth()['session_ttl_s']);
+    $store()->forgetPendingSetup($id);
+
+    return Session::issue($json($response, ['ok' => true, 'meter' => $proven->meter]), $session, Session::isSecure($request));
 });
 
 /**

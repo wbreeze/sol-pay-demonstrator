@@ -1,0 +1,82 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * SPEC §12.6: the development wallet, which signs a pending setup in place of
+ * a phone when `development.wallet` is on.
+ *
+ *   bin/dev-wallet          its address, and what it holds
+ *   bin/dev-wallet fund     SOL and DEMO from the faucet key, then what it holds
+ *
+ * The keypair is `var/dev-wallet.json`, made on first use here or by the
+ * page's development button, whichever comes first. `fund` sends what the
+ * faucet sends a reader, signed by the faucet key, and keeps no ledger, so it
+ * may be run again when the wallet runs short. That is the one way it differs
+ * from SPEC §4.3's faucet, and the reason it is a development tool.
+ *
+ * A setup with the default deposit spends 0.5 DEMO and about 0.004 SOL of
+ * rent, so one `fund` covers one first setup and a little reading.
+ */
+
+use Newsprint\Chain\AssociatedToken;
+use Newsprint\Chain\Keypair;
+use Newsprint\Chain\Rpc;
+use Newsprint\Chain\SubmitStatus;
+use Newsprint\Chain\Submitter;
+use Newsprint\Chain\SystemProgram;
+use Newsprint\Chain\TokenProgram;
+use Newsprint\Support\Causes;
+use Newsprint\Support\Config;
+use SolPay\Core\TokenAccount;
+
+require __DIR__.'/../vendor/autoload.php';
+
+$command = $argv[1] ?? 'show';
+if (!in_array($command, ['show', 'fund'], true)) {
+    $source = (string) file_get_contents(__FILE__);
+    preg_match('/\/\*\*\n(.*?)\*\//s', $source, $match);
+    echo preg_replace('/^ \* ?/m', '', $match[1] ?? '');
+    exit(2);
+}
+
+$config = Config::load(dirname(__DIR__));
+$program = $config->program();
+$rpc = new Rpc(
+    $config->rpcUrl(),
+    $program,
+    (string) $config->rpc()['commitment'],
+    (int) $config->rpc()['http_timeout_s'],
+);
+$mint = $config->provisioned()['mint'];
+$wallet = Keypair::loadOrCreate($config->keypairPath('dev-wallet'));
+$tokenAccount = AssociatedToken::address($wallet->address, $mint, $program->tokenProgram);
+
+// `%F` rather than `%f`: the author's shell is comma-decimal.
+$holds = static function () use ($rpc, $wallet, $tokenAccount): void {
+    $account = $rpc->multipleAccounts([$tokenAccount])[0];
+    $demo = $account === null ? 0 : TokenAccount::decode($account['data'])->amount;
+    printf("holds       %.9F SOL, %.6F DEMO\n", $rpc->balance($wallet->address) / 1_000_000_000, $demo / 1_000_000);
+};
+
+printf("wallet      %s\n", $wallet->address);
+$holds();
+if ($command === 'show') {
+    exit(0);
+}
+
+$faucet = Keypair::load($config->keypairPath('faucet'));
+$amounts = $config->faucet();
+$outcome = Submitter::fromConfig($rpc, $config)->send([
+    SystemProgram::transfer($faucet->address, $wallet->address, (int) $amounts['sol_lamports']),
+    AssociatedToken::createIdempotent($faucet->address, $wallet->address, $mint, $program->tokenProgram),
+    TokenProgram::mintTo($mint, $tokenAccount, $faucet->address, (int) $amounts['demo_base_units'], $program->tokenProgram),
+], $faucet);
+
+if ($outcome->status === SubmitStatus::Failed) {
+    echo 'FAILED      '.(Causes::describe($outcome->cause) ?? $outcome->detail)."\n";
+    exit(1);
+}
+printf("%-11s %s\n", strtoupper($outcome->status->name), (string) $outcome->signature);
+$holds();

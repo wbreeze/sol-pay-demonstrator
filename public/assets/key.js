@@ -13,8 +13,9 @@
  * 2. **Close.** The server compiles `close_meter`; the key signs those bytes;
  *    the server adds the authority's signature and sends. Then the key and the
  *    meter address are deleted here (§5.4).
- * 3. **The development stand-in** (slice 2 only): show this browser's public
- *    key, and take a meter address that `bin/fund-trials hand` renewed to it.
+ * 3. **Set up** (§6.3): post the key and the panel's answers, show the link
+ *    a wallet fetches, and on *continue* prove the key against the meter the
+ *    wallet opened. Renewing and *add to the fund* are the same scan.
  *
  * No library. WebCrypto signs, and the server composes every byte the key
  * signs (§12.2). Listeners are on the document, because a module runs once per
@@ -185,6 +186,9 @@ async function close(button) {
         link.textContent = 'The close on chain';
         status.append(' ', link);
       }
+      // The meter is gone, so everything that acted on it goes: the close
+      // button, and the renew and deposit forms with any scan they started.
+      pending = null;
       document.querySelectorAll('[data-close-controls]').forEach((controls) => { controls.hidden = true; });
       return;
     }
@@ -196,27 +200,99 @@ async function close(button) {
   }
 }
 
-// ---- 3. the development stand-in -----------------------------------------
+// ---- 3. setup ------------------------------------------------------------
 
-async function trial() {
-  const shown = document.querySelector('[data-key-trial-key]');
-  if (!shown || shown.dataset.shown) return;
-  shown.dataset.shown = '1';
-  shown.textContent = await publicKey(await keyPair());
+let pending = null;
+
+function region() {
+  return document.querySelector('[data-setup-scan]');
 }
 
-async function hold(form) {
-  const status = form.querySelector('[data-key-trial-status]');
-  const meter = new FormData(form).get('meter')?.toString().trim();
-  if (!meter) return;
-  await write('meter', meter);
-  say(status, 'Proving this browser\'s key against that meter…');
-  const { status: code, body } = await prove(meter);
-  if (body.ok) {
-    location.reload();
+/** §6.3 step 2: the page's key and the panel's answers; the server answers with the link. */
+async function start(form) {
+  const scan = region();
+  const status = scan?.querySelector('[data-setup-status]');
+  const fields = new FormData(form);
+  const kind = form.dataset.kind;
+  const answers = {
+    kind,
+    limit: fields.get('limit')?.toString() ?? '0',
+    expiry: fields.get('expiry')?.toString() ?? 'day',
+    deposit: fields.get('deposit')?.toString() ?? '0',
+    index: fields.get('index')?.toString() ?? '0',
+  };
+  if (kind !== 'deposit') answers.key = await publicKey(await keyPair());
+
+  const { status: code, body } = await post('/meter/setup', answers);
+  if (!body.id) {
+    // A refused start leaves no scan behind: an earlier link and code would
+    // otherwise still be on the page, answering for a setup that is not this one.
+    pending = null;
+    scan?.querySelectorAll('[data-setup-offer]').forEach((part) => { part.hidden = true; });
+    say(status ?? form, body.message || `The setup could not be started (${code}).`);
+    if (scan) scan.hidden = false;
     return;
   }
-  say(status, body.message || `The proof was refused (${code}).`);
+
+  pending = { id: body.id, kind };
+  scan.querySelectorAll('[data-setup-offer]').forEach((part) => { part.hidden = false; });
+  const link = scan.querySelector('[data-setup-link]');
+  link.href = body.link;
+  scan.querySelector('[data-setup-qr]').innerHTML = body.qr ?? '';
+  scan.hidden = false;
+  say(status, kind === 'deposit'
+    ? 'Approve the deposit in the wallet, then continue.'
+    : 'Approve the transaction in the wallet, then continue.');
+}
+
+/** §12.6: the development wallet signs in place of a phone. */
+async function development(button) {
+  const status = region()?.querySelector('[data-setup-status]');
+  if (!pending) return;
+  button.disabled = true;
+  say(status, 'The development wallet is signing and sending…');
+  try {
+    const { status: code, body } = await post(`/pay/${pending.id}/development`);
+    say(status, body.ok
+      ? `Sent: ${body.message} Now continue.`
+      : (body.message || `The development wallet could not send it (${code}).`));
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/**
+ * §6.3 step 5: one read, on the reader's gesture. For a setup, a fresh nonce
+ * signed by the key; the server binds the session when the meter names it.
+ */
+async function proceed(button) {
+  const status = region()?.querySelector('[data-setup-status]');
+  if (!pending) return;
+  button.disabled = true;
+  try {
+    const payload = { id: pending.id };
+    if (pending.kind !== 'deposit') {
+      const pair = await keyPair();
+      const { body: issued } = await post('/key/nonce');
+      const signed = new Uint8Array([
+        ...new TextEncoder().encode(PREFIX + location.origin),
+        ...fromHex(issued.nonce),
+      ]);
+      payload.nonce = issued.nonce;
+      payload.signature = toBase64(await crypto.subtle.sign('Ed25519', pair.privateKey, signed));
+    }
+    const { status: code, body } = await post('/meter/setup/continue', payload);
+    if (body.ok) {
+      if (body.meter) await write('meter', body.meter);
+      location.reload();
+      return;
+    }
+    say(status, body.message || `Not yet (${code}).`);
+  } catch (error) {
+    say(status, `Continue could not be sent: ${error.message}`);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 // ---- wiring ---------------------------------------------------------------
@@ -224,23 +300,31 @@ async function hold(form) {
 function arrive() {
   if (document.prerendering) return;
   bind();
-  trial();
-  document.querySelectorAll('[data-close-meter]').forEach((button) => { button.hidden = false; });
+  document.querySelectorAll('[data-close-meter], [data-setup-form]').forEach((element) => { element.hidden = false; });
 }
 
 document.addEventListener('click', (event) => {
-  const button = event.target.closest?.('[data-close-meter]');
-  if (button) {
-    event.preventDefault();
-    close(button);
+  const target = event.target;
+  const actions = [
+    ['[data-close-meter]', close],
+    ['[data-setup-development]', development],
+    ['[data-setup-continue]', proceed],
+  ];
+  for (const [selector, act] of actions) {
+    const button = target.closest?.(selector);
+    if (button) {
+      event.preventDefault();
+      act(button);
+      return;
+    }
   }
 });
 
 document.addEventListener('submit', (event) => {
-  const form = event.target.closest?.('[data-key-trial-form]');
+  const form = event.target.closest?.('[data-setup-form]');
   if (form) {
     event.preventDefault();
-    hold(form);
+    start(form);
   }
 });
 

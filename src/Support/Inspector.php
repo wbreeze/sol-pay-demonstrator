@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Newsprint\Support;
 
 use Newsprint\Chain\ChargeFault;
+use Newsprint\Chain\Keypair;
 use Newsprint\Chain\MeterState;
 use Newsprint\Chain\SiteState;
 use Newsprint\Metering\MeterOutcome;
@@ -201,6 +202,19 @@ final class Inspector
             $sections[0]['rows'][] = [
                 'test fault',
                 $fault->value.' — article charges skip the endpoint\'s check ('.ChargeFault::VARIABLE.')',
+            ];
+        }
+
+        // SPEC §12.6: the development wallet is shown when it is on, for the
+        // same reason as the fault above. The request's own loopback check is
+        // the route's; this row says what the configuration allows.
+        if ((bool) ($this->config->development()['wallet'] ?? false)
+            && str_contains((string) parse_url($this->config->rpcUrl(), PHP_URL_HOST), 'devnet')) {
+            $path = $this->config->keypairPath('dev-wallet');
+            $sections[0]['rows'][] = [
+                'development wallet',
+                'on — signs setups in place of a phone, for requests from this machine'
+                    .(is_file($path) ? ' ('.Keypair::load($path)->address.')' : ''),
             ];
         }
 

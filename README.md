@@ -193,8 +193,8 @@ Every one of these is a POST, and each answers with HTML.
 
 ### Called by the page's own scripts
 
-The key proof and the key-signed close are the page's. Setup by a scan and
-the faucet form arrive as the fund design is built (`SPEC.md` §4.3, §6.3).
+The key proof, the key-signed close and the setup scan are the page's. The
+faucet form arrives as the fund design is built (`SPEC.md` §4.3).
 
 | route | what it is | answers with |
 | --- | --- | --- |
@@ -202,6 +202,19 @@ the faucet form arrive as the fund design is built (`SPEC.md` §4.3, §6.3).
 | `POST /key/prove` | checks a key proof against the meter it names, and binds a session (`SPEC.md` §5.3) | JSON, and the cookie |
 | `POST /meter/close/prepare` | compiles `close_meter` for this browser's key to sign (`SPEC.md` §5.4) | JSON |
 | `POST /meter/close` | countersigns and sends the close, then `SPEC.md` §10.4's erasure | JSON, and the cookie cleared |
+| `POST /meter/setup` | records a pending setup, renewal or deposit, and answers its Solana Pay link (`SPEC.md` §6.3) | JSON |
+| `POST /meter/setup/continue` | *continue*: a fresh key proof against the meter the setup named, and a session (`SPEC.md` §6.3) | JSON, and the cookie |
+| `POST /pay/{id}/development` | the development wallet signs the pending setup in place of a phone; loopback and devnet only (`SPEC.md` §12.6) | JSON |
+
+### Called by the reader's wallet
+
+A Solana Pay transaction request (`SPEC.md` §6.3). The wallet fetches these,
+not the page, so they answer any origin.
+
+| route | what it is | answers with |
+| --- | --- | --- |
+| `GET /pay/{id}` | the label and icon the wallet shows before it asks | JSON |
+| `POST /pay/{id}` | the setup transaction composed for the wallet's account, unsigned, and the sentence it does | JSON |
 | `GET /inspector/panel` | the panel's sections for a page that read nothing (`SPEC.md` §9) | a fragment with `X-Fragment: 1`, a page without it |
 | `GET /inspector/event/{signature}` | one decoded event, on demand (`SPEC.md` §9) | JSON |
 

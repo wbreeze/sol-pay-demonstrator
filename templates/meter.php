@@ -7,12 +7,10 @@
  * next charge. There is no sign-in screen (SPEC §5.6): identifying happens
  * here, beside the money.
  *
- * **Setting a meter is being rebuilt for the fund design.** The setup scan
- * (SPEC §6.3) replaces the wallet in the page, and until it lands this panel
- * says so rather than offering a control that would not work. A browser that
- * already holds a key and a meter proves the key here and is bound a session
- * (SPEC §5.3), and a session meters, blocks and fails here as it will
- * afterwards.
+ * **Setting a meter is a scan** (SPEC §6.3). The panel asks four questions,
+ * the page makes its key, and a wallet fetches the transaction through a
+ * Solana Pay link. A browser that already holds a key and a meter proves the
+ * key here instead and is bound a session (SPEC §5.3).
  *
  * @var array<string, mixed> $meter
  * @var array<string, int|string> $site
@@ -50,32 +48,60 @@ $onChain = $meter['meter'];
         device, which then holds it. This browser's session with it has ended.
     </p>
 <?php endif ?>
-    <p class="pending">
-        Setting up a meter from this page is being rebuilt, and will return
-        shortly. Until then the ledes are free to read.
-    </p>
     <?php /* §5.3: a browser that holds a key and a meter address proves the
              key here, with no wallet, and the page reloads with a session.
              The script fills this line when it has something to say. */ ?>
     <p class="pending" data-key-bind role="status" hidden></p>
-<?php if ($meter['dev_key_trial']): ?>
-    <?php /* The development stand-in for setup (slice 2 of the fund design;
-             gone when the scan arrives). Shown only on loopback against
-             devnet, and only when `config/site.php` turns it on. */ ?>
-    <div class="dev" data-key-trial>
-        <p class="fine">
-            <strong>Development stand-in.</strong> This browser's key is
-            <code data-key-trial-key>…</code>. Renew a trial meter to it with
-            <code>bin/fund-trials hand 0 --key=&lt;that key&gt;</code>, and
-            paste the meter address it prints.
+
+    <?php /* `set_meter`, SPEC §6.3 step 1: inform the cost, ask four
+             questions, enforce the minimum, all before the wallet sees
+             anything. The expiry is a choice among four, never a date. */ ?>
+    <form class="setup" data-setup-form data-kind="setup" hidden>
+        <p>
+            Your wallet opens a <strong>fund</strong>, a pocket of
+            <?= $symbol ?> that sites draw from, and this site's
+            <strong>meter</strong> on it. The meter can take no more than its
+            limit, and nothing after its expiry. Your wallet signs once; after
+            that, reading needs nothing from it.
         </p>
-        <form data-key-trial-form>
-            <label>Meter <input type="text" name="meter" size="44" autocomplete="off"></label>
-            <button type="submit" class="secondary">Hold this meter</button>
-            <span class="pending" data-key-trial-status role="status" hidden></span>
-        </form>
-    </div>
-<?php endif ?>
+        <label class="limit">
+            Limit
+            <input type="text" inputmode="decimal" name="limit" value="<?= View::e((string) $meter['setup']['limit']) ?>" size="8">
+            <?= $symbol ?>
+        </label>
+        <p class="fine">At least <?= View::e((string) $meter['setup']['limit']) ?> <?= $symbol ?>. The limit is trust, not pacing: a site can draw straight to it.</p>
+
+        <fieldset class="expiry">
+            <legend>The meter expires after</legend>
+            <label><input type="radio" name="expiry" value="hour"> an hour</label>
+            <span class="fine">for a machine you do not own: after the hour, the key left in this browser opens nothing.</span>
+            <label><input type="radio" name="expiry" value="day" checked> a day</label>
+            <span class="fine">one sitting, with room to come back.</span>
+            <label><input type="radio" name="expiry" value="week"> a week</label>
+            <span class="fine">your own device.</span>
+            <label><input type="radio" name="expiry" value="month"> thirty days</label>
+            <span class="fine">your own device, read often. Until then, anyone who uses this browser can read on this meter.</span>
+        </fieldset>
+
+        <label class="limit">
+            Deposit
+            <input type="text" inputmode="decimal" name="deposit" value="<?= View::e((string) $meter['setup']['deposit']) ?>" size="8">
+            <?= $symbol ?>
+        </label>
+        <label class="limit">
+            Fund
+            <input type="number" name="index" value="0" min="0" max="255" size="4">
+        </label>
+        <p class="fine">
+            Most readers need one fund, fund 0. A different number opens
+            another, beside it. Your wallet pays the rent on the fund and the
+            meter, about 0.004 SOL the first time, and a fee of 0.000005 SOL
+            for each later change.
+        </p>
+        <p><button type="submit" class="wallet">Set up the meter</button></p>
+    </form>
+<?= $view->render('setup-scan', ['development' => $meter['setup']['dev_wallet']]) ?>
+    <noscript><p class="pending">Setting up a meter needs JavaScript: the key that the meter names is made and kept by this page's script.</p></noscript>
 
 <?php elseif ($meter['stage'] === 'failed'): ?>
     <?php /* §8.2. Under the fund design SPL's `InsufficientFunds` means one
@@ -111,7 +137,6 @@ $onChain = $meter['meter'];
         <?= View::e((string) $onChain['limit']) ?> <?= $symbol ?>.
         Nothing can be metered on it until it is renewed.
     </p>
-    <p><a href="/meter">The meter</a></p>
 
 <?php elseif ($meter['stage'] === 'limit'): ?>
     <h2>You have reached your limit</h2>
@@ -121,7 +146,6 @@ $onChain = $meter['meter'];
         of which <?= View::e((string) $onChain['paid']) ?> has settled and
         <?= View::e((string) $onChain['unpaid']) ?> has not.
     </p>
-    <p><a href="/meter">The meter</a></p>
 
 <?php else: ?>
     <h2>The meter is running</h2>
@@ -145,10 +169,8 @@ $onChain = $meter['meter'];
          session, including `unreadable`, where the chain cannot be read. */ ?>
 <?php if ($onChain !== null || $meter['stage'] === 'unreadable'): ?>
     <p class="fine">
-        <a href="/meter">The meter</a> — what you have spent, and where it stands.
-<?php if ($onChain !== null): ?>
-        · <a href="/meter#close">close this meter</a>
-<?php endif ?>
+        <a href="/meter">The meter</a> — what you have spent, and where it stands,
+        with the ways to renew it, add to its fund, or close it.
     </p>
 <?php endif ?>
 </section>

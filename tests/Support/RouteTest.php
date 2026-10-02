@@ -98,6 +98,34 @@ final class RouteTest extends TestCase
         }
     }
 
+    /**
+     * SPEC §12.3: a wallet in a browser reads the transaction request from
+     * another origin, refusals included, and preflights its POST. SPEC §12.6:
+     * the development wallet is off unless configured on, and it is not
+     * offered to other origins.
+     */
+    public function testTheWalletsRoutesAnswerAnyOriginAndTheDevelopmentWalletIsOff(): void
+    {
+        $factory = new ServerRequestFactory();
+        $id = str_repeat('0', 32);
+
+        $preflight = $this->app()->handle($factory->createServerRequest('OPTIONS', "https://example.test/pay/{$id}"));
+        self::assertSame(204, $preflight->getStatusCode());
+        self::assertSame('*', $preflight->getHeaderLine('Access-Control-Allow-Origin'));
+        self::assertStringContainsString('POST', $preflight->getHeaderLine('Access-Control-Allow-Methods'));
+        self::assertSame('Content-Type', $preflight->getHeaderLine('Access-Control-Allow-Headers'));
+
+        $unknown = $this->app()->handle($factory->createServerRequest('GET', "https://example.test/pay/{$id}"));
+        self::assertSame(404, $unknown->getStatusCode());
+        self::assertSame('*', $unknown->getHeaderLine('Access-Control-Allow-Origin'), 'a refusal the wallet can read');
+
+        $development = $this->app()->handle(
+            $factory->createServerRequest('POST', "https://example.test/pay/{$id}/development", ['REMOTE_ADDR' => '127.0.0.1']),
+        );
+        self::assertSame(403, $development->getStatusCode());
+        self::assertSame('', $development->getHeaderLine('Access-Control-Allow-Origin'));
+    }
+
     /** @return array<string, mixed> */
     private function health(): array
     {

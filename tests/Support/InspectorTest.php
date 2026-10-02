@@ -50,6 +50,33 @@ final class InspectorTest extends TestCase
         );
     }
 
+    /**
+     * SPEC §12.6: the development wallet is shown in the deployment section
+     * when it is on, so that nothing done with it can be mistaken for a
+     * phone's wallet. Off by default, and nothing is said then.
+     */
+    public function testTheDevelopmentWalletIsShownWhenItIsOn(): void
+    {
+        self::assertNull($this->row($this->inspector()->sections(), 'Deployment', 'development wallet'));
+
+        $root = sys_get_temp_dir().'/newsprint-inspector-'.bin2hex(random_bytes(4));
+        mkdir($root.'/config', 0o700, true);
+        $site = (string) file_get_contents(dirname(__DIR__, 2).'/config/site.php');
+        $site = str_replace("'wallet' => false", "'wallet' => true", $site);
+        file_put_contents($root.'/config/site.php', $site);
+
+        try {
+            $row = $this->row((new Inspector(Config::load($root)))->sections(), 'Deployment', 'development wallet');
+            self::assertNotNull($row);
+            self::assertStringStartsWith('on — signs setups in place of a phone', $row);
+        } finally {
+            @unlink($root.'/config/site.php');
+            @rmdir($root.'/config');
+            @rmdir($root.'/var');
+            @rmdir($root);
+        }
+    }
+
     /** @param list<array{heading: string, rows: list<array{0: string, 1: string}>, note?: string}> $sections */
     private function row(array $sections, string $heading, string $label): ?string
     {

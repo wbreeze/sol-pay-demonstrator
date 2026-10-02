@@ -45,6 +45,14 @@ final class Config
         return new self($root, $static, $provisioned);
     }
 
+    /** The site's public base URL, with no trailing slash, or null where it has none (SPEC §12.3). */
+    public function publicUrl(): ?string
+    {
+        $url = $this->static['public_url'] ?? null;
+
+        return is_string($url) && $url !== '' ? rtrim($url, '/') : null;
+    }
+
     public function rpcUrl(): string
     {
         return (string) $this->static['rpc']['url'];

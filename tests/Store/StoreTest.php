@@ -6,6 +6,7 @@ namespace Newsprint\Tests\Store;
 
 use Newsprint\Auth\Binding;
 use Newsprint\Metering\ChargeState;
+use Newsprint\Pay\SetupAnswers;
 use Newsprint\Store\Database;
 use Newsprint\Store\Store;
 use PHPUnit\Framework\TestCase;
@@ -139,15 +140,41 @@ final class StoreTest extends TestCase
 
     public function testThePendingSetupsTableIsSweptAfterItsWindow(): void
     {
-        $pdo = Database::open(':memory:');
-        $store = new Store($pdo, fn (): int => $this->now);
-        $pdo->prepare('INSERT INTO pending_setups (id, session, key, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
-            ->execute(['setup', 'session', 'BKEYfig', $this->now, $this->now + 600]);
+        $store = $this->store();
+        $store->createPendingSetup(new SetupAnswers(SetupAnswers::SETUP, 0, 500_000, 500_000, 'day', 'BKEYfig'), 600);
 
         self::assertSame(self::swept(), $store->sweepExpired());
         $this->now += 600;
         self::assertSame(0, $store->oldestExpired(), 'an expired setup is a row about a reader, waiting');
         self::assertSame(self::swept(setups: 1), $store->sweepExpired());
+    }
+
+    /**
+     * SPEC §6.3: a pending setup holds the panel's answers and, once the
+     * wallet has asked, the wallet's address, for ten minutes or until
+     * *continue*. Its id is the only thing the wallet's link carries.
+     */
+    public function testAPendingSetupHoldsItsAnswersAndThenTheWallet(): void
+    {
+        $store = $this->store();
+        $answers = new SetupAnswers(SetupAnswers::SETUP, 3, 500_000, 600_000, 'week', 'BKEYfig');
+        $id = $store->createPendingSetup($answers, 600);
+
+        self::assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $id, '128 random bits');
+        $held = $store->pendingSetup($id);
+        self::assertNotNull($held);
+        self::assertSame($answers->toArray(), $held['answers']->toArray());
+        self::assertNull($held['wallet'], 'no wallet until the wallet asks');
+
+        $store->recordSetupWallet($id, 'RDRfig');
+        self::assertSame('RDRfig', $store->pendingSetup($id)['wallet'] ?? null);
+
+        $store->forgetPendingSetup($id);
+        self::assertNull($store->pendingSetup($id), 'gone at continue');
+
+        $late = $store->createPendingSetup($answers, 600);
+        $this->now += 600;
+        self::assertNull($store->pendingSetup($late), 'and dead after ten minutes');
     }
 
     public function testAPendingCloseIsKeptUntilDroppedErasedOrExpired(): void

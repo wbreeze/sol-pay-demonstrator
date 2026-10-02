@@ -6,6 +6,7 @@ namespace Newsprint\Store;
 
 use Newsprint\Auth\Binding;
 use Newsprint\Metering\ChargeState;
+use Newsprint\Pay\SetupAnswers;
 use PDO;
 
 /**
@@ -156,6 +157,63 @@ final class Store
         $this->pdo->prepare('DELETE FROM nonces WHERE nonce = ?')->execute([$nonce]);
 
         return $live;
+    }
+
+    // ---- §6.3 pending setups ---------------------------------------------
+
+    /**
+     * Record a setup the panel started: 128 random bits as its id, the only
+     * thing the wallet's link carries (SPEC §12.3).
+     */
+    public function createPendingSetup(SetupAnswers $answers, int $ttlSeconds): string
+    {
+        $id = bin2hex(random_bytes(16));
+        $now = $this->now();
+        $this->pdo->prepare(
+            'INSERT INTO pending_setups (id, kind, key, answers, fund, created_at, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $id,
+            $answers->kind,
+            $answers->key,
+            (string) json_encode($answers->toArray()),
+            $answers->fund,
+            $now,
+            $now + $ttlSeconds,
+        ]);
+
+        return $id;
+    }
+
+    /** @return array{answers: SetupAnswers, wallet: ?string}|null a live pending setup */
+    public function pendingSetup(string $id): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT answers, wallet FROM pending_setups WHERE id = ? AND expires_at > ?');
+        $stmt->execute([$id, $this->now()]);
+        $row = $stmt->fetch();
+        if ($row === false) {
+            return null;
+        }
+        $answers = json_decode((string) $row['answers'], true);
+
+        return is_array($answers) ? [
+            'answers' => SetupAnswers::fromArray($answers),
+            'wallet' => $row['wallet'] === null ? null : (string) $row['wallet'],
+        ] : null;
+    }
+
+    /**
+     * The wallet that asked for the transaction (SPEC §6.3 step 4). Held for
+     * the setup's ten minutes at most, and gone at *continue*.
+     */
+    public function recordSetupWallet(string $id, string $wallet): void
+    {
+        $this->pdo->prepare('UPDATE pending_setups SET wallet = ? WHERE id = ?')->execute([$wallet, $id]);
+    }
+
+    public function forgetPendingSetup(string $id): void
+    {
+        $this->pdo->prepare('DELETE FROM pending_setups WHERE id = ?')->execute([$id]);
     }
 
     // ---- §7.1 view grants ------------------------------------------------

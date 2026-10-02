@@ -282,7 +282,8 @@ function fixtures(string $tree): array
         'meter' => ['address' => $METER, 'limit' => '0.5', 'used' => '0.42', 'paid' => '0.28', 'unpaid' => '0.14', 'expiry' => '2026-10-02 12:00 UTC'],
         'provisioned' => true,
         'result' => null, 'page_price' => '0.01', 'step_views' => 7, 'advanced' => null, 'solvency' => null,
-        'live_grants' => 2, 'dev_key_trial' => false,
+        'live_grants' => 2,
+        'setup' => ['limit' => '0.5', 'deposit' => '0.5', 'expiries' => ['hour', 'day', 'week', 'month'], 'dev_wallet' => false],
     ];
 
     // How far a fund holding 0.21 less `$short` is from a settle of 0.21.
@@ -372,7 +373,8 @@ function fixtures(string $tree): array
     $f['meter-unreadable'] = $m(['stage' => 'unreadable', 'meter' => null]);
     $f['meter-anonymous'] = $m(['stage' => 'anonymous', 'meter' => null]);
     $f['meter-anonymous-ended'] = $m(['stage' => 'anonymous', 'ended' => true, 'meter' => null]);
-    $f['meter-anonymous-dev'] = $m(['stage' => 'anonymous', 'dev_key_trial' => true, 'meter' => null]);
+    $f['meter-anonymous-dev'] = $m(['stage' => 'anonymous', 'meter' => null,
+        'setup' => ['limit' => '0.5', 'deposit' => '0.5', 'expiries' => ['hour', 'day', 'week', 'month'], 'dev_wallet' => true]]);
     $f['meter-failed-short'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', SolPay\Core\Cause::of($program, $program->tokenProgram, 1), $shortfall(80000), null)]);
     $f['meter-failed-other'] = $m(['stage' => 'failed', 'result' => $R::failed('refused', null, $shortfall(0), null)]);
     $f['meter-limit'] = $m(['stage' => 'limit']);

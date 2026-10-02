@@ -117,8 +117,12 @@ final class Database
      * Version 3 (slice 2) adds `sessions.close_message`: the `close_meter`
      * message the server compiled, kept until the page returns it signed
      * (SPEC §5.4). A version-2 file gains the column and loses nothing.
+     *
+     * Version 4 (slice 3) rebuilds `pending_setups`, which nothing had written:
+     * a setup belongs to the browser key it names, not to a session, since a
+     * browser setting up has none yet. *Continue* proves that key (§6.3).
      */
-    public const VERSION = 3;
+    public const VERSION = 4;
 
     public static function migrate(PDO $pdo): void
     {
@@ -141,10 +145,12 @@ final class Database
             $current = (int) $pdo->query('PRAGMA user_version')->fetchColumn();
             if ($current < 2) {
                 self::fromDelegateDesign($pdo);
-                self::create($pdo);
             } else {
                 self::addColumn($pdo, 'sessions', 'close_message', 'TEXT');
+                // Empty in every version-2 or -3 file: no route wrote it.
+                $pdo->exec('DROP TABLE IF EXISTS pending_setups');
             }
+            self::create($pdo);
             $pdo->exec('PRAGMA user_version = '.self::VERSION);
             $pdo->exec('COMMIT');
         } catch (\Throwable $e) {
@@ -206,15 +212,17 @@ final class Database
             );
             CREATE INDEX IF NOT EXISTS sessions_meter ON sessions (meter);
 
-            -- §6.3. A setup the reader has started and not continued. It
-            -- holds what the panel asked, and the wallet's address once the
-            -- wallet has asked for the transaction. Ten minutes, or until
-            -- *continue*. Written by slice 3's routes; the sweep covers it now.
+            -- §6.3. A setup the reader has started and not continued: what
+            -- kind, the browser key it names, what the panel asked, the fund
+            -- a session already holds (a renewal or a deposit), and the
+            -- wallet's address once the wallet has asked for the
+            -- transaction. Ten minutes, or until *continue*.
             CREATE TABLE IF NOT EXISTS pending_setups (
                 id         TEXT PRIMARY KEY,
-                session    TEXT NOT NULL,
-                key        TEXT NOT NULL,
-                answers    TEXT NOT NULL DEFAULT '{}',
+                kind       TEXT NOT NULL,
+                key        TEXT,
+                answers    TEXT NOT NULL,
+                fund       TEXT,
                 wallet     TEXT,
                 created_at INTEGER NOT NULL,
                 expires_at INTEGER NOT NULL

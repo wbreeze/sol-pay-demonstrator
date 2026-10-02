@@ -102,7 +102,7 @@ final class TemplateRenderTest extends TestCase
             'advanced' => null,
             'solvency' => null,
             'live_grants' => 2,
-            'dev_key_trial' => false,
+            'setup' => ['limit' => '0.5', 'deposit' => '0.5', 'expiries' => ['hour', 'day', 'week', 'month'], 'dev_wallet' => false],
         ];
     }
 
@@ -272,25 +272,23 @@ final class TemplateRenderTest extends TestCase
     }
 
     /**
-     * The panel for a browser with no session (fund design, slice 2). Setting
-     * up is being rebuilt and says so, with nothing to press that would not
-     * work. A browser that holds a key and a meter binds from here, so the
-     * key's script is loaded and has a line to speak on. And when the read has
-     * just ended a session, the panel says why the meter is gone from this
-     * browser (SPEC §5.3).
+     * The panel for a browser with no session. A browser that holds a key and
+     * a meter binds from here, so the key's script is loaded and has a line to
+     * speak on. The setup form is hidden until the script arrives, because
+     * without it the key the setup names cannot be made. And when the read
+     * has just ended a session, the panel says why the meter is gone from
+     * this browser (SPEC §5.3).
      */
-    public function testTheAnonymousPanelBindsAHeldKeyAndOffersNothingElse(): void
+    public function testTheAnonymousPanelBindsAHeldKeyOrSetsUp(): void
     {
         $plain = $this->renderStrictly('meter', [
             'meter' => $this->panel(['stage' => 'anonymous', 'meter' => null, 'items_remaining' => null]),
             'site' => $this->site(),
         ]);
-        self::assertStringContainsString('is being rebuilt', self::said($plain));
         self::assertStringNotContainsString('session with it has ended', self::said($plain));
-        self::assertStringNotContainsString('<button', $plain, 'nothing to press that would not work');
+        self::assertMatchesRegularExpression('/<form class="setup" data-setup-form data-kind="setup" hidden>/', $plain, 'nothing to press until the script can act on it');
         self::assertMatchesRegularExpression('/<p class="pending" data-key-bind role="status" hidden><\/p>/', $plain);
         self::assertStringContainsString('<script type="module" src="/assets/key.js"></script>', $plain);
-        self::assertStringNotContainsString('data-key-trial', $plain, 'the development stand-in is off unless turned on');
 
         $ended = self::said($this->renderStrictly('meter', [
             'meter' => $this->panel(['stage' => 'anonymous', 'ended' => true, 'meter' => null, 'items_remaining' => null]),
@@ -303,24 +301,53 @@ final class TemplateRenderTest extends TestCase
     }
 
     /**
-     * The development stand-in, when it is on: the key's line, filled by the
-     * script, and the form that takes a meter address. What the script looks
-     * for is what the template renders.
+     * `set_meter` (SPEC §6.3): the four answers, the scan they start, and
+     * *continue*. What the script looks for is what the template renders, and
+     * the form's fields are the names `POST /meter/setup` reads.
      */
-    public function testTheDevelopmentStandInRendersWhatKeyJsLooksFor(): void
+    public function testTheSetupFormRendersWhatKeyJsLooksFor(): void
     {
         $html = $this->renderStrictly('meter', [
-            'meter' => $this->panel(['stage' => 'anonymous', 'meter' => null, 'items_remaining' => null, 'dev_key_trial' => true]),
+            'meter' => $this->panel(['stage' => 'anonymous', 'meter' => null, 'items_remaining' => null]),
             'site' => $this->site(),
         ]);
         $script = (string) file_get_contents(dirname(__DIR__, 2).'/public/assets/key.js');
 
-        self::assertStringContainsString('bin/fund-trials hand 0', $html);
-        foreach (['data-key-trial-key', 'data-key-trial-form', 'data-key-trial-status', 'data-key-bind'] as $hook) {
+        foreach (['data-setup-form', 'data-setup-scan', 'data-setup-link', 'data-setup-qr', 'data-setup-continue', 'data-setup-status', 'data-key-bind'] as $hook) {
             self::assertStringContainsString($hook, $html, $hook.' in the template');
             self::assertStringContainsString('['.$hook.']', $script, $hook.' in key.js');
         }
-        self::assertMatchesRegularExpression('/<input[^>]*name="meter"/', $html, 'key.js reads the field by name');
+        foreach (['limit', 'deposit', 'index'] as $field) {
+            self::assertMatchesRegularExpression('/<input[^>]*name="'.$field.'"/', $html, $field.' is read by name');
+        }
+        foreach (['hour', 'day', 'week', 'month'] as $choice) {
+            self::assertMatchesRegularExpression('/<input type="radio" name="expiry" value="'.$choice.'"/', $html, 'expiry '.$choice);
+        }
+        self::assertStringContainsString('data-kind="setup"', $html);
+        self::assertStringContainsString('key.js', $html);
+
+        // §12.6: the development wallet only where it is on, and labelled.
+        self::assertStringNotContainsString('data-setup-development', $html);
+        $development = $this->renderStrictly('meter', [
+            'meter' => $this->panel(['stage' => 'anonymous', 'meter' => null, 'items_remaining' => null,
+                'setup' => ['limit' => '0.5', 'deposit' => '0.5', 'expiries' => [], 'dev_wallet' => true]]),
+            'site' => $this->site(),
+        ]);
+        self::assertStringContainsString('data-setup-development', $development);
+        self::assertStringContainsString('Development stand-in', $development);
+        self::assertStringContainsString('[data-setup-development]', $script);
+    }
+
+    /** `manage_meter` starts the same scan for renewing and for adding to the fund (§6.4). */
+    public function testTheMeterPageOffersRenewAndAddToTheFund(): void
+    {
+        $html = $this->renderStrictly('manage-meter', ['stage' => 'open', 'site' => $this->site()] + $this->panel());
+
+        self::assertStringContainsString('data-kind="renew"', $html);
+        self::assertStringContainsString('data-kind="deposit"', $html);
+        self::assertStringContainsString('id="renew"', $html);
+        self::assertSame(1, substr_count($html, 'data-setup-scan'), 'one scan region serves both forms');
+        self::assertStringContainsString('folds in the 0.14 you are carrying', self::said($html));
     }
 
     /** §8.2's `Expired`, which the delegate design never had. */
@@ -608,7 +635,7 @@ final class TemplateRenderTest extends TestCase
 
         $open = self::said($this->renderStrictly('manage-meter', ['stage' => 'open'] + $common));
         self::assertStringContainsString('2026-10-02 12:00 UTC', $open, 'the expiry is on the page');
-        self::assertStringContainsString('Renewing the meter is being rebuilt', $open, 'and the missing control is said to be missing');
+        self::assertStringContainsString('Renew the meter', $open, 'and the way to renew it');
 
         $ended = self::said($this->renderStrictly('manage-meter', ['stage' => 'anonymous', 'ended' => true] + $common));
         self::assertStringContainsString('session with it has ended', $ended);
@@ -648,8 +675,12 @@ final class TemplateRenderTest extends TestCase
         $none = self::said($this->renderStrictly('manage-meter', ['stage' => 'open', 'site' => $this->site()] + $this->panel(['live_grants' => 0])));
         self::assertStringContainsString('none are live right now', $none);
 
-        // The panel on the article links to it.
-        self::assertStringContainsString('href="/meter#close"', $this->renderStrictly('meter', ['meter' => $this->panel(['stage' => 'limit']), 'site' => $this->site()]));
+        // The panel on the article links to it once, on each blocked stage:
+        // `/meter` is the place to renew, add or close from (2026-10-01).
+        foreach (['limit', 'expired'] as $stage) {
+            $panel = $this->renderStrictly('meter', ['meter' => $this->panel(['stage' => $stage]), 'site' => $this->site()]);
+            self::assertSame(1, substr_count($panel, 'href="/meter'), $stage.' links to the meter once');
+        }
     }
 
     /** What key.js looks for on the meter page, against what the page renders. */

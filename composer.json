@@ -10,6 +10,7 @@
         "ext-json": "*",
         "ext-pdo_sqlite": "*",
         "ext-sodium": "*",
+        "chillerlan/php-qrcode": "^5",
         "league/commonmark": "^2.7",
         "slim/psr7": "^1.7",
         "slim/slim": "^4.15",

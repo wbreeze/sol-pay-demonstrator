@@ -570,7 +570,12 @@ barriers to reach the delegate design carried all sat on a wallet in the page.
      until then, anyone who uses this browser can read on this meter.
 2. **The page makes its key** if it has none (§5.1), and posts the key and
    the four answers. The server records a **pending setup**: a random id, the
-   session it belongs to, the key and the answers. It lives ten minutes.
+   key and the answers. It lives ten minutes. It belongs to the key rather
+   than to a session: a browser that sets up has no session yet, and
+   *continue* proves the key, which is what the setup names.
+   A renewal or a deposit started from `manage_meter` also records the fund
+   of the session that started it, so that the wallet cannot be another
+   reader's.
 3. **The page shows the link** `solana:https://<site>/pay/<id>`, as a link to
    tap on a phone and as a QR code to scan from a desktop. The QR code is
    rendered by the server as inline SVG (§12.2).
@@ -1164,7 +1169,7 @@ it, and let the bound be checked.
 | store | contents | goes away |
 | --- | --- | --- |
 | session | the meter's and its fund's addresses, the proven key | at the close, or within five minutes of the session's end |
-| pending setup | the session, the key, the panel's answers, and the wallet's address once the wallet has asked | at *continue*, or after ten minutes |
+| pending setup | the key, the panel's answers, the session's fund for a renewal or a deposit, and the wallet's address once the wallet has asked | at *continue*, or after ten minutes |
 | nonces | the nonce and when it was issued | at its first use, or after five minutes |
 | view grants | the meter, the article, the expiry, the charge's signature and what became of it | within thirty-five minutes: thirty of grant, then a sweep; at once at the close |
 | meter lock row | the meter's address | with the meter's last session and grant, or at the close |
@@ -1420,13 +1425,13 @@ instance needs a store that spans them, for the lock and for the nonces.
 on localhost: the key, the proof, metering, renewal, closing the meter. The development
 wallet stands in for the wallet.
 
-- It is a keypair in `var/dev-wallet.json`, funded from the faucet form like
-  any address.
-- On `set_meter` the panel offers *sign with the development wallet* beside
-  the link. The page posts to the same `POST /pay/{id}` with the development
-  wallet's account. The server composes the identical transaction, then signs
-  it with the development wallet and submits it. *Continue* follows as for a
-  phone.
+- It is a keypair in `var/dev-wallet.json`. Until the faucet form arrives,
+  `bin/dev-wallet fund` sends it what the faucet sends a reader.
+- Beside the link, the panel offers *sign with the development wallet*. The
+  page posts to `POST /pay/{id}/development`. The server records the
+  development wallet's account on the pending setup, as `POST /pay/{id}`
+  would, composes the identical transaction, then signs it with the
+  development wallet and submits it. *Continue* follows as for a phone.
 - It is off unless configured on, and refused unless the request comes from a
   loopback address and the RPC endpoint is devnet's. It is labelled on screen
   as the development stand-in it is, and §9's deployment section shows it

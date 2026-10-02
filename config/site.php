@@ -109,13 +109,20 @@ return [
         'session_ttl_s' => 43_200, // twelve hours
     ],
 
+    // SPEC §12.3: the transaction-request link must be an absolute HTTPS URL
+    // a wallet can reach, so the site needs its public base URL. Only the
+    // hosted instance has one. Null here means the link is built from the
+    // request's own origin, which a phone's wallet cannot reach on localhost:
+    // the development wallet stands in for it there.
+    'public_url' => null,
+
     // Development stand-ins. Each is refused unless the request comes from a
     // loopback address and the RPC endpoint is devnet's (SPEC §12.6).
     'development' => [
-        // Slice 2 of the fund design, until slice 3's scan replaces it: the
-        // panel shows this browser's public key and takes a meter address, so
-        // that `bin/fund-trials hand` can put a trial meter into a browser.
-        'key_trial' => false,
+        // SPEC §12.6: a keypair in `var/dev-wallet.json` signs the setup a
+        // wallet would sign, so setup runs on localhost with no phone.
+        // `bin/dev-wallet` prints its address and funds it from the faucet.
+        'wallet' => true,
     ],
 
     // SPEC §7.1 and §7.4. Both are policy numbers with no chain meaning.
