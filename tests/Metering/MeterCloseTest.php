@@ -10,6 +10,7 @@ use Newsprint\Metering\MeterClose;
 use PHPUnit\Framework\TestCase;
 use SolPay\Core\Base58;
 use SolPay\Core\Ids;
+use SolPay\Core\Ix;
 use SolPay\Core\Pda;
 use SolPay\Core\Program;
 
@@ -54,6 +55,20 @@ final class MeterCloseTest extends TestCase
         self::assertSame($this->authority->address, $keys[0], 'the fee payer leads');
         self::assertSame($this->key->address, $keys[1]);
         self::assertNotContains(self::READER, array_slice($keys, 0, 2), 'the reader does not sign; the rent goes back to them');
+    }
+
+    /**
+     * SPEC §9.2: the panel shows the close's instruction read back out of
+     * the kept message. For that to be the builder's output and not an
+     * approximation of it, the read has to return what `Ix::closeMeter`
+     * built: the program, the accounts in the instruction's order with the
+     * builder's flags, and the data.
+     */
+    public function testTheInstructionReadBackOutOfTheMessageIsTheBuilders(): void
+    {
+        $built = Ix::closeMeter(Program::default(), $this->key->address, self::READER, self::SITE, $this->fund);
+
+        self::assertEquals([$built], MessageSigner::instructions($this->message));
     }
 
     public function testItIsOneCloseMeterOnTheMeterThisSiteDerives(): void

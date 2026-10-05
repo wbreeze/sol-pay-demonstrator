@@ -211,7 +211,7 @@ The key proof, the key-signed close and the setup scan are the page's.
 | `POST /key/nonce` | a nonce for a key proof, forgotten at its first use (`SPEC.md` §5.2) | JSON |
 | `POST /key/prove` | checks a key proof against the meter it names, and binds a session (`SPEC.md` §5.3) | JSON, and the cookie |
 | `POST /meter/close/prepare` | compiles `close_meter` for this browser's key to sign (`SPEC.md` §5.4) | JSON |
-| `POST /meter/close` | countersigns and sends the close, then `SPEC.md` §10.4's erasure | JSON, and the cookie cleared |
+| `POST /meter/close` | countersigns and sends the close, then `SPEC.md` §10.4's erasure | JSON carrying the inspector's sections (`SPEC.md` §9.2), and the cookie cleared |
 | `POST /meter/setup` | records a pending setup, renewal or deposit, and answers its Solana Pay link (`SPEC.md` §6.3) | JSON |
 | `POST /meter/setup/continue` | *continue*: a fresh key proof against the meter the setup named, and a session (`SPEC.md` §6.3) | JSON, and the cookie |
 | `POST /pay/{id}/development` | the development wallet signs the pending setup in place of a phone; loopback and devnet only (`SPEC.md` §12.6) | JSON |

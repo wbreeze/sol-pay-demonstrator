@@ -25,7 +25,7 @@ final class LateCloseWiringTest extends TestCase
     {
         $body = $this->between("\$app->post('/meter/close',", "\n});\n");
 
-        $check = strpos($body, '$meterExists($held->meter) !== false');
+        $check = strpos($body, "\$after['exists'] !== false");
         $note = strpos($body, 'recordPendingClose(');
         $pending = strpos($body, "'pending' => true");
         $erase = strpos($body, 'eraseMeter(');

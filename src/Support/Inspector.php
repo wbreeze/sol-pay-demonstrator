@@ -8,8 +8,10 @@ use Newsprint\Chain\ChargeFault;
 use Newsprint\Chain\Keypair;
 use Newsprint\Chain\MeterState;
 use Newsprint\Chain\SiteState;
+use Newsprint\Metering\CloseSent;
 use Newsprint\Metering\MeterOutcome;
 use Newsprint\Metering\MeterResult;
+use SolPay\Core\Instruction;
 use SolPay\Core\Preflight;
 use SolPay\Core\Units;
 
@@ -49,11 +51,14 @@ final class Inspector
      * fetches when it is opened rather than on the request that made it. See
      * {@see lastTransaction()} for why that read is deferred.
      *
+     * `$close` is a close this request sent (SPEC §5.4). It is the last
+     * transaction on the one page that follows it.
+     *
      * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string, external?: bool}, event?: string}>
      */
-    public function sections(?SiteState $state = null, ?string $error = null, ?MeterState $meter = null, ?MeterResult $result = null): array
+    public function sections(?SiteState $state = null, ?string $error = null, ?MeterState $meter = null, ?MeterResult $result = null, ?CloseSent $close = null): array
     {
-        $sections = $this->order($this->build($state, $error, $meter, $result));
+        $sections = $this->order($this->build($state, $error, $meter, $result, $close));
         $names = $this->names($sections);
 
         return $names === null ? $sections : array_merge([$names], $sections);
@@ -96,6 +101,9 @@ final class Inspector
             'The last transaction',
             'Your meter, on chain',
             'Your fund, on chain',
+            // Seldom changes: a fund names one wallet for as long as the
+            // fund exists.
+            'Your wallet',
             'Treasury',
             'Configuration drift',
             'Site account, decoded',
@@ -175,7 +183,7 @@ final class Inspector
     /**
      * @return list<array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, claims?: string, link?: array{href: string, text: string, external?: bool}, event?: string}>
      */
-    private function build(?SiteState $state = null, ?string $error = null, ?MeterState $meter = null, ?MeterResult $result = null): array
+    private function build(?SiteState $state = null, ?string $error = null, ?MeterState $meter = null, ?MeterResult $result = null, ?CloseSent $close = null): array
     {
         $program = $this->config->program();
         $params = $this->config->siteParams();
@@ -183,7 +191,7 @@ final class Inspector
         // One map for the whole panel, built before any row is. Every address
         // row resolves its short name *and* its derivation from this and from
         // nothing else.
-        $known = $this->knownAddresses($state, $meter);
+        $known = $this->knownAddresses($state, $meter, $close?->key);
 
         $sections = [[
             'heading' => 'Deployment',
@@ -256,6 +264,11 @@ final class Inspector
                     'The page is still served; nothing here depends on the chain until a charge has to be made.',
                 ]],
             ];
+
+            // A close was sent whether or not the read after it answered.
+            if ($close !== null) {
+                $sections[] = $this->closeTransaction($close, $known);
+            }
 
             return $sections;
         }
@@ -343,10 +356,13 @@ final class Inspector
 
         if ($meter !== null) {
             array_push($sections, ...$this->reader($meter, $amount, $known, $result?->awaiting() ?? false));
+            $sections[] = $this->wallet($meter, $known);
             $sections[] = $this->preflight($state, $meter, $amount);
         }
 
-        if ($result !== null && $result->signature !== null) {
+        if ($close !== null) {
+            $sections[] = $this->closeTransaction($close, $known);
+        } elseif ($result !== null && $result->signature !== null) {
             $sections[] = $this->lastTransaction($result, $known);
         }
 
@@ -431,7 +447,94 @@ final class Inspector
             ];
         }
 
-        foreach ($result->instructions as $i => $instruction) {
+        array_push($rows, ...$this->instructionRows($result->instructions, $known));
+
+        return [
+            ...$this->transaction($signature, $rows),
+            // Which instruction rows belong to which transaction, so a follow-up
+            // can keep the ones its own request never held (2026-09-17). The
+            // builders' output is shown by the request that built it and by no
+            // other; a follow-up that replaced the panel would otherwise
+            // replace the evidence with a sentence about it.
+            ($result->earlier ? 'carry' : 'instructions') => $signature,
+        ];
+    }
+
+    /**
+     * A close this request sent (SPEC §9.2, §5.4).
+     *
+     * **The instruction rows are read out of the message the key signed.**
+     * One request composes the close and the next one sends it, and the
+     * compiled message is all this site keeps between the two. So these rows
+     * are not the builder's object carried across, as a charge's are. They
+     * are the builder's output as `Tx::compile` wrote it into the message,
+     * and the `instructions` row says so. Building the instruction a second
+     * time for display was declined for the reason {@see MeterResult} gives:
+     * a panel that rebuilt it would agree with itself whatever was sent.
+     *
+     * **The outcome is the account, not the signature** (SPEC §5.4). The
+     * close route reads the meter after it sends, and `landed` is what that
+     * read found.
+     *
+     * @param array<string, array{alias: string, derivation: ?string}> $known every address this request can name
+     *
+     * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, link: array{href: string, text: string, external: bool}, event: string, instructions: string}
+     */
+    private function closeTransaction(CloseSent $close, array $known): array
+    {
+        $rows = [
+            ['signature', $close->signature],
+            ['outcome', $close->landed
+                ? 'closed — the meter account is gone'
+                : 'sent — the meter account is still there; this site forgets the meter once the close lands'],
+            ['instructions', 'as compiled into the message that this browser\'s key signed'],
+        ];
+        array_push($rows, ...$this->instructionRows($close->instructions, $known));
+
+        return [
+            ...$this->transaction($close->signature, $rows),
+            'instructions' => $close->signature,
+        ];
+    }
+
+    /**
+     * What every transaction section has: the heading, the explorer link,
+     * and the signature whose event the panel reads when it is opened.
+     *
+     * @param list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}> $rows
+     *
+     * @return array{heading: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, link: array{href: string, text: string, external: bool}, event: string}
+     */
+    private function transaction(string $signature, array $rows): array
+    {
+        return [
+            'heading' => 'The last transaction',
+            'rows' => $rows,
+            'link' => [
+                'href' => 'https://explorer.solana.com/tx/'.rawurlencode($signature).'?cluster=devnet',
+                'text' => 'This transaction on chain',
+                // Said rather than guessed from the scheme: the template opens
+                // a second tab for this and for nothing else.
+                'external' => true,
+            ],
+            'event' => $signature,
+        ];
+    }
+
+    /**
+     * Each instruction as rows: its program, its accounts in order with
+     * their signer and writable flags, and its data.
+     *
+     * @param list<Instruction>                                         $instructions
+     * @param array<string, array{alias: string, derivation: ?string}> $known
+     *
+     * @return list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>
+     */
+    private function instructionRows(array $instructions, array $known): array
+    {
+        $rows = [];
+
+        foreach ($instructions as $i => $instruction) {
             $n = $i + 1;
             $rows[] = [
                 sprintf('ix %d · program', $n),
@@ -466,28 +569,51 @@ final class Inspector
                     // One colon per line: the meaning's. The old wording put a
                     // second one inside the derivation and the row read as two
                     // sentences fighting over which was the subject.
-                    'note' => self::says(Alias::DATA, sprintf('%d bytes, an 8-byte discriminator then borsh', strlen($instruction->data))),
+                    'note' => self::says(Alias::DATA, strlen($instruction->data) === 8
+                        // `close_meter` takes no arguments.
+                        ? '8 bytes, the discriminator alone'
+                        : sprintf('%d bytes, an 8-byte discriminator then borsh', strlen($instruction->data))),
                 ],
             ];
         }
 
+        return $rows;
+    }
+
+    /**
+     * Your wallet (decided 2026-10-04).
+     *
+     * The one section about the reader that is not headed *on chain*,
+     * because this site reads nothing from the wallet's own account. The
+     * page was never told the wallet (SPEC §5). The fund names it, and the
+     * fund is public, so the panel can show it and say where it came from.
+     *
+     * **`sent` is not a row this class emits.** The wallet sends the setup,
+     * the renewal and the deposit, and no request this site serves afterwards
+     * knows that one of them just happened. The browser does: it pressed
+     * *continue*. So the three sentences are written here, the template
+     * carries them in an inert `<template>` element, and `assets/inspector.js`
+     * shows the one that applies on the page that follows. The words stay
+     * with the panel's other words, and the fact stays with the only party
+     * that knows it.
+     *
+     * @param array<string, array{alias: string, derivation: ?string}> $known
+     *
+     * @return array{heading: string, claims: string, rows: list<array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, sent: array<string, string>}
+     */
+    private function wallet(MeterState $read, array $known): array
+    {
         return [
-            'heading' => 'The last transaction',
-            'rows' => $rows,
-            'link' => [
-                'href' => 'https://explorer.solana.com/tx/'.rawurlencode($signature).'?cluster=devnet',
-                'text' => 'This transaction on chain',
-                // Said rather than guessed from the scheme: the template opens
-                // a second tab for this and for nothing else.
-                'external' => true,
+            'heading' => 'Your wallet',
+            'claims' => 'under',
+            'rows' => [$read->fundAccount !== null
+                ? ['wallet', $this->address($read->fundAccount->reader, $known), 'named by your fund; this page was never told it']
+                : ['wallet', 'not known: this page was never told it, and the fund that names it is not there']],
+            'sent' => [
+                'setup' => 'the setup of this meter, before this page loaded',
+                'renew' => 'a renewal of this meter, before this page loaded',
+                'deposit' => 'a deposit to this fund, before this page loaded',
             ],
-            'event' => $signature,
-            // Which instruction rows belong to which transaction, so a follow-up
-            // can keep the ones its own request never held (2026-09-17). The
-            // builders' output is shown by the request that built it and by no
-            // other; a follow-up that replaced the panel would otherwise
-            // replace the evidence with a sentence about it.
-            ($result->earlier ? 'carry' : 'instructions') => $signature,
         ];
     }
 
@@ -603,7 +729,7 @@ final class Inspector
      *
      * @return array<string, array{alias: string, derivation: ?string}>
      */
-    private function knownAddresses(?SiteState $state, ?MeterState $meter): array
+    private function knownAddresses(?SiteState $state, ?MeterState $meter, ?string $closedKey = null): array
     {
         $program = $this->config->program();
 
@@ -642,6 +768,13 @@ final class Inspector
             if ($meter->fundAccount !== null) {
                 $roles[$meter->fundAccount->reader] = Alias::READER;
             }
+        }
+
+        // After a close the meter is gone and cannot name its key, so the
+        // close does. Without this the signer of the one instruction on the
+        // page would be an address the panel cannot place.
+        if ($closedKey !== null) {
+            $roles[$closedKey] = Alias::BROWSER_KEY;
         }
 
         // Seeds are written with the short names above rather than with
@@ -718,6 +851,10 @@ final class Inspector
                     $of($program->id),
                 );
             }
+        }
+
+        if ($closedKey !== null) {
+            $derivations[$closedKey] = 'generated in this browser; it signed this close, and the browser has deleted it';
         }
 
         $known = [];
@@ -878,6 +1015,8 @@ final class Inspector
             $rows[] = ['paid', $amount($meter->paid)];
             $rows[] = ['unpaid', $amount($meter->unpaid())];
             $rows[] = ['bump', (string) $meter->bump];
+        } else {
+            $rows[] = ['meter account', 'not found — it has been closed'];
         }
 
         $meterRows = $rows;

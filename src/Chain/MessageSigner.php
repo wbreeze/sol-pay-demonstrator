@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Newsprint\Chain;
 
+use SolPay\Core\AccountMeta;
 use SolPay\Core\Base58;
+use SolPay\Core\Instruction;
 
 /**
  * Signatures in account-key order, read out of the compiled message.
@@ -64,7 +66,62 @@ final class MessageSigner
     }
 
     /**
-     * compact-u16, read back. The encoder is `Tx`'s; this is the only other
+     * The instructions a compiled legacy message carries, each with its
+     * accounts in the instruction's own order.
+     *
+     * For SPEC §9.2's panel after a close. The close is composed by one
+     * request and sent by the next (§5.4), and the message is all that the
+     * site keeps between the two. The builder's `Instruction` is gone by
+     * then, so the panel shows what the key signed, read back out of the
+     * kept bytes.
+     *
+     * A signer or writable flag is the message's: an account is a signer
+     * when it sits among the required signatures, and writable by the
+     * header's two readonly counts. Compilation merges flags across
+     * instructions and forces the fee payer writable, so the flags here
+     * equal the builder's wherever one instruction names an account once
+     * and the fee payer is not among its accounts. That holds for the close.
+     *
+     * @return list<Instruction>
+     */
+    public static function instructions(string $message): array
+    {
+        if (strlen($message) < 4) {
+            throw new \InvalidArgumentException('not a compiled message');
+        }
+        $required = ord($message[0]);
+        $readonlySigned = ord($message[1]);
+        $readonlyUnsigned = ord($message[2]);
+        $keys = self::accountKeys($message);
+        [$count, $offset] = self::shortVec($message, 3);
+        // Past the keys, then past the 32-byte blockhash.
+        $offset += 32 * $count + 32;
+
+        $meta = static fn (int $i): AccountMeta => new AccountMeta(
+            $keys[$i],
+            $i < $required,
+            $i < $required ? $i < $required - $readonlySigned : $i < $count - $readonlyUnsigned,
+        );
+
+        $instructions = [];
+        [$n, $offset] = self::shortVec($message, $offset);
+        for ($i = 0; $i < $n; $i++) {
+            $program = $keys[ord($message[$offset++])];
+            [$accountCount, $offset] = self::shortVec($message, $offset);
+            $accounts = [];
+            for ($j = 0; $j < $accountCount; $j++) {
+                $accounts[] = $meta(ord($message[$offset++]));
+            }
+            [$length, $offset] = self::shortVec($message, $offset);
+            $instructions[] = new Instruction($program, $accounts, substr($message, $offset, $length));
+            $offset += $length;
+        }
+
+        return $instructions;
+    }
+
+    /**
+     * compact-u16, read back. The encoder is `Tx`'s; this class is the only other
      * place in the demonstrator that needs to understand the framing.
      *
      * @return array{int, int} the value, and the offset just past it

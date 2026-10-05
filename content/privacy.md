@@ -2,7 +2,7 @@
 title: Privacy
 slug: privacy
 created: 2026-09-04
-revised: 2026-10-03
+revised: 2026-10-04
 metered: false
 status: published
 ---
@@ -120,7 +120,7 @@ data to a log file nor sends it anywhere but back to you.
 
 ## What stays in your browser
 
-Three things are kept by your browser, not on the site server.
+Four things are kept by your browser, not on the site server.
 
 Your browser holds **a key**, made the first time you set a meter up. The key
 is made for this site and for nothing else. Your browser keeps each site's
@@ -133,6 +133,11 @@ come back tomorrow without your wallet.
 
 And for one tab, when you leave an article to renew your meter, your browser
 remembers **which article you came from**, so the site can take you back.
+
+For one page, after your wallet sets up or renews your meter or adds to your
+fund, your browser remembers **which of those your wallet did**, so the
+inspector on the next page can say so. The next page reads that one word and
+deletes it.
 
 Closing your meter deletes the key and the meter. Closing the tab forgets the
 article.

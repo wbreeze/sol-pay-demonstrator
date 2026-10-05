@@ -9,7 +9,7 @@
  * drifts from the inline version, and a reader who sees a different panel
  * depending on which page they opened it from.
  *
- * @var array<int, array{heading: string, rows?: array<int, array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, names?: array<int, array{value: string, alias: string, explorer: bool, note: ?string}>, instructions?: string, carry?: string}> $sections
+ * @var array<int, array{heading: string, rows?: array<int, array{0: string, 1: string|array{value: string, alias: string, explorer: bool, note: ?string}, 2?: string}>, names?: array<int, array{value: string, alias: string, explorer: bool, note: ?string}>, instructions?: string, carry?: string, sent?: array<string, string>}> $sections
  * @var \Newsprint\Support\View $view
  */
 use Newsprint\Support\View;
@@ -112,6 +112,25 @@ use Newsprint\Support\View;
                 </tr>
 <?php endif ?>
             </table>
+<?php if (isset($section['sent'])):
+    /* What the wallet sent, one row for each thing a wallet sends here
+       (2026-10-04). Inert: a `<template>` element renders nothing. The
+       wallet submits its own transaction, so no request this site serves
+       knows that one has just gone. The browser knows, because the reader
+       pressed *continue* there. `assets/key.js` leaves the kind in
+       `sessionStorage` for the page that follows, and `assets/inspector.js`
+       moves the matching row into the table above. The words are written by
+       `Inspector::wallet()` with the panel's other words, and the script
+       chooses one row and writes nothing. */ ?>
+            <template data-wallet-sent>
+<?php foreach ($section['sent'] as $kind => $text): ?>
+                <tr data-sent="<?= View::e($kind) ?>">
+                    <th scope="row">sent</th>
+                    <td><?= View::e($text) ?></td>
+                </tr>
+<?php endforeach ?>
+            </template>
+<?php endif ?>
 <?php if (isset($section['link'])): ?>
 <?php /* A second tab for a link that leaves this site, and for no other.
          These attributes were unconditional while the only link in the panel

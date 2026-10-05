@@ -967,17 +967,20 @@ A panel, present on every screen, collapsed by default and one click from any
 page. Its job is §2's claim 7: *every number on the screen came from an
 account, not from the server's memory.*
 
-**Reduced for the redesign, decided 2026-10-01.** The panel is rebuilt after
-the reader's path works. Until then it keeps the principles below and shows
-only what still holds. The sections it keeps, in order from what changes to
-what does not: *The values, in full*; *Preflight, for this request*; *The last
-transaction*, on a request that made one; *Your meter, on chain*; *Your fund,
-on chain*; *Treasury*; *Site account, decoded*; *Deployment*. The meter and
-the fund are two sections, decided 2026-10-02, because they are two accounts:
-the meter is this site's count, and the fund is the reader's, which other
-sites may meter on too.
+**The sections**, in order from what changes to what does not: *The values,
+in full*; *Preflight, for this request*; *The last transaction*, on a request
+that made one; *Your meter, on chain*; *Your fund, on chain*; *Your wallet*;
+*Treasury*; *Site account, decoded*; *Deployment*. The meter and the fund are
+two sections, decided 2026-10-02, because they are two accounts: the meter is
+this site's count, and the fund is the reader's, which other sites may meter
+on too. The three sections about the reader appear only where a session holds
+a meter.
 *Configuration drift* appears only when the chain and `config/site.php`
 disagree, placed beside the account it disagrees with.
+
+The panel was reduced for the redesign on 2026-10-01 and completed on
+2026-10-04, when the close and the wallet's transactions gained their places
+(§9.2).
 
 ### 9.1 Short names
 
@@ -1033,9 +1036,32 @@ of a reader's earlier transactions for the panel to reach back to. On a page
 that made none, the section is absent. For a charge or a close, which the
 server builds, the panel shows the instructions as the builders produced them:
 program, accounts in order with signer and writable flags, and data as hex.
-The setup transaction is built in the wallet's request, not the page's, and
-the wallet submits it, so the server never learns its signature. The panel
-says so rather than reconstructing it.
+
+**A close is shown by the request that sent it**, decided 2026-10-04. That
+request answers the page with the panel's sections, and the page puts them
+where the old panel was. The read that the close already makes after it sends
+(§5.4) asks for the site's accounts and the fund's in the same call, so the
+panel costs the close no round trip. The panel then shows the accounts as the
+close left them: the meter not found, and the fund with one meter fewer. One
+request composes the close and the next sends it, and the compiled message is
+all the site keeps between the two. So the instruction rows are read out of
+the message that the browser key signed, and the section says that is their
+source.
+
+**Your wallet**, decided 2026-10-04. One row says which wallet the fund
+names, and that the page was never told it (§5). The heading does not say *on
+chain*, because the site reads nothing from the wallet's own account. A
+setup, a renewal and a deposit are composed in the wallet's request and
+submitted by the wallet (§6.3). A wallet transaction is therefore never *the
+last transaction*: no request the site serves afterwards knows that one has
+just gone. The browser knows, because the reader pressed *continue*. So the
+page keeps one word for the tab, in `sessionStorage`, saying which of the
+three the wallet sent. The panel on the page that follows adds a `sent` row
+to *Your wallet*, and the word is deleted as it is read. The row's words are
+the server's, carried in every panel in an inert `<template>` element. The
+server is not told and stores nothing. The panel shows no signature for a
+wallet's transaction, and that holds for the development wallet too (§12.6),
+whose signature the server does see.
 
 **The event is read when the panel is opened**, with one `getTransaction`,
 because the panel is collapsed by default. **And the panel's own read is

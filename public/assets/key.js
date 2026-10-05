@@ -17,6 +17,10 @@
  *    a wallet fetches, and on *continue* prove the key against the meter the
  *    wallet opened. Renewing and *add to the fund* are the same scan.
  *
+ * It also tells the inspector two things that only this script learns: the
+ * panel the close's request rendered (SPEC §9.2), and that a wallet has just
+ * sent something, which no request to this site can know.
+ *
  * No library. WebCrypto signs, and the server composes every byte the key
  * signs (§12.2). Listeners are on the document, because a module runs once per
  * document and the panel can arrive later in a swapped answer (`swap.js`).
@@ -174,6 +178,7 @@ async function close(button) {
     }
     const signature = await crypto.subtle.sign('Ed25519', pair.privateKey, fromBase64(prepared.body.message));
     const sent = await post('/meter/close', { signature: toBase64(signature) });
+    showPanel(sent.body.panel);
     if (sent.body.ok) {
       await forget('meter');
       await forget('key');
@@ -202,7 +207,36 @@ async function close(button) {
   }
 }
 
+/**
+ * SPEC §9.2: the request that sent the close rendered the panel for it, with
+ * the instruction the key signed and the accounts as they are now. It takes
+ * the place of the panel this page was served with, which describes a meter
+ * that may be gone. `inspector.js` is told, so that it reads the event.
+ */
+function showPanel(markup) {
+  const body = document.querySelector('details.inspector .inspector-body');
+  if (typeof markup !== 'string' || !body) return;
+  body.innerHTML = markup;
+  document.dispatchEvent(new CustomEvent('newsprint:inspector'));
+}
+
 // ---- 3. setup ------------------------------------------------------------
+
+/**
+ * What the wallet just sent, for the inspector on the page that follows.
+ * The wallet submits its own transaction, so the server is not told and
+ * nothing is stored there. This tab's `sessionStorage` carries one word to
+ * the next page, where `inspector.js` reads it and removes it.
+ */
+const SENT = 'newsprint:sent';
+
+function rememberSent(kind) {
+  try {
+    sessionStorage.setItem(SENT, kind);
+  } catch {
+    // No storage: the inspector says nothing about the wallet's transaction.
+  }
+}
 
 let pending = null;
 
@@ -286,6 +320,7 @@ async function proceed(button) {
     const { status: code, body } = await post('/meter/setup/continue', payload);
     if (body.ok) {
       if (body.meter) await write('meter', body.meter);
+      rememberSent(pending.kind);
       // A reader who came to the meter page from an article was on the way
       // to that article. Renewing or adding to the fund was the interruption,
       // so *continue* takes them back to it. Anywhere else, the page reloads.

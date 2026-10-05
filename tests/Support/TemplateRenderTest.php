@@ -58,6 +58,65 @@ final class TemplateRenderTest extends TestCase
      *
      * @param array<string, mixed> $vars
      */
+    /**
+     * *Your wallet* carries what a wallet sends in an inert element
+     * (2026-10-04), and three files have to agree for a reader to see one of
+     * those rows: the template writes them, `key.js` leaves the kind for the
+     * next page, and `inspector.js` moves the matching row. A `<template>`
+     * element renders nothing, so a disagreement shows as a row that never
+     * appears and as no error at all.
+     */
+    public function testWhatTheWalletSentIsInertUntilTheBrowserSaysSo(): void
+    {
+        $html = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'Your wallet',
+            'claims' => 'under',
+            'rows' => [['wallet', 'not known']],
+            'sent' => ['renew' => 'a renewal of this meter, before this page loaded'],
+        ]]]);
+
+        self::assertMatchesRegularExpression(
+            '~</table>\s*<template data-wallet-sent>\s*<tr data-sent="renew">\s*<th scope="row">sent</th>\s*<td>a renewal of this meter, before this page loaded</td>\s*</tr>\s*</template>~',
+            $html,
+            'the row waits in a template element, after the table it will join',
+        );
+        self::assertSame(1, substr_count($html, 'a renewal of this meter'), 'and nowhere a reader can see it yet');
+
+        $plain = $this->renderStrictly('inspector-sections', ['sections' => [[
+            'heading' => 'Treasury',
+            'rows' => [['balance', '1']],
+        ]]]);
+        self::assertStringNotContainsString('<template', $plain);
+
+        $root = dirname(__DIR__, 2);
+        $key = (string) file_get_contents($root.'/public/assets/key.js');
+        $inspector = (string) file_get_contents($root.'/public/assets/inspector.js');
+
+        self::assertStringContainsString("const SENT = 'newsprint:sent';", $key);
+        self::assertStringContainsString("const SENT = 'newsprint:sent';", $inspector, 'one name for the word the two scripts pass');
+        self::assertStringContainsString('rememberSent(pending.kind);', $key, 'left on *continue*, before the page goes');
+        self::assertStringContainsString("'template[data-wallet-sent]'", $inspector);
+        self::assertStringContainsString("'[data-sent]'", $inspector);
+        self::assertStringContainsString('sessionStorage.removeItem(SENT)', $inspector, 'read once: the row lasts one page');
+    }
+
+    /**
+     * SPEC §9.2: the close's request renders the panel, and the page puts it
+     * where the old one was. The answer carries the sections only, so the
+     * page fills the body it has and tells `inspector.js` to look again.
+     */
+    public function testTheClosePutsItsPanelWhereTheOldOneWas(): void
+    {
+        $root = dirname(__DIR__, 2);
+        $key = (string) file_get_contents($root.'/public/assets/key.js');
+        $front = (string) file_get_contents($root.'/public/index.php');
+
+        self::assertStringContainsString('showPanel(sent.body.panel);', $key);
+        self::assertStringContainsString("querySelector('details.inspector .inspector-body')", $key);
+        self::assertStringContainsString("new CustomEvent('newsprint:inspector')", $key);
+        self::assertSame(2, substr_count($front, "'panel' => \$sections,"), 'both answers carry it: closed, and sent but not landed');
+    }
+
     private function renderStrictly(string $template, array $vars): string
     {
         set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {

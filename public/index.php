@@ -19,10 +19,15 @@ use Newsprint\Auth\KeyProof;
 use Newsprint\Auth\Session;
 use Newsprint\Chain\Faucet;
 use Newsprint\Chain\Keypair;
+use Newsprint\Chain\MessageSigner;
+use Newsprint\Chain\MeterReader;
+use Newsprint\Chain\MeterState;
 use Newsprint\Chain\ProgramEvent;
 use Newsprint\Chain\RequestRead;
 use Newsprint\Chain\Rpc;
 use Newsprint\Chain\RpcException;
+use Newsprint\Chain\SiteReader;
+use Newsprint\Chain\SiteState;
 use Newsprint\Chain\SubmitStatus;
 use Newsprint\Chain\Submitter;
 use Newsprint\Content\Library;
@@ -33,6 +38,7 @@ use Newsprint\Support\RpcTimingMiddleware;
 use Newsprint\Metering\ChargeFollowUp;
 use Newsprint\Metering\ChargeState;
 use Newsprint\Metering\CloseFinisher;
+use Newsprint\Metering\CloseSent;
 use Newsprint\Metering\Decision;
 use Newsprint\Metering\Meter;
 use Newsprint\Metering\MeterMiddleware;
@@ -119,6 +125,50 @@ $meterExists = static function (string $meter) use ($rpcFactory): ?bool {
     } catch (RpcException) {
         return null;
     }
+};
+
+/**
+ * The read the close route makes after it sends (SPEC §5.4): is the meter
+ * account gone?
+ *
+ * The site's accounts and the fund's travel in the same call, so the answer
+ * also fills SPEC §9.2's panel for the page the reader is left on, and the
+ * panel costs the close no round trip. Until 2026-10-04 this read asked for
+ * the meter alone, and the panel on that page went on showing a meter that
+ * was no longer there.
+ *
+ * Not a {@see RequestRead}, which ends the session at the read that finds
+ * the meter gone and hands back no meter. Here a missing meter is the
+ * answer wanted, and the route does its own erasing.
+ *
+ * `exists` is null when the endpoint did not answer, which the route treats
+ * as *still there*: nothing is erased without the account as evidence.
+ *
+ * @return array{exists: ?bool, site: ?SiteState, meter: ?MeterState, error: ?string}
+ */
+$afterClose = static function (Binding $held) use ($config, $rpcFactory): array {
+    $rpc = $rpcFactory();
+    $siteReader = new SiteReader($config, $rpc);
+    $meterReader = new MeterReader($config, $rpc);
+    $read = ['exists' => null, 'site' => null, 'meter' => null, 'error' => null];
+
+    try {
+        $siteAddresses = $siteReader->addresses();
+        $meterAddresses = $meterReader->addresses($held);
+        $accounts = $rpc->multipleAccounts([...$siteAddresses, ...$meterAddresses]);
+        $theirs = array_slice($accounts, count($siteAddresses));
+
+        // The meter is the first of its reader's addresses.
+        $read['exists'] = ($theirs[0] ?? null) !== null;
+        $read['site'] = $siteReader->decode(array_slice($accounts, 0, count($siteAddresses)));
+        if ($read['site'] !== null) {
+            $read['meter'] = $meterReader->decode($held, $meterAddresses, $theirs, $read['site']);
+        }
+    } catch (RpcException|DecodeException $e) {
+        $read['error'] = $e->getMessage();
+    }
+
+    return $read;
 };
 
 $finishClose = static function (string $meter) use ($store, $config, $meterExists): bool {
@@ -1037,7 +1087,7 @@ $app->post('/meter/close/prepare', function (Request $request, Response $respons
  * there, nothing is deleted and a note is left, so that a later request can
  * finish the erasure once the close lands (`$finishClose`).
  */
-$app->post('/meter/close', function (Request $request, Response $response) use ($json, $reads, $store, $config, $rpcFactory, $meterExists): Response {
+$app->post('/meter/close', function (Request $request, Response $response) use ($json, $reads, $store, $config, $rpcFactory, $afterClose, $panel, $view): Response {
     $id = Session::idFrom($request);
     $held = $reads($request)->binding();
     $message = $id === null ? null : $store()->closeMessage($id);
@@ -1065,7 +1115,21 @@ $app->post('/meter/close', function (Request $request, Response $response) use (
     }
 
     // The account is the evidence, not the signature.
-    if ($meterExists($held->meter) !== false) {
+    $after = $afterClose($held);
+
+    // SPEC §9.2: the panel for the page the reader is left on, rendered by
+    // the request that sent the close, from the read that request had to
+    // make. The instructions are read out of the message the key signed,
+    // because that message is what this site kept (`CloseSent`).
+    $sections = $view->render('inspector-sections', ['sections' => $panel->sections(
+        $after['site'],
+        $after['error'],
+        $after['meter'],
+        null,
+        new CloseSent((string) $outcome->signature, MessageSigner::instructions($message), $held->key, $after['exists'] === false),
+    )]);
+
+    if ($after['exists'] !== false) {
         $store()->recordPendingClose($held->meter, (string) $outcome->signature, (int) $config->auth()['session_ttl_s']);
 
         return $json($response, [
@@ -1073,6 +1137,7 @@ $app->post('/meter/close', function (Request $request, Response $response) use (
             'pending' => true,
             'signature' => $outcome->signature,
             'message' => 'sent, and the meter is still on chain; this site will forget it once the close lands',
+            'panel' => $sections,
         ], 202);
     }
 
@@ -1084,6 +1149,7 @@ $app->post('/meter/close', function (Request $request, Response $response) use (
         'ok' => true,
         'signature' => $outcome->signature,
         'erased' => $erased,
+        'panel' => $sections,
     ]), Session::isSecure($request));
 });
 

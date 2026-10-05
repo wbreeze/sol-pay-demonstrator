@@ -9,6 +9,7 @@ use Newsprint\Support\Alias;
 use Newsprint\Support\Config;
 use Newsprint\Support\Inspector;
 use PHPUnit\Framework\TestCase;
+use Newsprint\Metering\CloseSent;
 use Newsprint\Metering\MeterResult;
 use Newsprint\Chain\MeterState;
 use SolPay\Core\AccountMeta;
@@ -515,7 +516,7 @@ final class InspectorTest extends TestCase
             10_000,
             true,
             1,
-            [new Instruction($program->id, $accounts, (string) hex2bin('1e8e96a17c2e1d7e'))],
+            [new Instruction($program->id, $accounts, (string) hex2bin('1e8e96a17c2e1d7e0100000000000000'))],
         );
     }
 
@@ -544,10 +545,158 @@ final class InspectorTest extends TestCase
             'The last transaction',
             'Your meter, on chain',
             'Your fund, on chain',
+            'Your wallet',
             'Treasury',
             'Site account, decoded',
             'Deployment',
         ], array_column($sections, 'heading'));
+    }
+
+    /**
+     * *Your wallet* (2026-10-04): the wallet as the fund names it, and where
+     * the panel learned it. The heading has no *on chain*, because nothing
+     * in the section was read from the wallet's own account.
+     */
+    public function testYourWalletShowsTheReaderAndSaysTheFundNamedIt(): void
+    {
+        $sections = $this->inspector()->sections($this->state(), null, $this->meter());
+        $wallet = $this->section($sections, 'Your wallet');
+
+        self::assertSame('under', $wallet['claims'] ?? null);
+        self::assertCount(1, $wallet['rows'], 'one row from the server; `sent` is the browser\'s to add');
+        [$label, $value, $claim] = $wallet['rows'][0];
+        self::assertSame('wallet', $label);
+        self::assertSame(self::READER, $value['value']);
+        self::assertStringStartsWith(Alias::READER, $value['alias']);
+        self::assertSame('named by your fund; this page was never told it', $claim);
+    }
+
+    /** With no fund account there is no wallet to show, and the row says why. */
+    public function testYourWalletSaysSoWhenTheFundThatNamesItIsNotThere(): void
+    {
+        $sections = $this->inspector()->sections($this->state(), null, $this->meter(withFund: false));
+
+        self::assertSame(
+            'not known: this page was never told it, and the fund that names it is not there',
+            $this->row($sections, 'Your wallet', 'wallet'),
+        );
+    }
+
+    /**
+     * The three things a wallet sends here, in the words the template puts
+     * into its inert element. The keys are the kinds `assets/key.js` leaves
+     * for the next page, which are the `data-kind` values of the three forms.
+     */
+    public function testYourWalletCarriesARowForEachThingAWalletSends(): void
+    {
+        $wallet = $this->section($this->inspector()->sections($this->state(), null, $this->meter()), 'Your wallet');
+
+        self::assertSame(['setup', 'renew', 'deposit'], array_keys($wallet['sent'] ?? []));
+        foreach ($wallet['sent'] as $text) {
+            self::assertStringEndsWith('before this page loaded', $text, 'worded to stay true on a page left open');
+        }
+
+        $root = dirname(__DIR__, 2);
+        $forms = (string) file_get_contents($root.'/templates/meter.php').(string) file_get_contents($root.'/templates/manage-meter.php');
+        foreach (array_keys($wallet['sent']) as $kind) {
+            self::assertStringContainsString('data-kind="'.$kind.'"', $forms, "a form sends the kind {$kind}");
+        }
+    }
+
+    /** Nobody without a meter has a fund on this panel, so there is no wallet section either. */
+    public function testThereIsNoWalletSectionWithoutAMeter(): void
+    {
+        self::assertNotContains('Your wallet', array_column($this->inspector()->sections($this->state()), 'heading'));
+    }
+
+    /** The meter as the read after a close finds it: the address, and no account. */
+    private function closedMeter(): MeterState
+    {
+        $open = $this->meter();
+
+        return new MeterState($open->meterAddress, $open->fund, $open->fundTokenAccount, null, $open->funds, $this->state()->site, 6, $open->fundAccount);
+    }
+
+    private function close(bool $landed = true): CloseSent
+    {
+        $program = Config::load(dirname(__DIR__, 2))->program();
+        $open = $this->meter();
+        self::assertNotNull($open->meter);
+
+        return new CloseSent(
+            '5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW',
+            [new Instruction($program->id, [
+                new AccountMeta($open->meter->key, true, false),
+                new AccountMeta(self::SITE, false, false),
+                new AccountMeta($open->fund, false, true),
+                new AccountMeta(self::READER, false, true),
+                new AccountMeta($open->meterAddress, false, true),
+            ], (string) hex2bin('a1b2c3d4e5f60718'))],
+            $open->meter->key,
+            $landed,
+        );
+    }
+
+    /**
+     * SPEC §9.2: a close is the last transaction on the page that follows
+     * it, with the instruction the key signed. Until 2026-10-04 the close
+     * answered JSON and the panel kept showing the meter that had gone.
+     */
+    public function testACloseIsTheLastTransaction(): void
+    {
+        $close = $this->close();
+        $sections = $this->inspector()->sections($this->state(), null, $this->closedMeter(), null, $close);
+        $last = $this->section($sections, 'The last transaction');
+
+        self::assertSame($close->signature, $this->row($sections, 'The last transaction', 'signature'));
+        self::assertSame('closed — the meter account is gone', $this->row($sections, 'The last transaction', 'outcome'));
+        self::assertSame($close->signature, $last['event'] ?? null, 'the event is read when the panel opens, as a charge\'s is');
+        self::assertSame($close->signature, $last['instructions'] ?? null);
+        self::assertNull($this->row($sections, 'The last transaction', 'items'), 'a close meters nothing');
+
+        // Where the rows came from is said, because the builder's object did
+        // not reach this request and the kept message did.
+        self::assertStringContainsString('the message that this browser\'s key signed', (string) $this->row($sections, 'The last transaction', 'instructions'));
+
+        $accounts = array_values(array_filter($last['rows'], static fn (array $row): bool => str_starts_with($row[0], 'ix 1 · account')));
+        self::assertCount(5, $accounts);
+        self::assertSame('signer', $accounts[0][2]);
+        self::assertSame('readonly', $accounts[1][2]);
+        self::assertSame('writable', $accounts[4][2]);
+
+        // The meter is gone and cannot name its key, so the close does. The
+        // signer of the page's one instruction is not an unplaced address.
+        $names = $this->names($sections);
+        foreach ($accounts as $account) {
+            self::assertStringStartsNotWith(Alias::UNNAMED, $account[1]['alias']);
+        }
+        self::assertStringStartsWith(Alias::BROWSER_KEY, $names[$close->key]['alias']);
+        self::assertStringContainsString('it signed this close', (string) $names[$close->key]['note']);
+
+        $data = array_values(array_filter($names, static fn (array $n): bool => str_starts_with($n['alias'], Alias::DATA)));
+        self::assertStringEndsWith('8 bytes, the discriminator alone', (string) $data[0]['note']);
+
+        self::assertSame('not found — it has been closed', $this->row($sections, 'Your meter, on chain', 'meter account'));
+        self::assertContains('Your wallet', array_column($sections, 'heading'), 'the fund outlives the meter, and still names the wallet');
+    }
+
+    /** SPEC §5.4: the outcome is the account. A meter still there is a close that has not landed. */
+    public function testACloseThatHasNotLandedSaysTheMeterIsStillThere(): void
+    {
+        $sections = $this->inspector()->sections($this->state(), null, $this->meter(), null, $this->close(landed: false));
+
+        self::assertStringStartsWith('sent — the meter account is still there', (string) $this->row($sections, 'The last transaction', 'outcome'));
+        self::assertNull($this->row($sections, 'Your meter, on chain', 'meter account'));
+    }
+
+    /** The close went out whether or not the read after it answered, so the panel still shows it. */
+    public function testACloseIsShownWhenTheReadAfterItFailed(): void
+    {
+        $close = $this->close(landed: false);
+        $sections = $this->inspector()->sections(null, 'the endpoint did not answer', null, null, $close);
+
+        self::assertSame('the endpoint did not answer', $this->row($sections, 'This site, on chain', 'read failed'));
+        self::assertSame($close->signature, $this->row($sections, 'The last transaction', 'signature'));
     }
 
     /** The drift alarm sits with the account it disagrees with. */

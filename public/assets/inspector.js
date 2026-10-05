@@ -1,6 +1,7 @@
 /**
- * Three small jobs in the inspector: copying an address, reading the panel on
- * a page that deferred it, and reading the event.
+ * Four small jobs in the inspector: copying an address, reading the panel on
+ * a page that deferred it, reading the event, and saying what the wallet
+ * sent.
  *
  * ---- copying ----
  *
@@ -138,18 +139,68 @@ const readEvent = async () => {
     }
 };
 
+/* ---- what the wallet sent ----
+ *
+ * A wallet submits its own setup, renewal or deposit, so no request to this
+ * site knows that one has just gone. This browser knows: the reader pressed
+ * *continue*, and `assets/key.js` left the kind in `sessionStorage` on the
+ * way to this page. *Your wallet* carries a row for each kind in an inert
+ * `<template>` element, written by the server with the panel's other words.
+ * This moves the matching row into the table and writes nothing itself.
+ *
+ * **Read once and removed, so the row lasts one page.** A reload loses the
+ * row, as a reload loses a charge's instructions. The kind is kept in memory
+ * for the life of the page, because an article's answer replaces the panel's
+ * body (`assets/swap.js`) and the row has to be put back into the new one.
+ *
+ * A prerendered page waits until it is shown. A page that is never shown
+ * would otherwise take the word and say it to nobody. */
+const SENT = 'newsprint:sent';
+let sent = null;
+
+const takeSent = () => {
+    try {
+        sent = sessionStorage.getItem(SENT);
+        sessionStorage.removeItem(SENT);
+    } catch {
+        // No storage: nothing was left, and nothing is said.
+    }
+};
+
+const showSent = () => {
+    if (!sent || !panel) return;
+    const kept = panel.querySelector('template[data-wallet-sent]');
+    const table = kept?.parentElement?.querySelector('table');
+    if (!table || table.querySelector('[data-sent]')) return;
+
+    const row = [...kept.content.querySelectorAll('[data-sent]')]
+        .find((candidate) => candidate.dataset.sent === sent);
+    if (row) (table.tBodies[0] ?? table).append(row.cloneNode(true));
+};
+
 const opened = () => {
     if (!panel.open) return;
-    loadPanel();
+    // After the deferred read as well: that panel arrives with its own
+    // `<template>` element, and the row belongs in it too.
+    loadPanel().then(showSent);
     readEvent();
 };
 
+const arrived = () => {
+    if (document.prerendering) return;
+    takeSent();
+    showSent();
+};
+
 if (panel) {
+    arrived();
+    document.addEventListener('prerenderingchange', arrived);
     opened();
     panel.addEventListener('toggle', opened);
     document.addEventListener('newsprint:inspector', () => {
         panelAsked = false;
         eventAsked = false;
+        showSent();
         opened();
     });
 }
