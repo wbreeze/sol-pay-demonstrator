@@ -13,22 +13,17 @@ use Psr\Http\Message\ServerRequestInterface;
  * `SameSite=Lax` (SPEC §5), which a browser does not send on a cross-site
  * POST, so a forged request arrives anonymous with no reader to charge and no
  * session to act on. SPEC §7.1 carries that argument and `SessionCookieTest`
- * pins the attribute, which between them cover twelve of this site's thirteen
- * POST routes.
+ * pins the attribute.
  *
- * **First-run setup is the thirteenth, and the guard cannot reach it.** The
- * screen runs before anyone has signed in, so the request carries no session —
- * there is no cookie to withhold. SPEC §12.0 decided setup would be a page
- * rather than a command, and a route that provisions a site while
- * unauthenticated is the part of that bargain that has to be paid here
- * instead.
+ * **The faucet is the route that guard cannot reach.** A reader asks the
+ * faucet for coin before any session exists, so the request carries no cookie
+ * to withhold, and a form on another site could otherwise spend the faucet
+ * key's reserve (SPEC §4.3).
  *
- * What it is worth, stated honestly: on the shape SPEC §12.0 describes — each
- * person running their own copy as a local process — a forged POST provisions
- * a site the operator was about to provision anyway and spends cents of devnet
- * SOL. Nothing reaches the attacker. The reason to write it is that this
- * screen is the only worked example of `initialize_site` anywhere, and an
- * unauthenticated state-changing POST is not the thing to be an example of.
+ * First-run setup was the other such route until 2026-10-05, when it became
+ * `bin/setup` and stopped being a request at all. That is the better answer
+ * where it is available: a guard is what a route needs when it has to exist.
+ * The class keeps its namespace because moving it would be churn.
  */
 final class SameOrigin
 {

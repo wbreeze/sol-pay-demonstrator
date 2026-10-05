@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+#
+# Prepare a bare machine to be the hosted instance (SPEC §12.6). This runs ON
+# THE HOST, as root, once. `bin/host` sends it over SSH when the host has no
+# checkout. Nobody runs it by hand.
+#
+#   sudo bash host-bootstrap newsprint.example.org next-ten
+#
+# Written for Ubuntu 24.04, and every package comes from Ubuntu's own
+# archive: PHP-FPM, Composer, git, and Caddy for TLS. Running it a second time
+# changes nothing that is already in place.
+#
+# What it leaves behind:
+#
+#   /srv/newsprint            a shallow clone, owned by www-data
+#   /srv/newsprint/var        mode 700, where the keys and the store will go
+#   /etc/caddy/Caddyfile      the site, served over HTTPS
+#   /etc/cron.d/newsprint     bin/sweep every five minutes (SPEC §10.4)
+#
+# **It installs no keys.** They are made on the development machine by
+# `bin/setup` and arrive with `bin/host`, so this script can be read in full
+# without finding a secret.
+#
+# **Caddy gets its own certificate**, from Let's Encrypt, by answering on
+# ports 80 and 443. So the domain's address record has to point at this
+# machine, and the machine's firewall has to admit both ports, before the
+# site answers. Lightsail opens 80 by default and not 443.
+
+set -euo pipefail
+
+domain="${1:?usage: host-bootstrap DOMAIN BRANCH}"
+branch="${2:?usage: host-bootstrap DOMAIN BRANCH}"
+
+REPOSITORY=https://github.com/wbreeze/sol-pay-demonstrator.git
+SITE_DIR=/srv/newsprint
+SITE_USER=www-data
+
+[ "$(id -u)" = 0 ] || { echo "host-bootstrap: run as root" >&2; exit 2; }
+
+echo "bootstrap: packages"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update --quiet
+# The extensions composer.json requires. sodium and json are in php-common.
+apt-get install --yes --quiet \
+    git unzip caddy composer \
+    php-cli php-fpm php-curl php-sqlite3 php-mbstring
+
+fpm="php$(php -r 'echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;')-fpm"
+
+echo "bootstrap: checkout"
+if [ ! -d "$SITE_DIR/.git" ]; then
+    install --directory --owner "$SITE_USER" --group "$SITE_USER" "$SITE_DIR"
+    # Shallow: the host runs one commit and has no use for the history.
+    runuser -u "$SITE_USER" -- git clone --quiet --depth 1 --branch "$branch" "$REPOSITORY" "$SITE_DIR"
+fi
+install --directory --mode 700 --owner "$SITE_USER" --group "$SITE_USER" "$SITE_DIR/var"
+
+echo "bootstrap: web server"
+# Caddy reaches PHP-FPM through a socket that belongs to www-data's group.
+usermod --append --groups "$SITE_USER" caddy
+cat > /etc/caddy/Caddyfile <<CADDY
+# Written by bin/host-bootstrap in the Newsprint repository. Edit it there.
+${domain} {
+    root * ${SITE_DIR}/public
+    encode gzip
+    php_fastcgi unix//run/php/${fpm}.sock
+    file_server
+}
+CADDY
+systemctl enable --quiet --now "$fpm" caddy
+systemctl restart caddy
+
+echo "bootstrap: the sweep"
+cat > /etc/cron.d/newsprint <<CRON
+# Written by bin/host-bootstrap. SPEC §10.4: expired rows go within five minutes.
+*/5 * * * * ${SITE_USER} ${SITE_DIR}/bin/sweep
+CRON
+chmod 644 /etc/cron.d/newsprint
+
+echo "bootstrap: done"

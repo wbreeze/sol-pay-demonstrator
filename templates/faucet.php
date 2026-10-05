@@ -14,6 +14,7 @@
  * @var string $demo    the DEMO grant, in whole units
  * @var string $sol     the SOL grant, in whole units
  * @var bool $provisioned
+ * @var bool $hosted    whether this is the hosted instance, which may be taken down (SPEC §12.6)
  * @var string $address what was pasted, to show again
  * @var ?array{granted: bool, reason: string, message: string, signature: ?string} $result
  * @var ?string $development the development wallet's address, when it is on (SPEC §12.6)
@@ -74,6 +75,16 @@ $symbol = View::e((string) $site['symbol']);
             it is a little over one minimum limit, so that a fund can run
             short and this site can show what happens then.
         </p>
+<?php if ($hosted): ?>
+        <?php /* §12.6: said before the reader commits anything, and only where it is true. */ ?>
+        <p data-faucet-temporary>
+            <strong>This copy of the site is temporary.</strong> It may be
+            taken down without notice. A meter left open when that happens
+            keeps its rent, about 0.0013 SOL on devnet, and its fund cannot
+            be closed until the meter is. Close your meter when you finish
+            reading, while the site is still here to do it.
+        </p>
+<?php endif ?>
         <p class="fine">
             The address you paste is the one thing this site is told about
             your wallet on purpose. It is kept, with the time, so that the

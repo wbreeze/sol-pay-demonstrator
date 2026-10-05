@@ -14,6 +14,11 @@ use SolPay\Core\Program;
  * result of a chain interaction is not. SPEC §12.0 has setup generating the
  * second half on first run, so `isProvisioned()` is the question every entry
  * point asks before it does anything else.
+ *
+ * **The second half lives in one directory, and the directory can be named.**
+ * It is `var/` for the site this checkout serves. `bin/setup --into` names
+ * another, which is how the hosted instance's keys are made on the
+ * development machine and kept apart from the local site's (SPEC §12.6).
  */
 final class Config
 {
@@ -25,34 +30,56 @@ final class Config
      */
     private function __construct(
         public readonly string $root,
+        private readonly string $var,
         private readonly array $static,
         private ?array $provisioned,
     ) {
     }
 
-    public static function load(string $root): self
+    /**
+     * @param string|null $var where the provisioned half lives. Null is this
+     *                         checkout's own `var/`
+     */
+    public static function load(string $root, ?string $var = null): self
     {
         /** @var array<string, mixed> $static */
         $static = require $root.'/config/site.php';
+        $var = rtrim($var ?? $root.'/var', '/');
 
-        $provisioned = null;
-        $path = $root.'/var/site.json';
-        if (is_file($path)) {
-            $decoded = json_decode((string) file_get_contents($path), true);
-            if (is_array($decoded)) {
-                $provisioned = $decoded;
-            }
-        }
-
-        return new self($root, $static, $provisioned);
+        return new self($root, $var, $static, self::readJson($var.'/site.json'));
     }
 
-    /** The site's public base URL, with no trailing slash, or null where it has none (SPEC §12.3). */
+    /**
+     * The site's public base URL, with no trailing slash, or null where it
+     * has none (SPEC §12.3).
+     *
+     * Only the hosted instance has one, and its address is a fact about that
+     * machine and not about the repository. So `bin/host` writes it to
+     * `var/host.json` beside the keys, and the tracked file stays null.
+     */
     public function publicUrl(): ?string
     {
         $url = $this->static['public_url'] ?? null;
+        if (!is_string($url) || $url === '') {
+            $url = self::readJson($this->var.'/host.json')['public_url'] ?? null;
+        }
 
         return is_string($url) && $url !== '' ? rtrim($url, '/') : null;
+    }
+
+    /**
+     * Whether this copy is the hosted instance: the one other people's
+     * wallets meet, and the one that may be taken down (SPEC §12.6).
+     */
+    public function isHosted(): bool
+    {
+        return $this->publicUrl() !== null;
+    }
+
+    /** The directory the provisioned half lives in. */
+    public function varDir(): string
+    {
+        return $this->var;
     }
 
     public function rpcUrl(): string
@@ -157,7 +184,7 @@ final class Config
     public function provisioned(): array
     {
         if ($this->provisioned === null) {
-            throw new \RuntimeException('not provisioned: run first-run setup (SPEC §12.0)');
+            throw new \RuntimeException('not provisioned: run bin/setup (SPEC §12.0)');
         }
 
         return $this->provisioned;
@@ -173,7 +200,7 @@ final class Config
         $this->ensureVar();
         $merged = array_merge($this->provisioned ?? [], $addresses);
         file_put_contents(
-            $this->root.'/var/site.json',
+            $this->var.'/site.json',
             json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n",
         );
         $this->provisioned = $merged;
@@ -183,7 +210,7 @@ final class Config
     {
         $this->ensureVar();
 
-        return $this->root.'/var/newsprint.sqlite';
+        return $this->var.'/newsprint.sqlite';
     }
 
     /**
@@ -196,14 +223,24 @@ final class Config
     {
         $this->ensureVar();
 
-        return $this->root.'/var/'.$role.'.json';
+        return $this->var.'/'.$role.'.json';
     }
 
     private function ensureVar(): void
     {
-        $dir = $this->root.'/var';
-        if (!is_dir($dir)) {
-            mkdir($dir, 0o700, true);
+        if (!is_dir($this->var)) {
+            mkdir($this->var, 0o700, true);
         }
+    }
+
+    /** @return array<string, string>|null null when the file is absent or is not a JSON object */
+    private static function readJson(string $path): ?array
+    {
+        if (!is_file($path)) {
+            return null;
+        }
+        $decoded = json_decode((string) file_get_contents($path), true);
+
+        return is_array($decoded) ? $decoded : null;
     }
 }

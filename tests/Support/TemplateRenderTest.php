@@ -421,7 +421,7 @@ final class TemplateRenderTest extends TestCase
      */
     public function testTheFaucetSaysWhatItSendsBeforeItIsAsked(): void
     {
-        $vars = ['site' => $this->site(), 'demo' => '0.6', 'sol' => '0.01', 'provisioned' => true, 'address' => '', 'result' => null, 'development' => null];
+        $vars = ['site' => $this->site(), 'demo' => '0.6', 'sol' => '0.01', 'provisioned' => true, 'hosted' => false, 'address' => '', 'result' => null, 'development' => null];
         $html = $this->renderStrictly('faucet', $vars);
         $said = self::said($html);
 
@@ -452,6 +452,34 @@ final class TemplateRenderTest extends TestCase
         self::assertStringContainsString('DEVWfig', $development);
 
         self::assertStringContainsString('has not been set up yet', self::said($this->renderStrictly('faucet', ['provisioned' => false] + $vars)));
+
+        // SPEC §12.6: the hosted instance may be taken down, and says so
+        // before the reader commits anything. A local copy does not say it,
+        // because there it is not true.
+        self::assertStringNotContainsString('data-faucet-temporary', $html);
+        $hosted = self::said($this->renderStrictly('faucet', ['hosted' => true] + $vars));
+        self::assertStringContainsString('This copy of the site is temporary', $hosted);
+        self::assertStringContainsString('Close your meter when you finish reading', $hosted);
+    }
+
+    /**
+     * SPEC §12.0: setup is `bin/setup`. The page left at `/setup` names the
+     * command and offers nothing to press, in either state.
+     */
+    public function testTheSetupPageNamesTheCommandAndHasNoButton(): void
+    {
+        $missing = $this->renderStrictly('setup', ['provisioned' => false, 'site' => $this->site() + ['decimals' => 6]]);
+        self::assertStringContainsString('<code>bin/setup</code>', $missing);
+        self::assertStringContainsString('initialize_site', $missing);
+
+        $done = $this->renderStrictly('setup', ['provisioned' => true, 'site' => $this->site() + ['decimals' => 6]]);
+        self::assertStringContainsString('is set up', self::said($done));
+        self::assertStringNotContainsString('bin/setup', $done);
+
+        foreach ([$missing, $done] as $html) {
+            self::assertStringNotContainsString('<form', $html);
+            self::assertStringNotContainsString('<button', $html);
+        }
     }
 
     /** §8.2's `Expired`, which the delegate design never had. */

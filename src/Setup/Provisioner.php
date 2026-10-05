@@ -20,10 +20,15 @@ use SolPay\Core\Pda;
  * First-run setup (SPEC §12.0 and §4).
  *
  * Creates the DEMO mint, the treasury, and the site account, and records the
- * addresses. It is the only worked example of `initialize_site` anywhere, and
- * §3 makes it a screen rather than a command: every call it needs is available
- * over JSON-RPC including `requestAirdrop`, so an operator needs one language
- * runtime and no toolchain.
+ * addresses. It is the only worked example of `initialize_site` anywhere.
+ * Every call it needs is available over JSON-RPC including `requestAirdrop`,
+ * so an operator needs one language runtime and no toolchain.
+ *
+ * **Run by `bin/setup`, never by a web request.** It was a screen until
+ * 2026-10-05. A screen meant the authority key was generated inside a request,
+ * and that a public host stood unprovisioned behind a button anyone could
+ * press. This class did not change when the screen went, which is the
+ * argument for having kept it apart from the route.
  *
  * **Resumable, because the alternative is expensive.** Each step asks the
  * chain whether its work is already done, and records what it created as it
@@ -31,10 +36,10 @@ use SolPay\Core\Pda;
  * refused airdrop, a closed laptop, a rate limit — picks up where it stopped
  * rather than creating a second mint and abandoning the rent on the first.
  *
- * **It never runs against a provisioned site.** The separation §3 wanted from
- * an operator CLI is enforced here instead: this class refuses when the site
- * account already exists, which is a stronger guarantee than a command nobody
- * happens to run twice.
+ * **It never runs against a provisioned site.** This class refuses when the
+ * site account already exists, which is a stronger guarantee than a command
+ * nobody happens to run twice. New keys for a site that has them are
+ * {@see KeyRoll}'s business, and a deliberate act.
  */
 final class Provisioner
 {
@@ -45,7 +50,7 @@ final class Provisioner
     ) {
     }
 
-    /** What the screen shows before anything is done. @return array<string, mixed> */
+    /** What `bin/setup` prints before anything is done. @return array<string, mixed> */
     public function status(): array
     {
         $authority = Keypair::loadOrCreate($this->config->keypairPath('authority'));

@@ -106,6 +106,7 @@ Both scripts need PHP and the git history together.
 composer install
 bin/build-content         # content/*.md into var/content, which is gitignored
 bin/devnet-smoke          # airdrop, then one real transaction (see below)
+bin/setup                 # first run: keys, mint, treasury and site, on devnet
 bin/run-dev               # http://localhost:8000
 bin/check                 # what CI checks, before CI sees it
 ```
@@ -114,9 +115,10 @@ PHP 8.2 or later, with `sodium`, `pdo_sqlite` and `curl` — all bundled. 8.2 is
 where `composer.lock` resolves with `--no-dev`, and CI checks that in a job of
 its own.
 
-First-run setup is a screen rather than a command. It creates the demo mint and
-the treasury account, calls `initialize_site` once, and writes the resulting
-addresses into the configuration that the server reads. See
+First-run setup is `bin/setup`. It generates the site's keys, creates the demo
+mint and the treasury account, calls `initialize_site` once, and writes the
+resulting addresses into `var/`, where the server reads them. Until it has
+run, the site says so and names the command. See
 [SPEC.md §12.0](SPEC.md#120-the-shape).
 
 A reader's setup is a scan from a phone's wallet, and a phone cannot reach
@@ -166,6 +168,35 @@ is not keeping.
 `bin/run-dev` runs no schedule. On a development copy the charge-time sweep is
 enough.
 
+### The hosted instance
+
+One copy runs on a small virtual machine, for trying a real wallet and for a
+link to share. It is temporary, and its faucet page says so. Three scripts
+make it, and only the first is ever typed:
+
+```
+bin/host ubuntu@203.0.113.7 https://newsprint.example.org   # the first time
+bin/host                                                    # every time after
+bin/host --roll                                             # new keys: a new site
+bin/host --fetch                                            # the host's keys, back here
+```
+
+`bin/host` runs on the development machine. It makes the hosted site's keys
+with `bin/setup --into var/hosted` when there are none, and reuses them
+otherwise, so that replacing the machine does not strand the meters readers
+left open. It sends `bin/host-bootstrap` to a machine with no checkout, copies
+the keys up, and runs `bin/deploy` on the host. `bin/deploy` pulls the branch
+from the public repository, installs, builds the content and reloads PHP-FPM.
+
+A deploy is a push: the host gets what the repository holds, on the branch
+the development checkout is on.
+
+Before the first run, the machine needs three things that no script here
+does: an Ubuntu 24.04 instance reachable over SSH by a user with `sudo`, an
+address record for the domain pointing at it, and ports 80 and 443 open in
+its firewall. See
+[SPEC.md §12.6](SPEC.md#126-hosting-and-the-development-wallet).
+
 ## The endpoints
 
 What this server answers, and the one property worth knowing before reading
@@ -188,7 +219,7 @@ cannot keep them honest about what the routes do.
 | `GET /meter` | `manage_meter`: reachable at any time rather than only at the limit (`SPEC.md` §6) |
 | `GET /privacy` | a 301 to `/a/privacy`. `SPEC.md` §10.2 asks that the URL carry the page, not that a second handler render it |
 | `GET /faucet` | the demo's faucet: a form that takes a pasted wallet address (`SPEC.md` §4.3) |
-| `GET /setup` | first run, once per deployment (`SPEC.md` §12.0) |
+| `GET /setup` | says to run `bin/setup` on a copy that has not been set up. It runs nothing (`SPEC.md` §12.0) |
 
 ### The charging path
 
@@ -200,7 +231,6 @@ Every one of these is a POST, and each answers with HTML.
 | `POST /a/{slug}/confirm` | what became of that charge, asked on a later request (`SPEC.md` §7.3) |
 | `POST /meter/advance` | seven views in one instruction, so the collection threshold is reached on purpose (`SPEC.md` §7.4) |
 | `POST /faucet` | sends the grant to the pasted address, once per address, and refuses a request that came from another site's page (`SPEC.md` §4.3) |
-| `POST /setup` | runs the provisioner once, and refuses a request that came from another site's page (`SPEC.md` §12.0) |
 
 ### Called by the page's own scripts
 

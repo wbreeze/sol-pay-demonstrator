@@ -14,9 +14,10 @@ use Slim\Psr7\Factory\ServerRequestFactory;
  * The one POST route with no session to speak for it.
  *
  * `SessionCookieTest` proves `SameSite=Lax` is set, which is what stops a
- * cross-site POST reaching a reader's money (SPEC §7.1). `POST /setup` carries
- * no session at all, so that proof says nothing about it, and this is the
- * substitute.
+ * cross-site POST reaching a reader's money (SPEC §7.1). `POST /faucet`
+ * carries no session at all, so that proof says nothing about it, and this is
+ * the substitute. `POST /setup` was the other such route until setup became
+ * `bin/setup`.
  *
  * The route test is the one that matters. A guard nothing calls is
  * `sweepExpired()` again: a passing unit test proves the function works and
@@ -102,13 +103,13 @@ final class SameOriginTest extends TestCase
     }
 
     /**
-     * The claim the route has to make: a forged POST is refused, and the
-     * provisioner is never built — the container this runs in cannot reach
-     * devnet, so a request that got as far as an RPC call could not answer 403.
+     * The claim the route has to make: a forged POST is refused before the
+     * faucet is built. The container this runs in cannot reach devnet, so a
+     * request that got as far as an RPC call could not answer 403.
      */
-    public function testTheSetupRouteRefusesACrossSitePost(): void
+    public function testTheFaucetRouteRefusesACrossSitePost(): void
     {
-        $response = $this->app()->handle($this->post('http://localhost:8000/setup', [
+        $response = $this->app()->handle($this->post('http://localhost:8000/faucet', [
             'Sec-Fetch-Site' => 'cross-site',
             'Origin' => 'https://example.test',
         ]));
@@ -119,6 +120,24 @@ final class SameOriginTest extends TestCase
             (string) $response->getBody(),
             'the screen has to say why, in its own vocabulary',
         );
+    }
+
+    /**
+     * Setup is a command (SPEC §12.0). No request may run it, from this site
+     * or any other, and the page left at its address has no form to post.
+     */
+    public function testNoRequestRunsSetup(): void
+    {
+        $app = $this->app();
+
+        $posted = $app->handle($this->post('http://localhost:8000/setup', ['Sec-Fetch-Site' => 'same-origin']));
+        self::assertSame(405, $posted->getStatusCode());
+
+        $page = (string) $app->handle(
+            (new ServerRequestFactory())->createServerRequest('GET', 'http://localhost:8000/setup'),
+        )->getBody();
+        self::assertStringContainsString('bin/setup', $page);
+        self::assertStringNotContainsString('<form', $page);
     }
 
     /** @param array<string, string> $headers */

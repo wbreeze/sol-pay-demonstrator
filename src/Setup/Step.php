@@ -5,10 +5,9 @@ declare(strict_types=1);
 namespace Newsprint\Setup;
 
 /**
- * One thing setup did, or did not have to do. The screen renders these in
- * order, which is the whole of its reporting: an operator who has just handed
- * a program authority over their money should be able to see what was created
- * and what was already there.
+ * One thing setup did, or did not have to do. `bin/setup` prints these in
+ * order, which is the whole of its reporting: an operator should be able to
+ * see what was created and what was already there.
  */
 final class Step
 {

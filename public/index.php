@@ -50,9 +50,7 @@ use Newsprint\Pay\QrCode;
 use Newsprint\Pay\SetupAnswers;
 use Newsprint\Pay\SetupComposer;
 use Newsprint\Pay\SetupRefusal;
-use Newsprint\Setup\Provisioner;
 use Newsprint\Setup\SameOrigin;
-use Newsprint\Setup\Step;
 use Newsprint\Store\Database;
 use Newsprint\Store\Store;
 use Newsprint\Support\Inspector;
@@ -510,7 +508,11 @@ $meterVars = static function (Request $request, ?MeterResult $result = null) use
 
 $app = AppFactory::create();
 $app->addRoutingMiddleware();
-$errorMiddleware = $app->addErrorMiddleware(true, true, true);
+// Error details, a file path and a stack trace among them, are for the person
+// running a copy on their own machine. The hosted instance answers strangers
+// (SPEC §12.6), so there the page says what went wrong and not where. Both
+// still log.
+$errorMiddleware = $app->addErrorMiddleware(!$config->isHosted(), true, true);
 
 $page = static function (Response $response, string $html, int $status = 200): Response {
     $response->getBody()->write($html);
@@ -1517,6 +1519,7 @@ $faucetPage = static function (Request $request, string $address, ?array $result
         'demo' => Units::fromBaseUnits((int) $amounts['demo_base_units'], (int) $config->siteParams()['decimals']),
         'sol' => Units::fromBaseUnits((int) $amounts['sol_lamports'], 9),
         'provisioned' => $config->isProvisioned(),
+        'hosted' => $config->isHosted(),
         'address' => $address,
         'result' => $result,
         'development' => $development,
@@ -1531,8 +1534,8 @@ $app->post('/faucet', function (Request $request, Response $response) use ($page
     $address = trim((string) (((array) $request->getParsedBody())['address'] ?? ''));
 
     // No session exists for `SameSite=Lax` to be absent from, so this route
-    // asks where the request came from, as `/setup` does. A form on another
-    // site must not be able to spend the faucet's reserve.
+    // asks where the request came from. A form on another site must not be
+    // able to spend the faucet's reserve.
     if (!SameOrigin::allows($request)) {
         $said = 'this request did not come from a page on this site';
 
@@ -1550,69 +1553,18 @@ $app->post('/faucet', function (Request $request, Response $response) use ($page
 });
 
 /**
- * SPEC §12.0 and §3: first-run setup is a screen. It is the only worked example
- * of `initialize_site` anywhere, and the separation an operator CLI would have
- * given is enforced in the code instead — the provisioner refuses to run
- * against a site that already exists.
+ * SPEC §12.0: first-run setup is `bin/setup`, and this page says so.
+ *
+ * It was the setup screen until 2026-10-05, with a button that ran the
+ * provisioner. The page stays because an unprovisioned copy has to say what
+ * is missing, and the faucet, the meter and the inspector all link here. It
+ * makes no key and sends nothing.
  */
-$provisioner = static function () use ($config): Provisioner {
-    $rpc = new Rpc(
-        $config->rpcUrl(),
-        $config->program(),
-        (string) $config->rpc()['commitment'],
-        (int) $config->rpc()['http_timeout_s'],
-    );
-
-    return new Provisioner($config, $rpc, Submitter::fromConfig($rpc, $config));
-};
-
-$app->get('/setup', function (Request $request, Response $response) use ($view, $shell, $page, $provisioner, $config, $siteVars, $reads): Response {
-    $error = null;
-    $status = ['provisioned' => $config->isProvisioned(), 'authority' => '', 'faucet' => '', 'balance' => 0, 'needed' => 0, 'funded' => false];
-
-    try {
-        $status = $provisioner()->status();
-    } catch (RpcException $e) {
-        // The endpoint being unreachable is an ordinary thing on a laptop, and
-        // a stack trace is a poor way to say so.
-        $error = $e->getMessage();
-    }
-
+$app->get('/setup', function (Request $request, Response $response) use ($view, $shell, $page, $config, $siteVars, $reads): Response {
     return $page($response, $shell('First run', $view->render('setup', [
-        'status' => $status,
+        'provisioned' => $config->isProvisioned(),
         'site' => $siteVars($reads($request)),
-        'setup' => $config->setup(),
-        'error' => $error,
     ]), $reads($request)));
-});
-
-$app->post('/setup', function (Request $request, Response $response) use ($view, $shell, $page, $provisioner, $root): Response {
-    // The site's answer to a forged POST is `SameSite=Lax` on the session
-    // cookie (§5), and this is the one route with no session for it to be
-    // absent from. Refused here, before the provisioner is built, so a request
-    // from somebody else's page does not even open an RPC connection.
-    if (!SameOrigin::allows($request)) {
-        return $page($response, $shell('Setup stopped', $view->render('setup-ran', [
-            'steps' => [Step::blocked(
-                'request',
-                'This request did not come from a page on this site, so setup did not run. Open the setup screen and press the button there.',
-            )],
-            'provisioned' => Config::load($root)->isProvisioned(),
-            'refused' => true,
-        ])), 403);
-    }
-
-    $steps = $provisioner()->run();
-
-    // Re-read from disk: the provisioner wrote var/site.json as it went, and
-    // the config this request started with predates that.
-    $provisioned = Config::load($root)->isProvisioned();
-
-    return $page($response, $shell($provisioned ? 'Provisioned' : 'Setup stopped', $view->render('setup-ran', [
-        'steps' => $steps,
-        'provisioned' => $provisioned,
-        'refused' => false,
-    ])));
 });
 
 /**

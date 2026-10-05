@@ -119,10 +119,10 @@ from Packagist, since §12.1 decided PHP. Never sees the reader's wallet key or
 the browser key's private half.
 
 **First-run setup.** Creates the demo mint and the treasury, calls
-`initialize_site` once, and records the resulting addresses. It is a screen
-rather than a command (§12.0). Setup runs before a site authority exists,
-because generating one is the first thing it does, and it refuses once the
-site is provisioned. The operator never handles a keypair.
+`initialize_site` once, and records the resulting addresses. It is a command,
+`bin/setup`, and no web request runs it (§12.0). Setup runs before a site
+authority exists, because generating one is the first thing it does, and it
+refuses once the site is provisioned. The operator never handles a keypair.
 
 The article text is static content in the repository. There is no database
 of articles and no editor.
@@ -223,6 +223,10 @@ something a real site would offer. A single button sends it.
 
 **One grant per address**, recorded in the faucet ledger, and a rate limit per
 source IP address: five sends a day, counted whether or not the send lands.
+The ledger is the host's and does not travel. A replacement host that reuses
+the site's keys (§12.6) starts with an empty ledger, so an address may draw
+once more there. Accepted, 2026-10-05: the limit keeps the faucet key solvent,
+and a new host is rare.
 The limit keeps a keyed hash of the IP address for that day and never the
 address itself (§10.4). The faucet is the only part of this demo
 with an abuse surface worth naming, because it is the only part that gives
@@ -247,6 +251,14 @@ What custody a real deployment owes the authority key is §15.
 The hosted instance (§12.6) has its own site, with its own authority, mint and
 faucet key. Decided 2026-10-01: an environment that shares a key with another
 shares its compromise too (§15.2).
+
+**The hosted instance's keys are made on the development machine and copied
+to the host**, decided 2026-10-05. They stay in `var/hosted/` there, untracked.
+A replacement host takes the same keys, so that replacing the machine strands
+nobody's meter. New keys are a separate and deliberate act, the roll of
+§12.6. The keys are files on the host because they are devnet keys, short
+lived, controlling play money, and §15.3 says what a deployment would do
+instead.
 
 ### 4.5 Funding the server
 
@@ -281,7 +293,8 @@ the authority, then moves a reserve to the faucet key (§12.0). The endpoint's
 faucet refuses more often than it works and does not say why. The other routes
 are the web faucet at faucet.solana.com and a transfer from any funded devnet
 wallet. `bin/devnet-smoke` prints the address and these routes when the
-authority is empty.
+authority is empty. A roll (§12.6) asks nobody: the old authority and the old
+faucet key send what they hold to the new authority.
 
 **Knowing before it runs out.** `bin/devnet-canary` already exits 1 when the
 faucet key can no longer fund a visitor. It gains the same check for the
@@ -1325,20 +1338,26 @@ deployment. They need no Anchor, no Solana command-line tools, no validator
 and no WebAssembly target. Which is why there is no container: the
 prerequisite is PHP and Composer.
 
-**First-run setup is a page, not a command.** Every step is available over
-JSON-RPC, including `requestAirdrop` on devnet. So the first run opens a setup
-screen. It generates the site authority and the faucet key server-side,
-airdrops to the authority, moves a reserve to the faucet key, creates the DEMO
-mint and the treasury, calls `initialize_site` with §4.2's parameters, and
-records the addresses. The operator starts a process, opens a page and clicks
-once. It also earns its place as documentation, since `initialize_site` has
-no other worked example.
+**First-run setup is a command, `bin/setup`**, decided 2026-10-05. It was a
+page until then. Every step is available over JSON-RPC, including
+`requestAirdrop` on devnet, so the command needs PHP and nothing else. It
+generates the site authority and the faucet key, airdrops to the authority,
+moves a reserve to the faucet key, creates the DEMO mint and the treasury,
+calls `initialize_site` with §4.2's parameters, and records the addresses.
+Each step asks the chain whether its work is already done, so a run that
+stops resumes. It also earns its place as documentation, since
+`initialize_site` has no other worked example.
 
-**A page rather than a command costs one guard.** Every other POST here is
-guarded by the session cookie, which a browser withholds on a cross-site POST.
-Setup runs before any session exists. So the setup route checks
-`Sec-Fetch-Site`, or `Origin` against the request's own origin, and refuses a
-POST from another site's page before it opens an RPC connection.
+**Why not a page.** Two reasons, and the hosted instance supplied both. A
+page generates the authority key inside a web request, which is the first
+thing §15.3 tells an integrator not to copy. And a page that provisions
+before any session exists is an unauthenticated POST that changes state. On
+`localhost` that cost one guard. On a public host it meant that anyone who
+reached the address before the operator could press the button.
+
+**An unprovisioned copy says so.** `GET /setup` names the command and what it
+will do. The faucet, the meter panel and the inspector link there. The page
+has no form, and no request runs setup.
 
 ### 12.1 Server language: PHP
 
@@ -1538,12 +1557,65 @@ declined: it waits until a real wallet has to be tried (§13.4).
 - **A Lightsail instance**, or any small VM with a persistent disk, running
   PHP-FPM so that §7.2's lock is exercised by real concurrency, and
   `bin/sweep` from cron.
-- **TLS with automatic renewal and DNS in Route 53.** How exactly is settled
-  when the deployment is built. It is a scripted deployment, and temporary, so
-  an AWS-managed certificate behind a load balancer would be more than it
-  needs (§14).
-- **A deploy is a push**, then one script that pulls, installs and reloads, in
-  about a minute.
+- **TLS with automatic renewal and DNS in Route 53.** It is a scripted
+  deployment, and temporary, so an AWS-managed certificate behind a load
+  balancer would be more than it needs. Caddy on the instance holds the
+  certificate (§14).
+- **A deploy is a push**, then one command, in about a minute. What runs on
+  the host is what the public repository holds, never what a working tree
+  held.
+
+**One command on the development machine, `bin/host`**, decided 2026-10-05. It
+serves a first deployment and an update alike, and works out which.
+
+1. *Keys.* It makes them with `bin/setup --into var/hosted` when there are
+   none anywhere, and otherwise reuses the ones it has (§4.4).
+2. *Machine.* It sends `bin/host-bootstrap` to a host with no checkout. That
+   script installs PHP-FPM, Composer and Caddy from the distribution's own
+   packages, makes a shallow clone of the public repository, and adds the cron
+   line for `bin/sweep`.
+3. *Send.* It copies the keys up when the host's differ or are missing, with
+   the public address the site needs for §12.3.
+4. *Deploy.* It runs `bin/deploy` on the host, which pulls, installs, builds
+   the content and reloads PHP-FPM.
+
+**The deploy itself runs on the host.** The steps are host work in any case:
+Composer installs against the host's PHP, and the content is built into the
+host's `var/`. Keeping them in a tracked script on the host makes a first
+deployment and an update the same script, and leaves the development machine
+with one concern that only it can have, the keys. `bin/deploy` pulls first and
+then runs itself again, so that a change to the script arrives in one deploy.
+
+**The hosted instance may go away, and says so.** It is temporary by design.
+Taking it down strands whatever meters readers left open: each keeps its
+rent, 0.001346 SOL, and its fund cannot close until the meter does (§5.5). The
+site cannot prevent that, because no key the site holds may close a reader's
+meter. So two things limit it.
+
+- **The faucet page says it before the reader commits anything**, on the
+  hosted instance only: the site may be taken down without notice, and a
+  reader should close the meter when finished.
+- **A replacement host reuses the keys.** The site account, the mint and
+  every open meter are then still served. Readers lose only their sessions,
+  and the browser key binds a new one (§5.3).
+
+**A roll makes new keys, and is asked for**: `bin/host --roll`. It is §15.4's
+migration, chosen. The old site's meters are stranded as above. The old
+keys' SOL moves to the new authority first, since the old keys can still
+sign. The old keys are set aside, not deleted, on both machines. On the host
+the SQLite store is set aside with them, because its sessions name the old
+site's meters and its faucet ledger would refuse the same wallets a grant in
+the new mint.
+
+**An empty `var/hosted/` is not a request for new keys.** A fresh clone and a
+wiped workspace both look like that. When the host already has a site,
+`bin/host` stops and offers two ways on: `--fetch` copies the host's keys
+back, and `--roll` replaces them. So wiping the development workspace loses
+nothing while the host stands.
+
+**The development wallet is not deployed.** The hosted instance runs without
+`NEWSPRINT_DEV_WALLET`, and the tracked configuration leaves it off. The
+loopback and devnet checks above remain as a second refusal.
 
 Tunnels that route public traffic into a personal machine were considered and
 declined.
@@ -1658,16 +1730,18 @@ already ratified carry their date where they are made.
 
 1. **Closing a meter with the wallet** (§5.5): a scan that closes an
    abandoned meter, signed by the reader, offered on the panel when there is
-   no session.
+   no session. It closes meters at this site only, so it does not reach a
+   meter stranded by a roll or by a host taken down (§12.6).
+2. **Where TLS ends on the hosted instance** (§12.6): Caddy on the instance,
+   with a Let's Encrypt certificate that Caddy obtains by answering on ports
+   80 and 443. `bin/host-bootstrap` was written this way on 2026-10-05 because
+   it needs no credential on the host. Route 53 holds the address record and
+   takes no part in validation. The DNS challenge answered in Route 53 was the
+   route considered before, and it would put an AWS credential on the machine.
 
 **Open, and deferred to the hosted deployment:**
 
-2. **What a real wallet does** (§13.4).
-3. **Where TLS ends on the hosted instance** (§12.6). Two routes keep Route 53
-   doing the validation without a load balancer: Caddy on the instance, with
-   a Let's Encrypt certificate renewed through a DNS challenge answered in
-   Route 53; or an exportable certificate from AWS Certificate Manager,
-   installed on the instance and reinstalled at each renewal.
+3. **What a real wallet does** (§13.4).
 
 ## 15. The site authority key
 
@@ -1722,7 +1796,7 @@ requires that exact address. A deployment may point it at an account owned by
 a key that never goes online, so that the online key draws payments and a cold
 key spends them. **This demonstrator does not**: setup makes the treasury the
 authority's own associated token account, so one key draws the payments and
-owns where they land. That is right for a demonstrator set up from one screen
+owns where they land. That is right for a demonstrator set up by one command
 with one funded key. It is not a property to inherit, and it is the most
 valuable separation available to a deployment.
 
@@ -1747,13 +1821,18 @@ key that meters, permanently. This is also why §15.4 is a migration.
 ### 15.3 What not to copy from this demonstrator
 
 §1 makes this repository the reference integration, and a reference is copied.
-So, plainly: the authority key is **generated inside a web request** by the
-setup screen and written to `var/authority.json` in the Solana command-line
-tools' format. The web process reads that file on every charge. The key pays
-every fee and owns the treasury. All of it sits on one machine, unencrypted,
-with its safety resting on file permissions and on the fact that it holds
-devnet play money. Every one of those choices is right for a demonstrator and
-wrong for a deployment holding a real revenue stream.
+So, plainly: the authority key is generated by `bin/setup` and written to
+`var/authority.json` in the Solana command-line tools' format. The web
+process reads that file on every charge. The key pays every fee and owns the
+treasury. It sits on the serving machine, unencrypted, with its safety
+resting on file permissions and on the fact that it holds devnet play money.
+The hosted instance's key also sits on the development machine, and is
+copied between the two over SSH (§12.6). Every one of those choices is right
+for a demonstrator and wrong for a deployment holding a real revenue stream.
+
+One choice was wrong for the demonstrator too, and was changed on 2026-10-05:
+the key used to be generated inside a web request, by a setup screen. No
+request generates a key now.
 
 **The part worth copying is the shape.** `Newsprint\Chain\Keypair` is the only
 place in this repository that signs anything. The secret is wiped with

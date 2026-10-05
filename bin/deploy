@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+#
+# Bring the hosted instance up to date (SPEC §12.6). This runs ON THE HOST.
+# The command for the development machine is `bin/host`, which ends by
+# running this one over SSH.
+#
+#   sudo bin/deploy            # the branch already checked out
+#   sudo bin/deploy next-ten   # another branch
+#
+# Four steps, the same for a first deployment and for an update, and safe to
+# run twice:
+#
+#   1. pull      a shallow fetch of the branch from the public repository
+#   2. keys      take in whatever `bin/host` left in var/incoming/
+#   3. install   `composer install --no-dev`, then `bin/build-content`
+#   4. reload    PHP-FPM, so that no worker keeps the old code cached
+#
+# **A deploy is a push.** What runs here is what the repository holds, never
+# what a working tree held. That is why the code is pulled and not copied.
+#
+# **It pulls first and then runs itself again**, so that steps 2 to 4 are the
+# new version's. Without that, a change to this script would take two deploys
+# to arrive, and the first would run old steps against new code.
+#
+# **New keys are a new site, so the old site's store goes with its keys.**
+# When the incoming site differs from the one in place, the old keys and the
+# SQLite store move into var/rolled-<time>/ together. The store's sessions
+# name meters at the old site. Its faucet ledger records grants in the old
+# mint, and would refuse those same wallets a grant in the new one.
+#
+# **It refuses to run anywhere but the host.** Step 1 discards local changes
+# to tracked files, which is right for a checkout nobody edits and would be a
+# disaster in a working tree.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+SITE_DIR=/srv/newsprint
+SITE_USER=www-data
+
+if [ "$PWD" != "$SITE_DIR" ]; then
+    echo "bin/deploy runs on the host, in ${SITE_DIR}. On the development machine the command is bin/host." >&2
+    exit 2
+fi
+
+# Root, because step 2 moves files the site user owns and step 4 reloads a
+# service. Everything that touches the checkout still runs as the site user.
+if [ "$(id -u)" != 0 ]; then
+    exec sudo "$SITE_DIR/bin/deploy" "$@"
+fi
+
+site() {
+    runuser -u "$SITE_USER" -- env HOME="$PWD/var" COMPOSER_HOME="$PWD/var/composer" "$@"
+}
+
+branch="${1:-$(site git rev-parse --abbrev-ref HEAD)}"
+fpm="php$(php -r 'echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;')-fpm"
+
+# --- 1. pull ---------------------------------------------------------------
+if [ -z "${NEWSPRINT_DEPLOY_PULLED:-}" ]; then
+    echo "1. pull      ${branch}"
+    site git fetch --quiet --depth 1 origin "$branch"
+    site git checkout --quiet --force -B "$branch" FETCH_HEAD
+    NEWSPRINT_DEPLOY_PULLED=1 exec "$SITE_DIR/bin/deploy" "$branch"
+fi
+echo "             $(site git log -1 --format='%h %s')"
+
+# --- 2. keys ---------------------------------------------------------------
+incoming=var/incoming
+if [ -f "$incoming/host.json" ]; then
+    mv -f "$incoming/host.json" var/host.json
+fi
+if [ -f "$incoming/site.json" ]; then
+    stopped=
+    if [ -f var/site.json ] && ! cmp -s "$incoming/site.json" var/site.json; then
+        aside="var/rolled-$(date -u +%Y%m%d-%H%M%S)"
+        echo "2. keys      a different site: the old keys and store go to ${aside}"
+        # Stopped, because a worker holding the store open would go on
+        # writing to the file after it moved.
+        systemctl stop "$fpm"
+        stopped=1
+        mkdir -m 700 "$aside"
+        for file in authority.json faucet.json site.json \
+                    newsprint.sqlite newsprint.sqlite-wal newsprint.sqlite-shm; do
+            if [ -e "var/$file" ]; then
+                mv "var/$file" "$aside/"
+            fi
+        done
+    else
+        echo "2. keys      taken in"
+    fi
+    mv -f "$incoming/authority.json" "$incoming/faucet.json" "$incoming/site.json" var/
+    chmod 600 var/authority.json var/faucet.json var/site.json
+    chown -R "$SITE_USER": var
+    if [ -n "$stopped" ]; then
+        systemctl start "$fpm"
+    fi
+else
+    echo "2. keys      unchanged"
+fi
+chown "$SITE_USER": var/host.json 2>/dev/null || true
+
+if [ ! -f var/site.json ]; then
+    echo "bin/deploy: this host has no site keys. Run bin/host on the development machine, which sends them." >&2
+    exit 1
+fi
+
+# --- 3. install ------------------------------------------------------------
+echo "3. install"
+# `install`, never `update`: the lock file is the record of what the site
+# runs, and bin/run-dev says why a start-up script must not move it.
+site composer install --no-dev --no-interaction --no-progress --optimize-autoloader
+site bin/build-content
+
+# --- 4. reload -------------------------------------------------------------
+echo "4. reload    ${fpm}"
+systemctl reload "$fpm"
+
+echo
+echo "Deployed $(site git log -1 --format='%h') on ${branch}."

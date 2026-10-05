@@ -14,6 +14,9 @@ declare(strict_types=1);
  *
  *   bin/name-the-mint            # what it would do
  *   bin/name-the-mint --write    # do it
+ *   bin/name-the-mint --into var/hosted --write
+ *                                # the hosted instance's mint, whose keys
+ *                                # are in that directory (SPEC §12.6)
  *
  * Signed by the faucet key, which setup made the mint authority — so it is
  * also the payer for the metadata account's rent and its update authority.
@@ -32,10 +35,11 @@ $root = dirname(__DIR__);
 require $root.'/vendor/autoload.php';
 
 $write = in_array('--write', $_SERVER['argv'], true);
-$config = Config::load($root);
+$into = array_search('--into', $_SERVER['argv'], true);
+$config = Config::load($root, $into === false ? null : ($_SERVER['argv'][$into + 1] ?? null));
 
 if (!$config->isProvisioned()) {
-    fwrite(STDERR, "not provisioned: run first-run setup at /setup first\n");
+    fwrite(STDERR, "not provisioned: run bin/setup first\n");
     exit(1);
 }
 

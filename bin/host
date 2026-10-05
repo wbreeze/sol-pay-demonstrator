@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+#
+# Create or update the hosted instance (SPEC §12.6), from the development
+# machine. One command for both: it works out which.
+#
+#   bin/host ubuntu@203.0.113.7 https://newsprint.example.org
+#                       the first time: where to SSH, and the public address
+#   bin/host            every time after: deploy what is pushed
+#   bin/host --roll     new keys, and so a new site, after asking
+#   bin/host --fetch    copy the host's keys back here, and stop
+#
+# What it does, in order:
+#
+#   1. keys     makes them here with `bin/setup --into var/hosted` if there
+#               are none anywhere, and otherwise reuses the ones it has
+#   2. machine  sends `bin/host-bootstrap` to a host that has no checkout
+#   3. send     copies the keys up when the host's differ or are missing
+#   4. deploy   runs `bin/deploy` on the host: pull, install, build, reload
+#
+# **The hosted site's keys live here, in var/hosted/**, which git ignores.
+# A new host takes the same keys, so that replacing the machine does not
+# strand the meters readers left open: only a new site does that, and a new
+# site is `--roll`. The host never generates a key.
+#
+# **An empty var/hosted/ is not a request for new keys.** A fresh clone and a
+# wiped workspace both look like that. When the host already has a site, this
+# stops and names the two ways on: `--fetch` brings the host's keys back, and
+# `--roll` replaces them. Quietly making new keys here would roll a live site
+# by accident.
+#
+# **`--roll` strands every open meter at the old site.** No key the site
+# holds may close a reader's meter, so there is no cleanup to run first.
+# What a roll does save is the SOL: `bin/setup --roll` moves the old keys'
+# balances to the new authority. See `Newsprint\Setup\KeyRoll`.
+#
+# **A deploy is a push.** The host pulls the branch this checkout is on, as
+# the public repository has it. Commits not yet pushed do not go, and this
+# says so when it sees any.
+#
+# The development wallet is never part of this. `bin/deploy` sets no
+# `NEWSPRINT_DEV_WALLET`, and the tracked configuration leaves it off.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+# The author's shell is comma-decimal, and `sort`, `printf` and friends
+# change their minds under it.
+export LC_ALL=C
+
+KEYS=var/hosted
+REMOTE=/srv/newsprint
+
+usage() {
+    sed -n '3,10p' "$0" | sed 's/^# \{0,1\}//' >&2
+    exit 2
+}
+
+fail() {
+    printf '\nbin/host: %s\n' "$1" >&2
+    exit 1
+}
+
+mode=deploy
+case "${1:-}" in
+    --roll) mode=roll; shift ;;
+    --fetch) mode=fetch; shift ;;
+    -*) usage ;;
+esac
+
+mkdir -p "$KEYS"
+chmod 700 "$KEYS"
+
+if [ $# -eq 2 ]; then
+    case "$2" in
+        https://*) ;;
+        *) fail "the public address has to begin https:// — a wallet will not fetch a transaction request over anything else (SPEC §12.3)" ;;
+    esac
+    printf '%s\n' "$1" > "$KEYS/target"
+    php -r 'file_put_contents($argv[1], json_encode(["public_url" => rtrim($argv[2], "/")], JSON_UNESCAPED_SLASHES)."\n");' \
+        "$KEYS/host.json" "$2"
+elif [ $# -ne 0 ]; then
+    usage
+fi
+
+[ -f "$KEYS/target" ] && [ -f "$KEYS/host.json" ] \
+    || fail "no host is recorded in ${KEYS}/. Name it once: bin/host USER@HOST https://PUBLIC.ADDRESS"
+
+# The "site" a site.json names, or nothing. One reader for both sides, so the
+# comparison below is of like with like.
+site_named() {
+    php -r 'echo json_decode((string) stream_get_contents(STDIN), true)["site"] ?? "";'
+}
+
+target="$(cat "$KEYS/target")"
+url="$(php -r 'echo json_decode((string) file_get_contents($argv[1]), true)["public_url"] ?? "";' "$KEYS/host.json")"
+domain="${url#https://}"
+domain="${domain%%/*}"
+
+remote() {
+    ssh "$target" "$@"
+}
+
+# Into a file only the site user can read, without the key resting anywhere
+# else on the way. `install` reads its source from standard input.
+send() {
+    remote "sudo install -m 600 -o www-data -g www-data /dev/stdin ${REMOTE}/var/incoming/$1" < "$KEYS/$1"
+}
+
+fetch_keys() {
+    local file
+    for file in authority.json faucet.json site.json; do
+        # To a second name first: a connection that drops halfway must not
+        # leave half a key under the real one.
+        remote "sudo cat ${REMOTE}/var/${file}" > "$KEYS/${file}.fetching"
+        chmod 600 "$KEYS/${file}.fetching"
+        mv -f "$KEYS/${file}.fetching" "$KEYS/${file}"
+    done
+    echo "fetched     the host's keys, into ${KEYS}/"
+}
+
+echo "host        ${target}"
+echo "address     ${url}"
+
+here="$(site_named 2>/dev/null < "$KEYS/site.json" || true)"
+there="$(remote "sudo cat ${REMOTE}/var/site.json 2>/dev/null || true" | site_named)"
+echo "site here   ${here:-(none)}"
+echo "site there  ${there:-(none)}"
+echo
+
+# --- 1. keys ---------------------------------------------------------------
+if [ "$mode" = fetch ]; then
+    [ -n "$there" ] || fail "the host has no site to fetch"
+    if [ -n "$here" ] && [ "$here" != "$there" ]; then
+        fail "${KEYS}/ holds a different site from the host's. Move those files aside first if the host's are the ones to keep."
+    fi
+    fetch_keys
+    exit 0
+fi
+
+if [ -z "$here" ] && [ -n "$there" ]; then
+    if [ "$mode" != roll ]; then
+        fail "the host has a site and ${KEYS}/ has no keys for it.
+  bin/host --fetch   brings the host's keys back here, and changes nothing else
+  bin/host --roll    replaces them with new keys, which strands the open meters"
+    fi
+    # A roll starts from the old keys, because moving their SOL needs them.
+    fetch_keys
+    here="$there"
+fi
+
+if [ "$mode" = roll ]; then
+    [ -n "$here" ] || fail "there is no site to roll. bin/host makes the first one."
+    bin/setup --into "$KEYS" --roll
+elif [ -z "$here" ]; then
+    echo "1. keys     none anywhere: making them here"
+    bin/setup --into "$KEYS"
+else
+    echo "1. keys     reusing ${KEYS}/"
+fi
+here="$(site_named < "$KEYS/site.json")"
+[ -n "$here" ] || fail "setup did not finish, so there is nothing to deploy yet"
+
+# --- what the host will get --------------------------------------------------
+branch="$(GIT_OPTIONAL_LOCKS=0 git branch --show-current)"
+[ -n "$branch" ] || fail "this checkout is on no branch, so there is nothing to name to the host"
+pushed="$(GIT_OPTIONAL_LOCKS=0 git ls-remote origin "refs/heads/${branch}" | cut -f1)"
+[ -n "$pushed" ] || fail "the branch ${branch} is not on origin. A deploy is a push: push it first."
+if [ "$pushed" != "$(GIT_OPTIONAL_LOCKS=0 git rev-parse HEAD)" ]; then
+    echo "NOTE        origin's ${branch} is ${pushed:0:7} and is not this checkout's HEAD."
+    echo "            The host gets what is pushed."
+fi
+
+# --- 2. machine --------------------------------------------------------------
+if remote "test -d ${REMOTE}/.git"; then
+    echo "2. machine  already prepared"
+else
+    echo "2. machine  bare: preparing it"
+    remote "sudo bash -s -- '${domain}' '${branch}'" < bin/host-bootstrap
+fi
+
+# --- 3. send -----------------------------------------------------------------
+remote "sudo install -d -m 700 -o www-data -g www-data ${REMOTE}/var/incoming"
+send host.json
+if [ "$here" = "$there" ]; then
+    echo "3. send     the host has these keys"
+else
+    echo "3. send     keys for ${here}"
+    send authority.json
+    send faucet.json
+    send site.json
+fi
+
+# --- 4. deploy ---------------------------------------------------------------
+echo "4. deploy"
+remote "sudo ${REMOTE}/bin/deploy '${branch}'"
+
+echo
+if health="$(curl -fsS --max-time 20 "${url}/health" 2>&1)"; then
+    echo "${url}/health answers:"
+    echo "$health"
+else
+    echo "${url}/health did not answer: ${health}"
+    echo "On a new host that is usually the address record or port 443, and the certificate follows them."
+fi
+if [ "$here" != "$there" ]; then
+    echo
+    echo "A new mint has no name until it is given one, and a wallet shows \"Unknown\" for it:"
+    echo "  bin/name-the-mint --into ${KEYS} --write"
+fi

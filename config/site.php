@@ -84,8 +84,9 @@ return [
         'source_window_s' => 86_400, // a day
     ],
 
-    // SPEC §12.0's first run. The operator funds one address and setup moves
-    // a reserve to the other, so there is one thing to do by hand and not two.
+    // SPEC §12.0's first run, `bin/setup`. The operator funds one address and
+    // setup moves a reserve to the other, so there is one thing to do by hand
+    // and not two.
     'setup' => [
         'airdrop_lamports' => 1_000_000_000,        // 1 SOL; devnet's faucet refuses more often than it works
         'authority_minimum_lamports' => 300_000_000, // enough for setup's transactions and a long session of metering
@@ -114,6 +115,10 @@ return [
     // hosted instance has one. Null here means the link is built from the
     // request's own origin, which a phone's wallet cannot reach on localhost:
     // the development wallet stands in for it there.
+    //
+    // Leave it null. The hosted instance's address is a fact about one
+    // machine, so `bin/host` writes it to `var/host.json` on that machine and
+    // `Config::publicUrl()` reads it from there (SPEC §12.6).
     'public_url' => null,
 
     // Development stand-ins. Each is refused unless the request comes from a
@@ -123,7 +128,9 @@ return [
         // wallet would sign, so setup runs on localhost with no phone.
         // `bin/dev-wallet` prints its address and funds it from the faucet.
         // Leave this false and run with `NEWSPRINT_DEV_WALLET=1` instead, so
-        // that a tracked file does not carry a local choice.
+        // that a tracked file does not carry a local choice. The hosted
+        // instance runs this file as committed, which is what keeps the
+        // development wallet off it.
         'wallet' => false,
     ],
 

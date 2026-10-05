@@ -1,7 +1,7 @@
 # The devnet deployment
 
 **One instance, not a repository fact.** The addresses below are the result of
-first-run setup on the author's machine. `SPEC.md` §12.0 makes provisioning
+first-run setup, `bin/setup`, on the author's machine. `SPEC.md` §12.0 makes provisioning
 the job of whoever runs a copy, so a second copy produces a different mint,
 treasury and site account. `bin/devnet-canary` says as much when it runs
 anywhere else: *not provisioned here, so this checkout's own accounts were not
@@ -43,6 +43,22 @@ The same applies to a devnet reset, which removes the three accounts outright.
 `bin/devnet-canary` reports them GONE **only when run against a provisioned
 checkout** — the scheduled CI run checks devnet's health and the program's
 deployment, and nothing about this site's own accounts.
+
+## The hosted instance's keys
+
+`var/hosted/` on the development machine holds a second site's files: the
+hosted instance's authority, faucet key, mint keypair and `site.json`, with
+`target` and `host.json` naming the machine. `bin/host` reads and writes
+them (`SPEC.md` §12.6). The host holds a copy of everything but the mint
+keypair, which nothing needs after the mint exists.
+
+Losing `var/hosted/` while the host stands loses nothing: `bin/host --fetch`
+copies the keys back. Losing both is the lost `var/` above, for that site.
+
+A roll leaves `rolled-<time>/` directories behind, here and in the host's
+`var/`. Each holds an abandoned site's keys, and the old authority in it is
+the only key that can still settle that site's meters. They are never
+deleted by a script.
 
 ## Parameters, from `config/site.php`
 

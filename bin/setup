@@ -1,0 +1,143 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * First-run setup (SPEC §12.0): the keys, the DEMO mint, the treasury and the
+ * site account, on devnet, once.
+ *
+ *   bin/setup                  provision the site this checkout serves, in var/
+ *   bin/setup --into DIR       provision another site, with its keys in DIR
+ *   bin/setup --roll           new keys for a site that has them, after asking
+ *   bin/setup --roll --yes     the same, without asking; `bin/host` has asked
+ *
+ * A command and not a page since 2026-10-05, so that no web request generates
+ * a key and no unprovisioned host waits behind a button. It needs the network
+ * and nothing else: every call is JSON-RPC, the airdrop included.
+ *
+ * **Safe to run twice.** Each step asks the chain whether its work is already
+ * done. A run that stops, most often because devnet's faucet refused, says
+ * which address to fund and resumes from there the next time.
+ *
+ * **`--into` is how the hosted instance gets its keys** (SPEC §12.6). They are
+ * made on the development machine, in `var/hosted/`, and `bin/host` copies
+ * them up. The host never generates a key.
+ *
+ * **`--roll` abandons the site for a new one.** The old files move into a
+ * dated directory beside the new ones, and the SOL the old keys hold moves to
+ * the new authority. Every meter open at the old site stays open, and no key
+ * the site holds may close one: see `Newsprint\Setup\KeyRoll`.
+ *
+ * Exits 0 when the site is provisioned, 1 when setup stopped short, 2 on a
+ * usage error.
+ */
+
+use Newsprint\Chain\Keypair;
+use Newsprint\Chain\Rpc;
+use Newsprint\Chain\RpcException;
+use Newsprint\Chain\Submitter;
+use Newsprint\Setup\KeyRoll;
+use Newsprint\Setup\Provisioner;
+use Newsprint\Setup\Step;
+use Newsprint\Support\Config;
+
+$root = dirname(__DIR__);
+require $root.'/vendor/autoload.php';
+
+$into = null;
+$roll = false;
+$yes = false;
+$args = array_slice($_SERVER['argv'], 1);
+while ($args !== []) {
+    $arg = array_shift($args);
+    if ($arg === '--into' && $args !== []) {
+        $into = array_shift($args);
+    } elseif ($arg === '--roll') {
+        $roll = true;
+    } elseif ($arg === '--yes') {
+        $yes = true;
+    } else {
+        fwrite(STDERR, "usage: bin/setup [--into DIR] [--roll [--yes]]\n");
+        exit(2);
+    }
+}
+
+$config = Config::load($root, $into);
+$rpc = new Rpc(
+    $config->rpcUrl(),
+    $config->program(),
+    (string) $config->rpc()['commitment'],
+    (int) $config->rpc()['http_timeout_s'],
+);
+$submitter = Submitter::fromConfig($rpc, $config);
+
+/** @param list<Step> $steps */
+$report = static function (array $steps): void {
+    foreach ($steps as $step) {
+        printf("%-8s %s\n", strtoupper($step->status), $step->name);
+        echo '         '.wordwrap($step->detail, 68, "\n         ")."\n";
+        if ($step->address !== null) {
+            echo "         {$step->address}\n";
+        }
+        if ($step->signature !== null) {
+            echo "         https://explorer.solana.com/tx/{$step->signature}?cluster=devnet\n";
+        }
+    }
+};
+
+echo "site files  {$config->varDir()}\n";
+echo "endpoint    {$config->rpcUrl()}\n\n";
+
+try {
+    if ($roll) {
+        $site = $config->partial()['site'] ?? null;
+        if ($site === null) {
+            fwrite(STDERR, "bin/setup: there is no provisioned site in {$config->varDir()} to roll. Without --roll, this makes one.\n");
+            exit(1);
+        }
+        if (!$yes) {
+            echo "This abandons the site {$site}.\n";
+            echo "Every meter open there stays open, and only its reader can close it.\n";
+            echo "A reader who does not is left with the meter's rent locked, and a fund\n";
+            echo "that will not close while the meter is open. Type roll to go on: ";
+            if (trim((string) fgets(STDIN)) !== 'roll') {
+                echo "Nothing was changed.\n";
+                exit(1);
+            }
+        }
+
+        $aside = KeyRoll::setAside($config, gmdate('Ymd-His'));
+        echo "set aside   {$aside}\n\n";
+
+        // Reloaded, because the object above still remembers the old site.
+        $config = Config::load($root, $into);
+        $authority = Keypair::loadOrCreate($config->keypairPath('authority'));
+        $report(KeyRoll::moveSol($aside, $authority->address, $rpc, $submitter));
+    }
+
+    if ($config->isProvisioned()) {
+        // The provisioner refuses a provisioned site and reports the refusal
+        // as a blocked step. That is the right word for a caller that tried,
+        // and the wrong one here, where running twice is expected and safe.
+        echo "Already provisioned. Nothing was sent.\n";
+    } else {
+        $report((new Provisioner($config, $rpc, $submitter))->run());
+    }
+} catch (RpcException|RuntimeException $e) {
+    // The endpoint being unreachable is an ordinary thing on a laptop, and a
+    // stack trace is a poor way to say so.
+    fwrite(STDERR, "\nbin/setup: {$e->getMessage()}\n");
+    exit(1);
+}
+
+$config = Config::load($root, $into);
+if (!$config->isProvisioned()) {
+    echo "\nSetup stopped. Nothing it created is lost: run it again to resume.\n";
+    exit(1);
+}
+
+echo "\nProvisioned.\n";
+foreach ($config->provisioned() as $what => $address) {
+    printf("%-11s %s\n", $what, $address);
+}
