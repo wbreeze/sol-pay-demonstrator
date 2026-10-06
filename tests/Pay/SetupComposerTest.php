@@ -53,7 +53,7 @@ final class SetupComposerTest extends TestCase
             Ix::deposit($this->program, $this->holding, self::WALLET, $this->fund, self::MINT, 500_000, 6),
             Ix::openMeter($this->program, self::SITE, self::WALLET, $this->fund, self::KEY, 500_000, self::NOW + 86_400),
         ], $made->instructions, 'open_fund before the deposit: the fund\'s token account has to exist first');
-        self::assertSame('Newsprint: open fund 0, then deposit 0.5 DEMO, then open a meter for this browser with a limit of 0.5 DEMO.', $made->message());
+        self::assertSame('Open meter, limit 0.5 DEMO; deposit 0.5 DEMO; new fund 0.', $made->message());
         self::assertSame(Pda::meterAddress(self::SITE, $this->fund)['address'], $made->meter);
     }
 

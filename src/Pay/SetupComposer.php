@@ -99,7 +99,7 @@ final class SetupComposer
             }
             $instructions[] = Ix::deposit($this->program, $at['holding'], $account, $at['fund'], $mint, $answers->deposit, $this->decimals);
 
-            return new Composition($instructions, ['add '.$this->amount($answers->deposit).' '.$this->symbol.' to fund '.$answers->index], $at['fund'], $at['meter']);
+            return new Composition($instructions, ['Add '.$this->amount($answers->deposit).' '.$this->symbol.' to fund '.$answers->index], $at['fund'], $at['meter']);
         }
 
         $floor = Preflight::limitFloor($this->siteAccount, $meter);
@@ -109,7 +109,7 @@ final class SetupComposer
 
         if ($fund === null) {
             $instructions[] = Ix::openFund($this->program, $account, $mint, $answers->index);
-            $plan[] = 'open fund '.$answers->index;
+            $plan[] = 'new fund '.$answers->index;
         }
         if ($answers->deposit > 0) {
             $instructions[] = Ix::deposit($this->program, $at['holding'], $account, $at['fund'], $mint, $answers->deposit, $this->decimals);
@@ -120,12 +120,14 @@ final class SetupComposer
         $expiry = $now + $answers->expirySeconds();
         if ($meter === null) {
             $instructions[] = Ix::openMeter($this->program, $this->site, $account, $at['fund'], $key, $answers->limit, $expiry);
-            $plan[] = 'open a meter for this browser';
+            $said = 'Open meter';
         } else {
             $instructions[] = Ix::renewMeter($this->program, $this->site, $account, $at['fund'], $key, $answers->limit, $expiry);
-            $plan[] = 'renew the meter for this browser';
+            $said = 'Renew meter';
         }
-        $plan[count($plan) - 1] .= ' with a limit of '.$this->amount($answers->limit).' '.$this->symbol;
+        // The meter's phrase goes first although its instruction goes last:
+        // `Composition` says why. The deposit follows and the fund is last.
+        $plan = [$said.', limit '.$this->amount($answers->limit).' '.$this->symbol, ...array_reverse($plan)];
 
         return new Composition($instructions, $plan, $at['fund'], $at['meter']);
     }
