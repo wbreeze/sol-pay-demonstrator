@@ -5,6 +5,8 @@
 #
 #   bin/host ubuntu@203.0.113.7 https://newsprint.example.org
 #                       the first time: where to SSH, and the public address
+#   bin/host ubuntu@203.0.113.7 https://newsprint.example.org ~/.ssh/a-key
+#                       the same, when SSH needs a key it would not offer
 #   bin/host            every time after: deploy what is pushed
 #   bin/host --roll     new keys, and so a new site, after asking
 #   bin/host --fetch    copy the host's keys back here, and stop
@@ -37,6 +39,10 @@
 # the public repository has it. Commits not yet pushed do not go, and this
 # says so when it sees any.
 #
+# **Which machine, and which SSH key, are facts about this workspace.** They
+# are remembered in var/hosted/ beside the site's keys and are never tracked.
+# The SSH key file itself stays where it is: only its path is recorded.
+#
 # The development wallet is never part of this. `bin/deploy` sets no
 # `NEWSPRINT_DEV_WALLET`, and the tracked configuration leaves it off.
 
@@ -50,7 +56,7 @@ KEYS=var/hosted
 REMOTE=/srv/newsprint
 
 usage() {
-    sed -n '3,10p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
 }
 
@@ -69,7 +75,7 @@ esac
 mkdir -p "$KEYS"
 chmod 700 "$KEYS"
 
-if [ $# -eq 2 ]; then
+if [ $# -eq 2 ] || [ $# -eq 3 ]; then
     case "$2" in
         https://*) ;;
         *) fail "the public address has to begin https:// — a wallet will not fetch a transaction request over anything else (SPEC §12.3)" ;;
@@ -77,6 +83,13 @@ if [ $# -eq 2 ]; then
     printf '%s\n' "$1" > "$KEYS/target"
     php -r 'file_put_contents($argv[1], json_encode(["public_url" => rtrim($argv[2], "/")], JSON_UNESCAPED_SLASHES)."\n");' \
         "$KEYS/host.json" "$2"
+    # Naming the host again without a key forgets the old one, so that the
+    # record is always what was last typed.
+    : > "$KEYS/identity"
+    if [ $# -eq 3 ]; then
+        [ -f "$3" ] || fail "there is no SSH key at $3"
+        printf '%s\n' "$3" > "$KEYS/identity"
+    fi
 elif [ $# -ne 0 ]; then
     usage
 fi
@@ -95,8 +108,16 @@ url="$(php -r 'echo json_decode((string) file_get_contents($argv[1]), true)["pub
 domain="${url#https://}"
 domain="${domain%%/*}"
 
+# `IdentitiesOnly`, because an agent holding several keys offers them all
+# first, and a server gives up after a handful of wrong ones.
+identity="$(cat "$KEYS/identity" 2>/dev/null || true)"
+ssh_options=()
+if [ -n "$identity" ]; then
+    ssh_options=(-i "$identity" -o IdentitiesOnly=yes)
+fi
+
 remote() {
-    ssh "$target" "$@"
+    ssh ${ssh_options[@]+"${ssh_options[@]}"} "$target" "$@"
 }
 
 # Into a file only the site user can read, without the key resting anywhere
@@ -118,6 +139,7 @@ fetch_keys() {
 }
 
 echo "host        ${target}"
+echo "ssh key     ${identity:-(whatever ssh offers)}"
 echo "address     ${url}"
 
 here="$(site_named 2>/dev/null < "$KEYS/site.json" || true)"
