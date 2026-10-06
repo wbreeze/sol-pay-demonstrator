@@ -645,8 +645,8 @@ is a worse screen than a refusal:
   refused it as an account already in use.
 
 A refusal is an error response with a sentence and no transaction. How
-wallets show such a response is untested until a real wallet scans the link,
-which waits for the hosted instance (§13.4).
+wallets show such a response is still untested: the wallet run of 2026-10-06
+met no refusal (§13.4).
 
 **The pending setup holds the wallet's address for at most ten minutes**, and
 §10.4 lists it. Once *continue* succeeds, the session holds the meter's and
@@ -1551,8 +1551,8 @@ It does not bypass anything that protects a reader. The key and the proof are
 untouched, and the transaction is the one a wallet would get. What it replaces
 is the phone.
 
-**Hosted: a small virtual machine**, decided 2026-09-30. Deferred, not
-declined: it waits until a real wallet has to be tried (§13.4).
+**Hosted: a small virtual machine**, decided 2026-09-30. Deployed, and
+serving on 2026-10-06, when a real wallet was first tried (§13.4).
 
 - **A Lightsail instance**, or any small VM with a persistent disk, running
   PHP-FPM so that §7.2's lock is exercised by real concurrency, and
@@ -1636,7 +1636,7 @@ Roughly twelve markdown files with front matter, rendered at build time by
 Four walkthroughs. The first is the demonstration. The second exists because
 the settle refused for want of money cannot be reached any other way, and an
 unreachable branch is an untested one. The third is the second device, and
-the fourth is a real wallet, which waits for the hosted instance.
+the fourth is a real wallet, on the hosted instance.
 
 ### 13.1 First visit
 
@@ -1706,19 +1706,39 @@ new device's key. Then:
 
 ### 13.4 A real wallet
 
-**Deferred, not declined: gated on the hosted instance (§12.6).** Everything
-above can run on localhost with the development wallet. This walkthrough
-cannot, because a wallet on a phone fetches the transaction itself, over
-HTTPS. On the hosted instance, with a wallet app set to devnet:
+**Run in part on 2026-10-06**, on the hosted instance (§12.6), with Solflare
+on an iPhone set to devnet. Everything above can run on localhost with the
+development wallet. This walkthrough cannot, because a wallet on a phone
+fetches the transaction itself, over HTTPS.
+
+**Observed:**
 
 - scanning the setup link fetches, shows and signs the setup transaction, and
   the meter appears on *continue*;
+- *add to the fund* works the same way, and so does a renewal.
+
+**What that wallet showed.** The wallet showed the label, the icon and the
+site's domain, and asked the reader to connect an account. Only then did the
+wallet show the transaction, with the SOL and DEMO amounts the panel had
+quoted. Four things a reader meets there:
+
+- the reader makes two gestures, the connection and the approval, where §6.3
+  step 4 describes one;
+- the message is cut off after about thirty characters, so the message now
+  leads with the limit (`Newsprint\Pay\Composition`);
+- the wallet calls the site unknown, and the reader must switch on *I trust
+  this site* before approving;
+- the token has its name and no image, because `token_uri` is empty in
+  `config/site.php`.
+
+**Not yet run:**
+
 - a transaction request the server refuses (§6.3) reaches the reader as a
   sentence, in the wallet or on the page;
-- *add to the fund* and *close a meter with your wallet* work the same way.
+- *close a meter with your wallet* (§5.5).
 
-Until this has passed, §6.3's account of what a wallet does is the Solana Pay
-specification's, not an observation.
+Until those two have passed, §6.3's account of a refusal and §5.5's account of
+a wallet's close are the Solana Pay specification's, not observations.
 
 ## 14. Open questions, and proposals awaiting the author
 
@@ -1741,7 +1761,8 @@ already ratified carry their date where they are made.
 
 **Open, and deferred to the hosted deployment:**
 
-3. **What a real wallet does** (§13.4).
+3. **What a real wallet does with a refusal, and with a close** (§13.4). The
+   setup, the deposit and the renewal were observed on 2026-10-06.
 
 ## 15. The site authority key
 
