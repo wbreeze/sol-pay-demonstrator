@@ -191,5 +191,5 @@ $onChain = $meter['meter'];
 </section>
 <?php if ($meter['provisioned'] && $meter['stage'] === 'anonymous'): ?>
 <?php /* §12.2: one small module, where the key has work to do. */ ?>
-<script type="module" src="/assets/key.js"></script>
+<script type="module" src="<?= $view->asset('/assets/key.js') ?>"></script>
 <?php endif ?>

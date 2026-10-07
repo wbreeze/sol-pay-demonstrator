@@ -45,7 +45,7 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
 <?php endif ?>
     <p class="pending" data-key-bind role="status" hidden></p>
     <p><a href="/">Go and read something</a>.</p>
-    <script type="module" src="/assets/key.js"></script>
+    <script type="module" src="<?= $view->asset('/assets/key.js') ?>"></script>
 
 <?php elseif ($stage === 'unreadable'): ?>
     <p class="lede">The chain could not be read just now, so this page cannot say where you stand.</p>
@@ -195,7 +195,7 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
         </div>
         <p class="pending" data-close-status role="status" hidden></p>
     </section>
-    <script type="module" src="/assets/key.js"></script>
+    <script type="module" src="<?= $view->asset('/assets/key.js') ?>"></script>
 <?php endif ?>
 
     <p class="fine"><a href="/">Back to the paper</a> · <a href="/privacy">What this site holds about you</a></p>

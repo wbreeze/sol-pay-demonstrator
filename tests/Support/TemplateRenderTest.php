@@ -347,7 +347,7 @@ final class TemplateRenderTest extends TestCase
         self::assertStringNotContainsString('session with it has ended', self::said($plain));
         self::assertMatchesRegularExpression('/<form class="setup" data-setup-form data-kind="setup" hidden>/', $plain, 'nothing to press until the script can act on it');
         self::assertMatchesRegularExpression('/<p class="pending" data-key-bind role="status" hidden><\/p>/', $plain);
-        self::assertStringContainsString('<script type="module" src="/assets/key.js"></script>', $plain);
+        self::assertMatchesRegularExpression('~<script type="module" src="/assets/key\.js\?v=[0-9a-f]{10}"></script>~', $plain);
 
         $ended = self::said($this->renderStrictly('meter', [
             'meter' => $this->panel(['stage' => 'anonymous', 'ended' => true, 'meter' => null, 'items_remaining' => null]),
@@ -520,7 +520,7 @@ final class TemplateRenderTest extends TestCase
 
         self::assertMatchesRegularExpression('/<form[^>]*\bdata-advance\b/', $html);
         self::assertMatchesRegularExpression('/<p[^>]*\bdata-advance-status\b[^>]*\brole="status"[^>]*\bhidden\b[^>]*>\s*Advancing the meter 7 views…/u', $html);
-        self::assertStringContainsString('<script type="module" src="/assets/advance.js"></script>', $html);
+        self::assertMatchesRegularExpression('~<script type="module" src="/assets/advance\.js\?v=[0-9a-f]{10}"></script>~', $html);
         self::assertFileExists(dirname(__DIR__, 2).'/public/assets/advance.js');
         self::assertDoesNotMatchRegularExpression('/<button[^>]*\bdisabled\b/', $html);
     }
@@ -588,7 +588,7 @@ final class TemplateRenderTest extends TestCase
 
         self::assertMatchesRegularExpression('/<form method="post" action="\/a\/two%20orderings"[^>]*\bdata-read-on\b/', $html);
         self::assertDoesNotMatchRegularExpression('/<button[^>]*\bdisabled\b/', $html);
-        self::assertStringContainsString('<script type="module" src="/assets/read-on.js"></script>', $html);
+        self::assertMatchesRegularExpression('~<script type="module" src="/assets/read-on\.js\?v=[0-9a-f]{10}"></script>~', $html);
         self::assertFileExists(dirname(__DIR__, 2).'/public/assets/read-on.js');
         self::assertStringContainsString('The lede.', $html);
 
@@ -816,7 +816,7 @@ final class TemplateRenderTest extends TestCase
         // Hidden until the script runs, because the key is the script's.
         self::assertMatchesRegularExpression('/<button[^>]*data-close-meter[^>]*hidden/', $html);
         self::assertStringContainsString('<noscript>', $html);
-        self::assertStringContainsString('<script type="module" src="/assets/key.js"></script>', $html);
+        self::assertMatchesRegularExpression('~<script type="module" src="/assets/key\.js\?v=[0-9a-f]{10}"></script>~', $html);
 
         $none = self::said($this->renderStrictly('manage-meter', ['stage' => 'open', 'site' => $this->site()] + $this->panel(['live_grants' => 0])));
         self::assertStringContainsString('none are live right now', $none);
@@ -1209,7 +1209,7 @@ final class TemplateRenderTest extends TestCase
                 self::assertStringNotContainsString($phrase, $html, $label.': no '.$phrase);
             }
             self::assertStringContainsString('data-charge-pending="/a/two-orderings/confirm"', $html, $label.': where the page asks');
-            self::assertStringContainsString('<script type="module" src="/assets/charge.js"></script>', $html, $label);
+            self::assertMatchesRegularExpression('~<script type="module" src="/assets/charge\.js\?v=[0-9a-f]{10}"></script>~', $html, $label);
             self::assertMatchesRegularExpression('/<p class="fine" data-charge-failed hidden><\/p>/', $html, $label.': the failure line is empty and hidden');
             self::assertMatchesRegularExpression('/<noscript>.*<a href="\/a\/two-orderings">.*<\/noscript>/s', $html, $label.': and without JavaScript, a link back to the GET, not a reload that resubmits');
             self::assertStringContainsString('<a href="/meter">The meter</a>', $html, $label.': the way out, while the line that usually carries it is withheld');

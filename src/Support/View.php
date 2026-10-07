@@ -11,8 +11,14 @@ namespace Newsprint\Support;
  */
 final class View
 {
-    public function __construct(private readonly string $templateDir)
+    private readonly string $publicDir;
+
+    /** @var array<string, string> */
+    private array $assets = [];
+
+    public function __construct(private readonly string $templateDir, ?string $publicDir = null)
     {
+        $this->publicDir = $publicDir ?? dirname($templateDir).'/public';
     }
 
     /** @param array<string, mixed> $vars */
@@ -25,6 +31,36 @@ final class View
         require $this->templateDir.'/'.$template.'.php';
 
         return (string) ob_get_clean();
+    }
+
+    /**
+     * A file under `public/`, addressed so that a changed file is a new URL:
+     * `/assets/key.js` as `/assets/key.js?v=3f9a2c41d0`.
+     *
+     * A deploy of 2026-10-07 was pulled, built and served, and the author's
+     * browser went on running the previous `key.js`. Caddy's file server
+     * sends a file with its date and no instruction about caching, so a
+     * browser may reuse its copy for a while without asking. A URL that
+     * changes with the content needs no cooperation from the host, and works
+     * the same under `bin/run-dev`.
+     *
+     * The version is the start of the file's SHA-256, taken when a page is
+     * rendered. So nothing is written into the tree and nothing is built:
+     * the templates name the file, and a change to the file changes no
+     * template. A missing file keeps its plain path, and the browser reports
+     * the 404 that is the real fault.
+     */
+    public function asset(string $path): string
+    {
+        return $this->assets[$path] ??= $this->versioned($path);
+    }
+
+    private function versioned(string $path): string
+    {
+        $file = $this->publicDir.$path;
+        $hash = is_file($file) ? hash_file('sha256', $file) : false;
+
+        return $hash === false ? $path : $path.'?v='.substr($hash, 0, 10);
     }
 
     /**

@@ -74,5 +74,5 @@ use Newsprint\Support\View;
             </span>
         </p>
     </form>
-    <script type="module" src="/assets/read-on.js"></script>
+    <script type="module" src="<?= $view->asset('/assets/read-on.js') ?>"></script>
 </article>

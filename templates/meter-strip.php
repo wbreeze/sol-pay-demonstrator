@@ -128,7 +128,7 @@ $awaiting = $result->awaiting();
         <p class="fine"><a href="/meter">The meter</a></p>
         <p class="fine" data-charge-failed hidden></p>
     </div>
-    <script type="module" src="/assets/charge.js"></script>
+    <script type="module" src="<?= $view->asset('/assets/charge.js') ?>"></script>
 <?php elseif ($result->outcome === MeterOutcome::Granted): ?>
     <p>
 <?php if ($result->earlier): ?>
@@ -251,5 +251,5 @@ $awaiting = $result->awaiting();
         <p class="pending" data-advance-failed role="status" hidden></p>
     </form>
 <?php endif ?>
-    <script type="module" src="/assets/advance.js"></script>
+    <script type="module" src="<?= $view->asset('/assets/advance.js') ?>"></script>
 </section>

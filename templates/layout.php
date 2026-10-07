@@ -24,7 +24,12 @@ use Newsprint\Support\View;
   a way nobody would notice while writing it.
 -->
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="<?= $view->asset('/assets/site.css') ?>">
+<?php /* `View::asset` gives a changed file a new URL. `swap.js` is the one
+         file no template names: three modules import it as `./swap.js`. The
+         import map versions it for all three, so that a change to `swap.js`
+         changes none of them. It has to come before the first module. */ ?>
+<script type="importmap">{"imports": {"/assets/swap.js": "<?= $view->asset('/assets/swap.js') ?>"}}</script>
 </head>
 <body>
 <header class="masthead">

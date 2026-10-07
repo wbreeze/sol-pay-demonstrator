@@ -42,16 +42,30 @@
  */
 const loaded = new Set();
 
+/**
+ * A module's name, apart from its version. The templates address each script
+ * as `key.js?v=…` (`View::asset`), and the version moves when the file does.
+ * After a deploy, an answer swapped into a page that was already open names a
+ * URL the browser has not seen, and would run the new module beside the old
+ * one, with both listening on the document. So a module is known here by its
+ * path, and the page keeps the copy it loaded until it is loaded again.
+ */
+function named(url) {
+    const name = new URL(url, document.baseURI);
+    name.search = '';
+    return name.href;
+}
+
 function remember() {
     for (const script of document.querySelectorAll('script[type="module"][src]')) {
-        loaded.add(script.src);
+        loaded.add(named(script.src));
     }
 }
 
 function activate(root) {
     for (const inert of root.querySelectorAll('script')) {
         const module = inert.type === 'module' && inert.src !== '';
-        if (module && loaded.has(new URL(inert.getAttribute('src'), document.baseURI).href)) {
+        if (module && loaded.has(named(inert.getAttribute('src')))) {
             inert.remove();
             continue;
         }
@@ -60,7 +74,7 @@ function activate(root) {
         for (const { name, value } of inert.attributes) live.setAttribute(name, value);
         live.textContent = inert.textContent;
         inert.replaceWith(live);
-        if (module) loaded.add(live.src);
+        if (module) loaded.add(named(live.src));
     }
 }
 

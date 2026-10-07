@@ -85,5 +85,5 @@ use Newsprint\Support\View;
              pages that have one — the deferred read of the transaction's
              event. It used to load only for the second, which stopped being
              true when addresses gained controls. Local file, per §10.3. */ ?>
-    <script type="module" src="/assets/inspector.js"></script>
+    <script type="module" src="<?= $view->asset('/assets/inspector.js') ?>"></script>
 </details>
