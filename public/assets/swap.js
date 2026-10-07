@@ -10,7 +10,8 @@
  * together, from one request, so there is no older state left beside them. An
  * in-place re-render that updated only part of the page was tried for the
  * advance on 2026-09-10 and dropped for exactly that reason. (One exception,
- * the builders' instruction rows, and it is argued at `carryInstructions`.)
+ * the builders' instruction rows and the short names those rows link to, and
+ * it is argued at `carryInstructions`.)
  *
  * A third caller since 2026-09-17: `charge.js`, whose POST confirms a charge
  * the article was already served on. Same answer, same swap.
@@ -81,6 +82,31 @@ function carryInstructions(from, to) {
         const rows = from.querySelectorAll(`[data-ix-of="${CSS.escape(slot.dataset.ixSlot)}"]`);
         if (rows.length === 0) continue;
         slot.replaceWith(...rows);
+        carryNames(from, to, rows);
+    }
+}
+
+/**
+ * The carried rows bring their short names with them (2026-10-06).
+ *
+ * A short name in a row is a link to that value's row in the table of names,
+ * first in the panel. The confirming request builds that table from what it
+ * holds, and it never held the instructions. So a value that only the
+ * instructions mention has no row in the new table, and its short name linked
+ * to nothing. The instruction's bytes, `DATA…`, are always such a value. The
+ * row is in the panel being replaced, made by the request that made the
+ * instruction rows, and it goes across with them for the same reason.
+ */
+function carryNames(from, to, rows) {
+    const names = to.querySelector('table.names');
+    if (!names) return;
+    for (const row of rows) {
+        for (const link of row.querySelectorAll('a.shorthand[href^="#"]')) {
+            const id = decodeURIComponent(link.getAttribute('href').slice(1));
+            if (to.querySelector(`[id="${CSS.escape(id)}"]`)) continue;
+            const name = from.querySelector(`table.names [id="${CSS.escape(id)}"]`);
+            if (name) (names.tBodies[0] ?? names).append(name);
+        }
     }
 }
 

@@ -1310,6 +1310,17 @@ final class TemplateRenderTest extends TestCase
         self::assertStringContainsString('[data-ix-slot]', $swap);
         self::assertStringContainsString('dataset.ixSlot', $swap);
         self::assertStringContainsString('[data-ix-of=', $swap);
+
+        // The carried rows link to rows in the table of names, and the
+        // follow-up's table lacks the ones only an instruction mentions. So
+        // `swap.js` carries those rows too, and finds both ends by the class
+        // names these two templates write.
+        $link = $this->renderStrictly('inspector-address', ['value' => ['value' => '0102', 'alias' => 'DATAfoo', 'explorer' => false, 'note' => null]]);
+        self::assertStringContainsString('<a class="shorthand" href="#', $link);
+        $names = $this->renderStrictly('inspector-names', ['section' => ['heading' => 'The values, in full', 'names' => [['value' => '0102', 'alias' => 'DATAfoo', 'explorer' => false, 'note' => null]]]]);
+        self::assertStringContainsString('<table class="names">', $names);
+        self::assertStringContainsString('a.shorthand[href^="#"]', $swap);
+        self::assertStringContainsString('table.names', $swap);
     }
 
     public function testAMeterDecodesIntoThePanelWithoutGuessingAtItsShape(): void
