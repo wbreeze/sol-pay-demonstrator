@@ -651,9 +651,9 @@ is a worse screen than a refusal:
   produce it. `bin/fund-trials wrong` sent it anyway, and the System program
   refused it as an account already in use.
 
-A refusal is an error response with a sentence and no transaction. How
-wallets show such a response is still untested: the wallet run of 2026-10-06
-met no refusal (§13.4).
+A refusal is an error response with a sentence and no transaction. Solflare
+shows the sentence in full, under *Request failed*, with nothing to sign
+(§13.4).
 
 **The pending setup holds the wallet's address for at most ten minutes**, and
 §10.4 lists it. Once *continue* succeeds, the session holds the meter's and
@@ -1567,7 +1567,13 @@ serving on 2026-10-06, when a real wallet was first tried (§13.4).
 - **TLS with automatic renewal and DNS in Route 53.** It is a scripted
   deployment, and temporary, so an AWS-managed certificate behind a load
   balancer would be more than it needs. Caddy on the instance holds the
-  certificate (§14).
+  certificate, decided 2026-10-07. Caddy obtains the certificate from Let's
+  Encrypt by answering on ports 80 and 443, and renews it. `bin/host-bootstrap`
+  was written this way on 2026-10-05 because it needs no credential on the
+  host. Route 53 holds the address record and takes no part in validation.
+  The DNS challenge answered in Route 53 was the route considered before, and
+  it would put an AWS credential on the machine. Observed 2026-10-07: the
+  certificate that the instance serves is issued by Let's Encrypt.
 - **A deploy is a push**, then one command, in about a minute. What runs on
   the host is what the public repository holds, never what a working tree
   held.
@@ -1713,7 +1719,7 @@ new device's key. Then:
 
 ### 13.4 A real wallet
 
-**Run in part on 2026-10-06**, on the hosted instance (§12.6), with Solflare
+**Run in part on 2026-10-06 and 2026-10-07**, on the hosted instance (§12.6), with Solflare
 on an iPhone set to devnet. Everything above can run on localhost with the
 development wallet. This walkthrough cannot, because a wallet on a phone
 fetches the transaction itself, over HTTPS.
@@ -1722,7 +1728,15 @@ fetches the transaction itself, over HTTPS.
 
 - scanning the setup link fetches, shows and signs the setup transaction, and
   the meter appears on *continue*;
-- *add to the fund* works the same way, and so does a renewal.
+- *add to the fund* works the same way, and so does a renewal;
+- on 2026-10-07 the setup ran again, with the scan in the form's place
+  (§6.3 step 3). The description, the button, the code and *continue* fit one
+  screen of the phone;
+- on 2026-10-07 the server refused a transaction request, and the wallet said
+  why. The panel asked for a deposit of 0.5 DEMO from a wallet that held
+  0.15. After the reader connected, the wallet showed *Request failed* and
+  the server's sentence, whole: "A deposit of 0.5 DEMO from a wallet holding
+  0.15 DEMO: the wallet cannot cover it." The only control was *Close*.
 
 **What that wallet showed.** The wallet showed the label, the icon and the
 site's domain, and asked the reader to connect an account. Only then did the
@@ -1732,20 +1746,31 @@ quoted. Four things a reader meets there:
 - the reader makes two gestures, the connection and the approval, where §6.3
   step 4 describes one;
 - the message is cut off after about thirty characters, so the message now
-  leads with the limit (`Newsprint\Pay\Composition`);
+  leads with the limit (`Newsprint\Pay\Composition`). On 2026-10-07 the
+  wallet showed "Open meter, limit 0.5 DEMO." whole. A longer message, with a
+  deposit or a new fund in it, has not been seen since the rewrite;
 - the wallet calls the site unknown, and the reader must switch on *I trust
   this site* before approving;
 - the token has its name and no image, because `token_uri` is empty in
   `config/site.php`.
 
+**What that wallet does not show.** Solflare lists the reader's DEMO and
+nothing of the fund or the meter. A deposit appears in the token's activity
+as *App interaction*, −0.5 DEMO, with no word on where the DEMO went. The
+approval screen for a meter alone showed −0.0013 SOL, the meter's rent, and a
+network fee of 0.000025 SOL. So the reader's only account of what the fund
+holds and what the meter has used is this site's own page (§6), and the
+inspector (§9).
+
 **Not yet run:**
 
-- a transaction request the server refuses (§6.3) reaches the reader as a
-  sentence, in the wallet or on the page;
-- *close a meter with your wallet* (§5.5).
+- *close a meter with your wallet* (§5.5). Nothing is built for the wallet's
+  close, and the proposal was deferred on 2026-10-07 (§14). Solflare has no
+  screen of its own that lists a meter, so the site's scan would be the only
+  way for a wallet to close one.
 
-Until those two have passed, §6.3's account of a refusal and §5.5's account of
-a wallet's close are the Solana Pay specification's, not observations.
+Until the close has run, §5.5's account of a wallet's close is the Solana Pay
+specification's, not an observation.
 
 ## 14. Open questions, and proposals awaiting the author
 
@@ -1758,18 +1783,14 @@ already ratified carry their date where they are made.
 1. **Closing a meter with the wallet** (§5.5): a scan that closes an
    abandoned meter, signed by the reader, offered on the panel when there is
    no session. It closes meters at this site only, so it does not reach a
-   meter stranded by a roll or by a host taken down (§12.6).
-2. **Where TLS ends on the hosted instance** (§12.6): Caddy on the instance,
-   with a Let's Encrypt certificate that Caddy obtains by answering on ports
-   80 and 443. `bin/host-bootstrap` was written this way on 2026-10-05 because
-   it needs no credential on the host. Route 53 holds the address record and
-   takes no part in validation. The DNS challenge answered in Route 53 was the
-   route considered before, and it would put an AWS credential on the machine.
+   meter stranded by a roll or by a host taken down (§12.6). Deferred
+   2026-10-07, with nothing built: the close that exists is the browser
+   key's (§5.4).
 
 **Open, and deferred to the hosted deployment:**
 
-3. **What a real wallet does with a refusal, and with a close** (§13.4). The
-   setup, the deposit and the renewal were observed on 2026-10-06.
+2. **What a real wallet does with a close** (§13.4). The setup, the deposit
+   and the renewal were observed on 2026-10-06, and a refusal on 2026-10-07.
 
 ## 15. The site authority key
 
