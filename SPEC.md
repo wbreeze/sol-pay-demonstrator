@@ -593,7 +593,14 @@ barriers to reach the delegate design carried all sat on a wallet in the page.
    reader's.
 3. **The page shows the link** `solana:https://<site>/pay/<id>`, as a link to
    tap on a phone and as a QR code to scan from a desktop. The QR code is
-   rendered by the server as inline SVG (§12.2).
+   rendered by the server as inline SVG (§12.2). The link, the code and
+   *continue* take the place of the form that started the scan, decided
+   2026-10-07: under the form they were out of sight on a phone, and the
+   button seemed to do nothing. Above the link the page says in full what the
+   transaction does, from the reader's own answers, because the wallet shows
+   only the start of the transaction's message (§13.4). *Change the answers*
+   brings the form back. Nothing is signed at that point, and the pending
+   setup is left to expire.
 4. **The wallet fetches it.** `GET /pay/<id>` answers with a label and an
    icon, both served by this site (§10.3). `POST /pay/<id>` carries the
    wallet's `account`. The server records the account on the pending setup,

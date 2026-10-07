@@ -98,6 +98,12 @@ $onChain = $meter['meter'];
             meter, about 0.004 SOL the first time, and a fee of 0.000005 SOL
             for each later change.
         </p>
+        <?php /* Why the scan did not start, filled by `key.js`. Above the button,
+                 because the button is what the reader is looking at. */ ?>
+        <p class="refusal" data-setup-refusal role="alert" hidden>
+            <strong>Nothing was sent to your wallet:</strong>
+            <span data-setup-reason></span>.
+        </p>
         <p><button type="submit" class="wallet">Set up the meter</button></p>
         <p class="fine">
             A wallet with no <?= $symbol ?> cannot deposit any.
@@ -105,7 +111,7 @@ $onChain = $meter['meter'];
             address you paste.
         </p>
     </form>
-<?= $view->render('setup-scan', ['development' => $meter['setup']['dev_wallet']]) ?>
+<?= $view->render('setup-scan', ['symbol' => $symbol, 'development' => $meter['setup']['dev_wallet']]) ?>
     <noscript><p class="pending">Setting up a meter needs JavaScript: the key that the meter names is made and kept by this page's script.</p></noscript>
 
 <?php elseif ($meter['stage'] === 'failed'): ?>

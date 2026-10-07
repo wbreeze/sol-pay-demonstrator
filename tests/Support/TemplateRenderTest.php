@@ -372,7 +372,7 @@ final class TemplateRenderTest extends TestCase
         ]);
         $script = (string) file_get_contents(dirname(__DIR__, 2).'/public/assets/key.js');
 
-        foreach (['data-setup-form', 'data-setup-scan', 'data-setup-link', 'data-setup-qr', 'data-setup-continue', 'data-setup-status', 'data-key-bind'] as $hook) {
+        foreach (['data-setup-form', 'data-setup-scan', 'data-setup-link', 'data-setup-qr', 'data-setup-continue', 'data-setup-cancel', 'data-setup-status', 'data-setup-refusal', 'data-setup-reason', 'data-key-bind'] as $hook) {
             self::assertStringContainsString($hook, $html, $hook.' in the template');
             self::assertStringContainsString('['.$hook.']', $script, $hook.' in key.js');
         }
@@ -384,6 +384,17 @@ final class TemplateRenderTest extends TestCase
         }
         self::assertStringContainsString('data-kind="setup"', $html);
         self::assertStringContainsString('key.js', $html);
+
+        // The scan says what the wallet will ask. `key.js` writes the form's
+        // answers into these slots, and shows a row to the kinds it names.
+        foreach (['index', 'deposit', 'limit', 'expiry'] as $answer) {
+            self::assertStringContainsString('data-answer="'.$answer.'"', $html, $answer.' is said back');
+        }
+        foreach (['setup', 'renew', 'deposit'] as $kind) {
+            self::assertMatchesRegularExpression('/data-kinds="[^"]*\b'.$kind.'\b/', $html, 'a row for '.$kind);
+        }
+        self::assertStringContainsString('[data-answer]', $script);
+        self::assertStringContainsString('[data-kinds]', $script);
 
         // §12.6: the development wallet only where it is on, and labelled.
         self::assertStringNotContainsString('data-setup-development', $html);
@@ -406,6 +417,7 @@ final class TemplateRenderTest extends TestCase
         self::assertStringContainsString('data-kind="deposit"', $html);
         self::assertStringContainsString('id="renew"', $html);
         self::assertSame(1, substr_count($html, 'data-setup-scan'), 'one scan region serves both forms');
+        self::assertSame(3, substr_count($html, 'data-setup-refusal'), 'each form and the scan say their own refusal, above their own button');
 
         // SPEC §6.4: *continue* returns a reader to the article they came
         // from. The line that says so is hidden until `key.js` knows of one.

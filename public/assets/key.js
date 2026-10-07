@@ -13,9 +13,10 @@
  * 2. **Close.** The server compiles `close_meter`; the key signs those bytes;
  *    the server adds the authority's signature and sends. Then the key and the
  *    meter address are deleted here (§5.4).
- * 3. **Set up** (§6.3): post the key and the panel's answers, show the link
- *    a wallet fetches, and on *continue* prove the key against the meter the
- *    wallet opened. Renewing and *add to the fund* are the same scan.
+ * 3. **Set up** (§6.3): post the key and the panel's answers, show in the
+ *    form's place what the wallet will ask and the link it fetches, and on
+ *    *continue* prove the key against the meter the wallet opened. Renewing
+ *    and *add to the fund* are the same scan.
  *
  * It also tells the inspector two things that only this script learns: the
  * panel the close's request rendered (SPEC §9.2), and that a wallet has just
@@ -244,8 +245,87 @@ function region() {
   return document.querySelector('[data-setup-scan]');
 }
 
+function offer(scan, shown) {
+  scan?.querySelectorAll('[data-setup-offer]').forEach((part) => { part.hidden = !shown; });
+}
+
+/**
+ * What the wallet is about to ask, written into the scan from the form's own
+ * answers. The words are the template's: each row names the kinds that show
+ * it, and the expiry is said as the form's label says it.
+ */
+function describe(scan, form, answers) {
+  const chosen = form.querySelector('[name="expiry"]:checked');
+  const said = { ...answers, expiry: chosen?.closest('label')?.textContent.trim() ?? '' };
+  scan.querySelectorAll('[data-answer]').forEach((slot) => {
+    slot.textContent = (said[slot.dataset.answer] ?? '').trim();
+  });
+  const deposits = Number(answers.deposit) > 0;
+  scan.querySelectorAll('[data-kinds]').forEach((row) => {
+    const applies = row.dataset.kinds.split(' ').includes(answers.kind);
+    row.hidden = !applies || (row.hasAttribute('data-deposit') && !deposits);
+  });
+}
+
+/**
+ * The scan stands where its form stood. A scan under the form is out of sight
+ * on a phone, where the button that started it is the last thing on the
+ * screen. Any other form that an earlier scan replaced comes back, so that
+ * one scan is on the page and it is the last one asked for.
+ */
+function replace(form, scan) {
+  document.querySelectorAll('[data-setup-form]').forEach((other) => { other.hidden = other === form; });
+  form.after(scan);
+  withdraw(scan);
+  scan.hidden = false;
+  scan.focus({ preventScroll: true });
+  scan.scrollIntoView({ block: 'start' });
+}
+
+/** *Change the answers*: the form returns as the reader left it. */
+function cancel() {
+  const scan = region();
+  pending = null;
+  if (scan) scan.hidden = true;
+  const form = scan?.previousElementSibling;
+  document.querySelectorAll('[data-setup-form]').forEach((each) => { each.hidden = false; });
+  form?.scrollIntoView({ block: 'start' });
+}
+
 /** §6.3 step 2: the page's key and the panel's answers; the server answers with the link. */
 async function start(form) {
+  const submit = form.querySelector('[type="submit"]');
+  if (submit) submit.disabled = true;
+  withdraw(form);
+  try {
+    await ask(form);
+  } catch (error) {
+    refuse(form, `the request could not be sent (${error.message})`);
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
+/**
+ * Why a button did not do what it offered, said above that button and
+ * brought to the middle of the screen. Said anywhere else, a refusal is a
+ * button that did nothing: on a phone the button is the last thing in view.
+ * `within` is the form for a scan that did not start, and the scan for a
+ * *continue* that found no meter. The template ends the sentence.
+ */
+function refuse(within, reason) {
+  const refusal = within?.querySelector('[data-setup-refusal]');
+  if (!refusal) return;
+  refusal.querySelector('[data-setup-reason]').textContent = reason.replace(/\.$/, '');
+  refusal.hidden = false;
+  refusal.scrollIntoView({ block: 'center' });
+}
+
+function withdraw(within) {
+  within?.querySelectorAll('[data-setup-refusal]').forEach((refusal) => { refusal.hidden = true; });
+}
+
+async function ask(form) {
   const scan = region();
   const status = scan?.querySelector('[data-setup-status]');
   const fields = new FormData(form);
@@ -263,22 +343,24 @@ async function start(form) {
   if (!body.id) {
     // A refused start leaves no scan behind: an earlier link and code would
     // otherwise still be on the page, answering for a setup that is not this one.
+    // The form stays, because the answer to most refusals is a different number.
     pending = null;
-    scan?.querySelectorAll('[data-setup-offer]').forEach((part) => { part.hidden = true; });
-    say(status ?? form, body.message || `The setup could not be started (${code}).`);
-    if (scan) scan.hidden = false;
+    if (scan) scan.hidden = true;
+    document.querySelectorAll('[data-setup-form]').forEach((each) => { each.hidden = false; });
+    refuse(form, body.message || `the setup could not be started (${code})`);
     return;
   }
 
   pending = { id: body.id, kind };
-  scan.querySelectorAll('[data-setup-offer]').forEach((part) => { part.hidden = false; });
+  offer(scan, true);
+  describe(scan, form, answers);
   const link = scan.querySelector('[data-setup-link]');
   link.href = body.link;
   scan.querySelector('[data-setup-qr]').innerHTML = body.qr ?? '';
-  scan.hidden = false;
-  say(status, kind === 'deposit'
-    ? 'Approve the deposit in the wallet, then continue.'
-    : 'Approve the transaction in the wallet, then continue.');
+  // The status line is the development wallet's, and a new scan starts
+  // without what an earlier one said there.
+  if (status) status.hidden = true;
+  replace(form, scan);
 }
 
 /** §12.6: the development wallet signs in place of a phone. */
@@ -302,9 +384,9 @@ async function development(button) {
  * signed by the key; the server binds the session when the meter names it.
  */
 async function proceed(button) {
-  const status = region()?.querySelector('[data-setup-status]');
   if (!pending) return;
   button.disabled = true;
+  withdraw(region());
   try {
     const payload = { id: pending.id };
     if (pending.kind !== 'deposit') {
@@ -333,9 +415,9 @@ async function proceed(button) {
       }
       return;
     }
-    say(status, body.message || `Not yet (${code}).`);
+    refuse(region(), body.message || `the server answered ${code}`);
   } catch (error) {
-    say(status, `Continue could not be sent: ${error.message}`);
+    refuse(region(), `the request could not be sent (${error.message})`);
   } finally {
     button.disabled = false;
   }
@@ -414,6 +496,7 @@ document.addEventListener('click', (event) => {
     ['[data-close-meter]', close],
     ['[data-setup-development]', development],
     ['[data-setup-continue]', proceed],
+    ['[data-setup-cancel]', cancel],
   ];
   for (const [selector, act] of actions) {
     const button = target.closest?.(selector);

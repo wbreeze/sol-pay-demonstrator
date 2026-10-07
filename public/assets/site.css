@@ -350,7 +350,23 @@ button:hover { filter: brightness(1.1); }
 .meter .expiry legend { padding: 0 0.3rem; font-size: 0.95rem; }
 .meter .expiry label { margin-top: 0.35rem; }
 .meter .expiry .fine { padding-left: 1.6rem; }
-.meter .scan { margin: 1rem 0 0; padding-top: 0.75rem; border-top: 1px solid var(--rule); }
+.meter .scan { margin: 1rem 0 0; padding-top: 0.75rem; border-top: 1px solid var(--rule); scroll-margin-top: 1rem; }
+/* The scan is focused when it takes its form's place, so that a screen reader
+   starts there. It is not a control, and draws no ring. */
+.meter .scan:focus { outline: none; }
+.meter .scan > div > p { margin: 0.5rem 0; }
+.meter .scan .status { width: auto; margin: 0.25rem 0 0.75rem; font-size: 0.85rem; }
+.meter .scan .status th, .meter .scan .status td { padding: 0.1rem 1rem 0.1rem 0; }
+.meter .scan .status td { word-break: normal; }
+.meter .scan .qr svg { margin: 0.5rem 0; }
+.meter .scan [data-setup-link] {
+    display: flex;
+    justify-content: center;
+    box-sizing: border-box;
+    width: min(16rem, 100%);
+}
+/* The wallet link is the scan's main action on a phone, so it wears the button. */
+a.wallet { text-decoration: none; }
 /* Dark on light in both schemes: scanners expect that polarity. */
 .meter .qr svg {
     display: block;
@@ -361,6 +377,17 @@ button:hover { filter: brightness(1.1); }
 }
 .meter .qr:empty { display: none; }
 [data-setup-status] { overflow-wrap: anywhere; }
+/* A refusal has to be seen at a glance beside the button it answers: the
+   accent, a rule down its edge, and upright type where progress lines lean. */
+.meter .refusal {
+    margin: 0.75rem 0;
+    padding: 0.5rem 0.75rem;
+    border-left: 3px solid var(--accent);
+    background: var(--paper);
+    color: var(--accent);
+    font-size: 0.95rem;
+    overflow-wrap: anywhere;
+}
 
 /* §4.3: the faucet's one field is an address, which is long. */
 .faucet label { display: block; font-size: 0.95rem; }

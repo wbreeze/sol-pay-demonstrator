@@ -82,7 +82,7 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
         <p>
             Renewing sets a new limit and a new expiry, carries what is unpaid
             forward as the new period's <code>used</code>, and resets
-            <code>paid</code> to zero. Your wallet signs it, with one scan.
+            <code>paid</code> to zero. Your wallet signs the renewal, with one scan.
         </p>
         <form class="setup" data-setup-form data-kind="renew" hidden>
             <label class="limit">
@@ -103,6 +103,12 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
                 <input type="text" inputmode="decimal" name="deposit" value="0" size="8">
                 <?= $symbol ?>
             </label>
+            <?php /* Why the scan did not start, filled by `key.js`. Above the button,
+                     because the button is what the reader is looking at. */ ?>
+            <p class="refusal" data-setup-refusal role="alert" hidden>
+                <strong>Nothing was sent to your wallet:</strong>
+                <span data-setup-reason></span>.
+            </p>
             <p><button type="submit" class="wallet">Renew</button></p>
         </form>
 
@@ -117,9 +123,15 @@ $symbol = View::e((string) ($symbol ?? $site['symbol']));
                 <input type="text" inputmode="decimal" name="deposit" value="<?= View::e((string) $setup['deposit']) ?>" size="8">
                 <?= $symbol ?>
             </label>
+            <?php /* Why the scan did not start, filled by `key.js`. Above the button,
+                     because the button is what the reader is looking at. */ ?>
+            <p class="refusal" data-setup-refusal role="alert" hidden>
+                <strong>Nothing was sent to your wallet:</strong>
+                <span data-setup-reason></span>.
+            </p>
             <p><button type="submit" class="wallet">Add to the fund</button></p>
         </form>
-<?= $view->render('setup-scan', ['development' => $setup['dev_wallet']]) ?>
+<?= $view->render('setup-scan', ['symbol' => $symbol, 'development' => $setup['dev_wallet']]) ?>
         <noscript><p class="pending">Renewing and adding to the fund need JavaScript: the scan starts from this page's script.</p></noscript>
     </section>
 
