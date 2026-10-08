@@ -202,7 +202,7 @@ the site is told an address on purpose, and the privacy page lists it (§10.2).
 **The amounts.** The DEMO grant is 0.60: a little over one minimum limit and
 well under two. That stinginess is deliberate. A reader who opens at the
 minimum, reads to the limit, renews and keeps going runs the *fund* short
-three clicks into the second period, which is §13.2's walkthrough and the only
+early in the second period, which is §13.2's walkthrough and the only
 way to reach a settle refused for want of money. A generous faucet would make
 that state unreachable.
 
@@ -1660,51 +1660,44 @@ a link, in one sitting, with no instructions beyond what the site tells them:
 2. Follow the panel to the faucet, paste a wallet address, read what is about
    to happen and that the faucet exists only for the demo, and see SOL and 0.60 DEMO
    arrive.
-3. Back in the panel, choose a limit at or above 0.50, an expiry, a deposit of
-   0.50 and fund 0, and scan once. Press *continue*.
-4. Read that article and nine more with no further wallet interaction.
-5. Watch the tenth view settle, and open the transfer on the explorer.
-6. Advance the meter with the seven-view control, and see the settle fire on
-   some clicks and not others.
-7. Be blocked on the eighth click at 0.49 against a limit of 0.50, and land on
-   `manage_meter` rather than an error.
-8. Renew at 0.50 with a second scan, and see `used` carry 0.07 forward while
-   `paid` resets to zero.
-9. Close the meter, and confirm in the inspector and on an explorer that the meter is
+3. Back in the panel, choose a limit, an expiry, a deposit and fund 0, and
+   scan once. Press *continue*.
+4. Read with no further wallet interaction. Use the seven-view advance where
+   reading alone cannot reach a figure.
+5. During the test, the threshold lands on a page read at least once, and the
+   limit lands on a page read. Open a settle's transfer on the explorer.
+6. The read at the limit lands on `manage_meter` rather than an error.
+7. Renew with a second scan, and see `used` carry the unpaid balance forward
+   while `paid` resets to zero.
+8. Close the meter, and confirm in the inspector and on an explorer that the meter is
    gone and the fund remains.
-10. At every step, open the inspector and find the account field that explains
-    what they just saw.
+9. At every step, open the inspector and find the account field that explains
+   what they just saw.
 
-Step 10 is the acceptance test for §1's second purpose. Steps 1 to 9 are the
-first.
+Step 9 is the acceptance test for §1's second purpose. Steps 1 to 8 are the
+first. The figures that make step 5 come out, at seven metered articles, are
+the capture plan's to choose, not this section's.
 
 ### 13.2 A depleted fund
 
-Continue from step 7 instead of renewing at once. The fund holds 0.08. The
-reader renews at a limit of 0.50 and deposits the 0.10 DEMO left in the
-wallet, so the fund holds 0.18 against a limit of 0.50. The program permits
-this, and should: the limit is what the site may take, and the balance is what
-it can.
+Continue from step 6, the read at the limit. The reader renews at a limit of
+0.50 and deposits the DEMO left in the wallet, so the fund holds less than the
+limit. The program permits this, and should: the limit is what the site may
+take, and the balance is what it can. Reading or advancing then reaches a
+settle larger than the fund.
 
-| click | `used` | `paid` | settle | fund after |
-| --- | --- | --- | --- | --- |
-| — | 0.07 | 0.00 | — | 0.18 |
-| 1 | 0.14 | 0.14 | 0.14 | 0.04 |
-| 2 | 0.21 | 0.14 | none | 0.04 |
-| 3 | — | — | **0.14 attempted against 0.04** | 0.04 |
-
-The third click is refused by the endpoint's simulation, from inside the
+That settle is refused by the endpoint's simulation, from inside the
 settle's transfer. The pass conditions:
 
 - The screen says the fund is short, by how much, and offers to add to it. It
   names SPL Token's `InsufficientFunds` as the cause, attributed to the token
   program (§8.1).
-- `used` and `paid` are unchanged at 0.21 and 0.14.
+- `used` and `paid` are unchanged.
 - The article is not delivered, and no grant is recorded.
 - The faucet refuses the same address a second grant, and says so.
-- Closing the meter still works, forgiving the 0.07 unpaid.
+- Closing the meter still works, forgiving the unpaid balance.
 
-A generous faucet never reaches this table. That is why §4.3 is stingy.
+A generous faucet never reaches this state. That is why §4.3 is stingy.
 
 ### 13.3 A second device
 
