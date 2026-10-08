@@ -34,7 +34,7 @@ use Newsprint\Support\View;
 <body>
 <header class="masthead">
     <a class="wordmark" href="/">Newsprint</a>
-    <p class="tagline">Reading without leaving profiles of your principles.</p>
+    <p class="tagline">Support the writing. Your reading is nobody's business.</p>
 <?php /* §5.6: identity is shown on the meter, not in the masthead. A name
          and a way out across every page is the furniture of an account, and
          this site has no accounts. What it has is a cookie, a row naming one
