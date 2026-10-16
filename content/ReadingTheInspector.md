@@ -2,7 +2,7 @@
 title: How to read the inspector
 slug: reading-the-inspector
 created: 2026-09-14
-revised: 2026-10-04
+revised: 2026-10-05
 metered: false
 status: published
 lede: >
