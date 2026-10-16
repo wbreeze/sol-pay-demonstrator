@@ -15,6 +15,7 @@ which, and fix it in the same sitting.
 | [`why-these-tests.md`](why-these-tests.md) | What offline checking cannot see, and which test or script catches each one. The argument for the odd-looking tests under `tests/Support/`. |
 | [`writing.md`](writing.md) | Conventions for the articles and for on-screen copy: audience, person, byline, naming, and the prose rules. |
 | [`deployment.md`](deployment.md) | The devnet deployment as it stands: addresses, parameters, clocks, event discriminators, and what a lost `var/` means. |
+| [`acceptance.md`](acceptance.md) | The acceptance record for `SPEC.md` §13: which sessions ran, where the evidence is, and the canary's output from a fresh clone. |
 
 **Not here on purpose.** The decision log lives in `SPEC.md`, section by
 section, because two copies of a decision drift and the stale one reads exactly
